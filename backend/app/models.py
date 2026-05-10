@@ -1,10 +1,28 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Enum, Text, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Enum, Text, UniqueConstraint, Table
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import JSON
 import enum
 
 from .database import Base
+
+
+model_tags = Table(
+    "model_tags",
+    Base.metadata,
+    Column("model_id", Integer, ForeignKey("print_models.id", ondelete="CASCADE"), primary_key=True),
+    Column("tag_id", Integer, ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
+class Tag(Base):
+    __tablename__ = "tags"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, unique=True)
+    color_hex = Column(String, nullable=False, default="#6366f1")
+
+    models = relationship("PrintModel", secondary="model_tags", back_populates="tags")
 
 
 class Setting(Base):
@@ -61,6 +79,7 @@ class PrintModel(Base):
     images = relationship("ModelImage", back_populates="print_model", cascade="all, delete-orphan", order_by="ModelImage.created_at")
     slicer_files = relationship("ModelSlicerFile", back_populates="print_model", cascade="all, delete-orphan")
     orders = relationship("Order", back_populates="print_model")
+    tags = relationship("Tag", secondary="model_tags", back_populates="models", order_by="Tag.name")
 
 
 class ModelFilament(Base):

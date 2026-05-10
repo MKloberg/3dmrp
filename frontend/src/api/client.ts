@@ -36,6 +36,12 @@ export interface FilamentSpec {
   created_at: string
 }
 
+export interface Tag {
+  id: number
+  name: string
+  color_hex: string
+}
+
 export interface ModelFilament {
   id: number
   filament_spec_id: number
@@ -64,6 +70,7 @@ export interface PrintModel {
   filament_requirements: ModelFilament[]
   images: ModelImage[]
   slicer_files: SlicerFile[]
+  tags: Tag[]
 }
 
 export interface Order {
@@ -161,6 +168,19 @@ export const updateOrder = (id: number, data: Partial<Order>) =>
 export const deleteOrder = (id: number) =>
   req<void>(`/orders/${id}`, { method: 'DELETE' })
 
+// --- Tags ---
+export const getTags = () => req<Tag[]>('/tags')
+export const createTag = (data: { name: string; color_hex: string }) =>
+  req<Tag>('/tags', { method: 'POST', body: JSON.stringify(data) })
+export const updateTag = (id: number, data: { name: string; color_hex: string }) =>
+  req<Tag>(`/tags/${id}`, { method: 'PUT', body: JSON.stringify(data) })
+export const deleteTag = (id: number) =>
+  req<void>(`/tags/${id}`, { method: 'DELETE' })
+export const addTagToModel = (tagId: number, modelId: number) =>
+  req<void>(`/tags/${tagId}/models/${modelId}`, { method: 'POST' })
+export const removeTagFromModel = (tagId: number, modelId: number) =>
+  req<void>(`/tags/${tagId}/models/${modelId}`, { method: 'DELETE' })
+
 // --- Forecast ---
 export const getForecast = (forecastWeeks = 4, lookbackWeeks = 4) =>
   req<ForecastResponse>(`/forecast?forecast_weeks=${forecastWeeks}&lookback_weeks=${lookbackWeeks}`)
@@ -215,6 +235,18 @@ export interface Printer {
   slots: PrinterSlot[]
 }
 
+export interface PrinterStatus {
+  state: 'standby' | 'printing' | 'paused' | 'error' | 'complete' | 'offline' | string
+  filename: string | null
+  progress: number | null
+  print_duration: number | null
+  time_remaining: number | null
+  extruder_temp: number | null
+  extruder_target: number | null
+  bed_temp: number | null
+  bed_target: number | null
+}
+
 export interface MoonrakerJob {
   job_id: string
   filename: string
@@ -245,6 +277,32 @@ export const setPrinterSlot = (printerId: number, slotNumber: number, filamentSp
   })
 export const deletePrinterSlot = (printerId: number, slotNumber: number) =>
   req<void>(`/printers/${printerId}/slots/${slotNumber}`, { method: 'DELETE' })
+export interface WebcamInfo {
+  name: string
+  stream_url: string
+  snapshot_url: string
+  flip_horizontal: boolean
+  flip_vertical: boolean
+  rotation: number
+}
+
+export interface FilamentDetectSlot {
+  slot_index: number
+  detected: boolean
+  vendor: string
+  material: string
+  sub_type: string
+  color_hex: string
+  suggested_filament_spec_id: number | null
+}
+
+export const getPrinterFilamentDetect = (id: number) =>
+  req<FilamentDetectSlot[]>(`/printers/${id}/filament-detect`)
+
+export const getPrinterWebcams = (id: number) =>
+  req<WebcamInfo[]>(`/printers/${id}/webcams`)
+export const getPrinterStatus = (id: number) =>
+  req<PrinterStatus>(`/printers/${id}/status`)
 export const getPrinterHistory = (id: number, limit = 50) =>
   req<PrinterHistoryResponse>(`/printers/${id}/history?limit=${limit}`)
 export const uploadPrinterImage = async (id: number, file: File): Promise<void> => {

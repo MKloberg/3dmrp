@@ -4,16 +4,38 @@ import {
   getModels, createModel, updateModel, deleteModel,
   getFilaments, getPrinters, addFilamentReq, updateFilamentReq, removeFilamentReq, reorderFilaments,
   uploadModelImage, deleteModelImage, setSlicerFile, deleteSlicerFile, openInSlicer,
-  PrintModel, FilamentSpec, Printer,
+  getTags, createTag, updateTag, deleteTag, addTagToModel, removeTagFromModel,
+  PrintModel, FilamentSpec, Printer, Tag,
 } from '../api/client'
 import Modal from '../components/Modal'
-import { Plus, Trash2, ChevronDown, ChevronRight, Pencil, Check, X, Upload, ShoppingCart, Play, Scissors, GripVertical } from 'lucide-react'
+import { Plus, Trash2, ChevronDown, ChevronRight, Pencil, Check, X, Upload, ShoppingCart, Play, Scissors, GripVertical, Tag as TagIcon, Settings2 } from 'lucide-react'
+
+const TAG_COLORS = [
+  '#6366f1','#8b5cf6','#ec4899','#ef4444','#f97316',
+  '#eab308','#22c55e','#14b8a6','#3b82f6','#64748b',
+]
+
+function TagPill({ tag, onRemove }: { tag: Tag; onRemove?: () => void }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium text-white shrink-0"
+      style={{ backgroundColor: tag.color_hex }}
+    >
+      {tag.name}
+      {onRemove && (
+        <button onClick={e => { e.stopPropagation(); onRemove() }} className="opacity-70 hover:opacity-100">
+          <X size={10} />
+        </button>
+      )}
+    </span>
+  )
+}
 
 function FilamentDot({ hex }: { hex: string }) {
   return <span className="inline-block w-3 h-3 rounded-full border border-gray-300 dark:border-gray-600 shrink-0" style={{ backgroundColor: hex }} />
 }
 
-function ModelDetail({ model, filaments, printers }: { model: PrintModel; filaments: FilamentSpec[]; printers: Printer[] }) {
+function ModelDetail({ model, filaments, printers, allTags }: { model: PrintModel; filaments: FilamentSpec[]; printers: Printer[]; allTags: Tag[] }) {
   const qc = useQueryClient()
   const imageInputRef = useRef<HTMLInputElement>(null)
   const [uploadingImage, setUploadingImage] = useState(false)
@@ -23,6 +45,15 @@ function ModelDetail({ model, filaments, printers }: { model: PrintModel; filame
     Object.fromEntries(model.slicer_files.map(sf => [sf.printer_id, sf.file_path]))
   )
   const [launchError, setLaunchError] = useState<string | null>(null)
+
+  const addTagMutation = useMutation({
+    mutationFn: (tagId: number) => addTagToModel(tagId, model.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['models'] }),
+  })
+  const removeTagMutation = useMutation({
+    mutationFn: (tagId: number) => removeTagFromModel(tagId, model.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['models'] }),
+  })
   const dragSrc = useRef<number | null>(null)
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [overIndex, setOverIndex] = useState<number | null>(null)
@@ -130,6 +161,28 @@ function ModelDetail({ model, filaments, printers }: { model: PrintModel; filame
   return (
     <div className="border-t dark:border-gray-700 px-4 py-3 space-y-4">
       {model.notes && <p className="text-sm text-gray-500 dark:text-gray-400 italic">{model.notes}</p>}
+
+      {/* Tags */}
+      <div className="flex flex-wrap items-center gap-2">
+        {model.tags.map(tag => (
+          <TagPill key={tag.id} tag={tag} onRemove={() => removeTagMutation.mutate(tag.id)} />
+        ))}
+        {allTags.filter(t => !model.tags.some(mt => mt.id === t.id)).length > 0 && (
+          <select
+            className="text-xs border rounded-full px-2 py-0.5 text-gray-500 dark:text-gray-400 dark:bg-gray-800 dark:border-gray-600 cursor-pointer"
+            value=""
+            onChange={e => { if (e.target.value) addTagMutation.mutate(Number(e.target.value)) }}
+          >
+            <option value="">+ Add tag</option>
+            {allTags.filter(t => !model.tags.some(mt => mt.id === t.id)).map(t => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+        )}
+        {allTags.length === 0 && model.tags.length === 0 && (
+          <span className="text-xs text-gray-400 italic">No tags yet — create some with the tag manager above.</span>
+        )}
+      </div>
 
       {/* Slicers */}
       {printers.some(p => p.slicer_name || p.slicer_executable) && (
@@ -365,16 +418,115 @@ function ModelDetail({ model, filaments, printers }: { model: PrintModel; filame
   )
 }
 
+function TagManager({ onClose }: { onClose: () => void }) {
+  const qc = useQueryClient()
+  const { data: tags = [] } = useQuery({ queryKey: ['tags'], queryFn: getTags })
+  const [form, setForm] = useState({ name: '', color_hex: TAG_COLORS[0] })
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editForm, setEditForm] = useState({ name: '', color_hex: '' })
+
+  const createMutation = useMutation({
+    mutationFn: () => createTag(form),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tags'] }); qc.invalidateQueries({ queryKey: ['models'] }); setForm({ name: '', color_hex: TAG_COLORS[0] }) },
+  })
+  const updateMutation = useMutation({
+    mutationFn: () => updateTag(editingId!, editForm),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tags'] }); qc.invalidateQueries({ queryKey: ['models'] }); setEditingId(null) },
+  })
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => deleteTag(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tags'] }); qc.invalidateQueries({ queryKey: ['models'] }) },
+  })
+
+  return (
+    <Modal title="Manage Tags" onClose={onClose}>
+      <div className="space-y-4">
+        <div className="space-y-2">
+          {tags.length === 0 && <p className="text-sm text-gray-400 italic">No tags yet.</p>}
+          {tags.map(tag => (
+            <div key={tag.id} className="flex items-center gap-2">
+              {editingId === tag.id ? (
+                <>
+                  <div className="flex gap-1 flex-wrap">
+                    {TAG_COLORS.map(c => (
+                      <button key={c} onClick={() => setEditForm(f => ({ ...f, color_hex: c }))}
+                        className={`w-5 h-5 rounded-full border-2 ${editForm.color_hex === c ? 'border-gray-900 dark:border-white' : 'border-transparent'}`}
+                        style={{ backgroundColor: c }} />
+                    ))}
+                  </div>
+                  <input className="flex-1 border rounded px-2 py-1 text-sm dark:bg-gray-700 dark:border-gray-600"
+                    value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
+                    onKeyDown={e => { if (e.key === 'Enter') updateMutation.mutate(); if (e.key === 'Escape') setEditingId(null) }}
+                    autoFocus />
+                  <button onClick={() => updateMutation.mutate()} disabled={!editForm.name} className="text-green-500 hover:text-green-600 disabled:opacity-40"><Check size={14} /></button>
+                  <button onClick={() => setEditingId(null)} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>
+                </>
+              ) : (
+                <>
+                  <TagPill tag={tag} />
+                  <button onClick={() => { setEditingId(tag.id); setEditForm({ name: tag.name, color_hex: tag.color_hex }) }}
+                    className="text-gray-400 hover:text-brand-600 ml-auto"><Pencil size={12} /></button>
+                  <button onClick={() => { if (confirm(`Delete tag "${tag.name}"?`)) deleteMutation.mutate(tag.id) }}
+                    className="text-gray-400 hover:text-red-500"><Trash2 size={13} /></button>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div className="border-t dark:border-gray-700 pt-3 space-y-2">
+          <p className="text-xs font-medium text-gray-500 dark:text-gray-400">New tag</p>
+          <div className="flex gap-1 flex-wrap">
+            {TAG_COLORS.map(c => (
+              <button key={c} onClick={() => setForm(f => ({ ...f, color_hex: c }))}
+                className={`w-5 h-5 rounded-full border-2 ${form.color_hex === c ? 'border-gray-900 dark:border-white' : 'border-transparent'}`}
+                style={{ backgroundColor: c }} />
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <input className="flex-1 border rounded-lg px-3 py-1.5 text-sm dark:bg-gray-700 dark:border-gray-600"
+              placeholder="Tag name"
+              value={form.name}
+              onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+              onKeyDown={e => { if (e.key === 'Enter' && form.name) createMutation.mutate() }}
+            />
+            <button disabled={!form.name || createMutation.isPending}
+              onClick={() => createMutation.mutate()}
+              className="bg-brand-600 text-white px-3 py-1.5 text-sm rounded-lg disabled:opacity-50">
+              Add
+            </button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 export default function Models() {
   const qc = useQueryClient()
   const { data: models = [] } = useQuery({ queryKey: ['models'], queryFn: getModels })
   const { data: filaments = [] } = useQuery({ queryKey: ['filaments'], queryFn: getFilaments })
   const { data: printers = [] } = useQuery({ queryKey: ['printers'], queryFn: getPrinters })
+  const { data: allTags = [] } = useQuery({ queryKey: ['tags'], queryFn: getTags })
 
   const [expanded, setExpanded] = useState<number | null>(null)
   const [showForm, setShowForm] = useState(false)
+  const [showTagManager, setShowTagManager] = useState(false)
+  const [filterTagIds, setFilterTagIds] = useState<Set<number>>(new Set())
   const [editing, setEditing] = useState<PrintModel | null>(null)
   const [form, setForm] = useState({ name: '', description: '', notes: '' })
+
+  function toggleFilterTag(id: number) {
+    setFilterTagIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  const visibleModels = filterTagIds.size === 0
+    ? models
+    : models.filter(m => [...filterTagIds].every(tid => m.tags.some(t => t.id === tid)))
 
   const saveMutation = useMutation({
     mutationFn: () => editing ? updateModel(editing.id, form) : createModel(form),
@@ -404,20 +556,54 @@ export default function Models() {
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Print Models</h1>
-        <button
-          onClick={openCreate}
-          className="flex items-center gap-1.5 bg-brand-600 hover:bg-brand-700 text-white text-sm px-4 py-2 rounded-lg"
-        >
-          <Plus size={15} /> Add Model
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowTagManager(true)}
+            className="flex items-center gap-1.5 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm px-3 py-2 rounded-lg"
+          >
+            <TagIcon size={14} /> Tags
+          </button>
+          <button
+            onClick={openCreate}
+            className="flex items-center gap-1.5 bg-brand-600 hover:bg-brand-700 text-white text-sm px-4 py-2 rounded-lg"
+          >
+            <Plus size={15} /> Add Model
+          </button>
+        </div>
       </div>
 
-      {models.length === 0 && (
-        <p className="text-sm text-gray-400 italic">No models yet. Add your first print model.</p>
+      {/* Tag filter bar */}
+      {allTags.length > 0 && (
+        <div className="flex flex-wrap gap-2 items-center">
+          <span className="text-xs text-gray-400">Filter:</span>
+          {allTags.map(tag => (
+            <button
+              key={tag.id}
+              onClick={() => toggleFilterTag(tag.id)}
+              className={`px-2.5 py-0.5 rounded-full text-xs font-medium border-2 transition-all ${
+                filterTagIds.has(tag.id)
+                  ? 'text-white border-transparent'
+                  : 'bg-transparent border-transparent text-gray-500 dark:text-gray-400 hover:border-gray-300'
+              }`}
+              style={filterTagIds.has(tag.id) ? { backgroundColor: tag.color_hex, borderColor: tag.color_hex } : {}}
+            >
+              {tag.name}
+            </button>
+          ))}
+          {filterTagIds.size > 0 && (
+            <button onClick={() => setFilterTagIds(new Set())} className="text-xs text-gray-400 hover:text-gray-600">Clear</button>
+          )}
+        </div>
+      )}
+
+      {visibleModels.length === 0 && (
+        <p className="text-sm text-gray-400 italic">
+          {models.length === 0 ? 'No models yet. Add your first print model.' : 'No models match the selected tags.'}
+        </p>
       )}
 
       <div className="space-y-2">
-        {models.map(model => {
+        {visibleModels.map(model => {
           const isOpen = expanded === model.id
           const firstImage = model.images[0]
           return (
@@ -439,6 +625,7 @@ export default function Models() {
                   )}
                   <span className="font-medium">{model.name}</span>
                   {model.description && <span className="text-sm text-gray-400 hidden sm:inline">— {model.description}</span>}
+                  {model.tags.map(tag => <TagPill key={tag.id} tag={tag} />)}
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-gray-400">{model.filament_requirements.length} filament{model.filament_requirements.length !== 1 ? 's' : ''}</span>
@@ -452,11 +639,13 @@ export default function Models() {
                 </div>
               </div>
 
-              {isOpen && <ModelDetail model={model} filaments={filaments} printers={printers} />}
+              {isOpen && <ModelDetail model={model} filaments={filaments} printers={printers} allTags={allTags} />}
             </div>
           )
         })}
       </div>
+
+      {showTagManager && <TagManager onClose={() => setShowTagManager(false)} />}
 
       {showForm && (
         <Modal title={editing ? 'Edit Model' : 'New Model'} onClose={closeForm}>

@@ -1,13 +1,14 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  getPrinters, createPrinter, deletePrinter, getPrinterHistory,
+  getPrinters, createPrinter, deletePrinter, getPrinterHistory, getPrinterStatus, getPrinterWebcams,
+  getPrinterFilamentDetect,
   getFilaments, createModel, addFilamentReq, copyThumbnailToModel, uploadPrinterImage,
   setPrinterSlot, deletePrinterSlot, setPrinterSlicer,
-  Printer, MoonrakerJob, FilamentSpec,
+  Printer, MoonrakerJob, FilamentSpec, PrinterStatus, WebcamInfo, FilamentDetectSlot,
 } from '../api/client'
 import Modal from '../components/Modal'
-import { Plus, Trash2, Printer as PrinterIcon, ChevronDown, ChevronRight, Upload, X, Scissors } from 'lucide-react'
+import { Plus, Trash2, Printer as PrinterIcon, ChevronDown, ChevronRight, Upload, X, Scissors, Video, RefreshCw } from 'lucide-react'
 
 function formatDuration(seconds: number | null): string {
   if (seconds == null) return '—'
@@ -220,6 +221,79 @@ function ImportModal({
   )
 }
 
+function formatTime(seconds: number): string {
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  return h > 0 ? `${h}h ${m}m` : `${m}m`
+}
+
+const STATE_STYLES: Record<string, { dot: string; label: string; text: string }> = {
+  printing: { dot: 'bg-green-500 animate-pulse', label: 'Printing', text: 'text-green-600 dark:text-green-400' },
+  paused:   { dot: 'bg-yellow-400',              label: 'Paused',   text: 'text-yellow-600 dark:text-yellow-400' },
+  error:    { dot: 'bg-red-500',                 label: 'Error',    text: 'text-red-600 dark:text-red-400' },
+  standby:  { dot: 'bg-gray-300 dark:bg-gray-600', label: 'Idle',   text: 'text-gray-400' },
+  complete: { dot: 'bg-blue-400',                label: 'Complete', text: 'text-blue-500' },
+  offline:  { dot: 'bg-gray-300 dark:bg-gray-600', label: 'Offline', text: 'text-gray-400' },
+}
+
+function PrinterStatusDisplay({ printerId }: { printerId: number }) {
+  const { data: status } = useQuery<PrinterStatus>({
+    queryKey: ['printer-status', printerId],
+    queryFn: () => getPrinterStatus(printerId),
+    refetchInterval: 10000,
+    retry: false,
+  })
+
+  if (!status) return null
+
+  const style = STATE_STYLES[status.state] ?? STATE_STYLES.standby
+
+  return (
+    <div className="flex flex-col gap-0.5 min-w-0" onClick={e => e.stopPropagation()}>
+      {/* State + temps row */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-1.5">
+          <span className={`w-2 h-2 rounded-full shrink-0 ${style.dot}`} />
+          <span className={`text-xs font-medium ${style.text}`}>{style.label}</span>
+        </div>
+        {status.state === 'printing' && status.filename && (
+          <span className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-40" title={status.filename}>
+            {status.filename.replace(/\.[^/.]+$/, '')}
+          </span>
+        )}
+        {(status.extruder_temp != null || status.bed_temp != null) && status.state !== 'offline' && (
+          <div className="flex items-center gap-2 text-xs text-gray-400">
+            {status.extruder_temp != null && (
+              <span title="Extruder">
+                🌡 {status.extruder_temp.toFixed(0)}°
+                {status.extruder_target ? `/${status.extruder_target.toFixed(0)}°` : ''}
+              </span>
+            )}
+            {status.bed_temp != null && (
+              <span title="Bed">
+                ⬛ {status.bed_temp.toFixed(0)}°
+                {status.bed_target ? `/${status.bed_target.toFixed(0)}°` : ''}
+              </span>
+            )}
+          </div>
+        )}
+        {status.state === 'printing' && status.time_remaining != null && (
+          <span className="text-xs text-gray-400">{formatTime(status.time_remaining)} left</span>
+        )}
+      </div>
+      {/* Progress bar */}
+      {status.state === 'printing' && status.progress != null && (
+        <div className="w-48 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-green-500 rounded-full transition-all duration-1000"
+            style={{ width: `${(status.progress * 100).toFixed(1)}%` }}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
 function PrinterAvatar({ printer }: { printer: Printer }) {
   const qc = useQueryClient()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -268,9 +342,179 @@ function PrinterAvatar({ printer }: { printer: Printer }) {
   )
 }
 
+function CameraFeed({ cam }: { cam: WebcamInfo }) {
+  const [src, setSrc] = useState('')
+  const [error, setError] = useState(false)
+  const imgRef = useRef<HTMLImageElement>(null)
+
+  useEffect(() => {
+    setError(false)
+    setSrc(`${cam.snapshot_url}${cam.snapshot_url.includes('?') ? '&' : '?'}_t=${Date.now()}`)
+    const id = setInterval(() => {
+      setSrc(`${cam.snapshot_url}${cam.snapshot_url.includes('?') ? '&' : '?'}_t=${Date.now()}`)
+    }, 500)
+    return () => clearInterval(id)
+  }, [cam.snapshot_url])
+
+  const transform = [
+    cam.flip_horizontal ? 'scaleX(-1)' : '',
+    cam.flip_vertical ? 'scaleY(-1)' : '',
+    cam.rotation ? `rotate(${cam.rotation}deg)` : '',
+  ].filter(Boolean).join(' ') || undefined
+
+  if (error) return (
+    <div className="flex items-center justify-center h-32 bg-gray-100 dark:bg-gray-700 rounded-lg text-xs text-gray-400">
+      Camera unavailable
+    </div>
+  )
+
+  return (
+    <img
+      ref={imgRef}
+      src={src}
+      alt={cam.name}
+      style={{ transform }}
+      onError={() => setError(true)}
+      className="w-full rounded-lg object-contain bg-black max-h-64"
+    />
+  )
+}
+
+function PrinterCamera({ printer }: { printer: Printer }) {
+  const { data: webcams, isLoading } = useQuery({
+    queryKey: ['printer-webcams', printer.id],
+    queryFn: () => getPrinterWebcams(printer.id),
+    staleTime: 60_000,
+    retry: false,
+  })
+
+  if (isLoading || !webcams?.length) return null
+
+  return (
+    <div className="border-t dark:border-gray-700 px-4 py-3 space-y-3">
+      <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide flex items-center gap-1.5">
+        <Video size={11} /> Camera{webcams.length > 1 ? 's' : ''}
+      </h3>
+      <div className={webcams.length > 1 ? 'grid grid-cols-2 gap-3' : ''}>
+        {webcams.map(cam => (
+          <div key={cam.name}>
+            {webcams.length > 1 && (
+              <p className="text-xs text-gray-400 mb-1">{cam.name}</p>
+            )}
+            <CameraFeed cam={cam} />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function SyncSlotsModal({
+  slots,
+  filaments,
+  onClose,
+  onApply,
+}: {
+  slots: FilamentDetectSlot[]
+  filaments: FilamentSpec[]
+  onClose: () => void
+  onApply: (assignments: { slotIndex: number; specId: number | null }[]) => Promise<void>
+}) {
+  const [assignments, setAssignments] = useState(
+    slots.map(s => ({ slotIndex: s.slot_index, specId: s.suggested_filament_spec_id }))
+  )
+  const [saving, setSaving] = useState(false)
+
+  function updateAssignment(slotIndex: number, specId: number | null) {
+    setAssignments(prev => prev.map(a => a.slotIndex === slotIndex ? { ...a, specId } : a))
+  }
+
+  async function handleApply() {
+    setSaving(true)
+    try { await onApply(assignments) } finally { setSaving(false) }
+  }
+
+  const detectedCount = slots.filter(s => s.detected).length
+
+  return (
+    <Modal title="Sync Filament Slots from Printer" onClose={onClose}>
+      <div className="space-y-4">
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          {detectedCount} filament{detectedCount !== 1 ? 's' : ''} detected via RFID.
+          Review the suggested matches and click Apply to update the slots.
+        </p>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-xs text-gray-400 border-b dark:border-gray-600">
+              <th className="text-left pb-1.5 pr-3 w-10">Slot</th>
+              <th className="text-left pb-1.5 pr-3">Detected</th>
+              <th className="text-left pb-1.5">Match in library</th>
+            </tr>
+          </thead>
+          <tbody>
+            {slots.map((slot, i) => (
+              <tr key={slot.slot_index} className="border-b dark:border-gray-700 last:border-0">
+                <td className="py-2 pr-3">
+                  <span className="text-xs font-medium text-gray-500 dark:text-gray-400">#{slot.slot_index + 1}</span>
+                </td>
+                <td className="py-2 pr-3">
+                  {slot.detected ? (
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="w-4 h-4 rounded-full border border-gray-300 dark:border-gray-600 shrink-0"
+                        style={{ backgroundColor: slot.color_hex }}
+                      />
+                      <div>
+                        <p className="text-xs font-medium leading-tight">
+                          {slot.material}{slot.sub_type ? ` ${slot.sub_type}` : ''}
+                        </p>
+                        <p className="text-xs text-gray-400 leading-tight">{slot.vendor}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <span className="text-xs text-gray-400 italic">Empty</span>
+                  )}
+                </td>
+                <td className="py-2">
+                  <select
+                    className="w-full border rounded px-2 py-1 text-xs dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100"
+                    value={assignments[i]?.specId ?? ''}
+                    onChange={e => updateAssignment(slot.slot_index, e.target.value ? Number(e.target.value) : null)}
+                  >
+                    <option value="">— none —</option>
+                    {filaments.map(f => (
+                      <option key={f.id} value={f.id}>
+                        {f.material} — {f.color_name}{f.brand ? ` (${f.brand})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Cancel</button>
+          <button
+            onClick={handleApply}
+            disabled={saving}
+            className="bg-brand-600 text-white px-4 py-2 text-sm rounded-lg disabled:opacity-50"
+          >
+            {saving ? 'Applying…' : 'Apply'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 function PrinterSlotConfig({ printer, filaments }: { printer: Printer; filaments: FilamentSpec[] }) {
   const qc = useQueryClient()
+  const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState<number | null>(null)
+  const [syncing, setSyncing] = useState(false)
+  const [syncData, setSyncData] = useState<FilamentDetectSlot[] | null>(null)
+  const [syncError, setSyncError] = useState<string | null>(null)
 
   const maxSlot = printer.slots.length > 0 ? Math.max(...printer.slots.map(s => s.slot_number)) : 0
 
@@ -295,51 +539,100 @@ function PrinterSlotConfig({ printer, filaments }: { printer: Printer; filaments
     qc.invalidateQueries({ queryKey: ['printers'] })
   }
 
+  async function handleSync() {
+    setSyncing(true)
+    setSyncError(null)
+    try {
+      const data = await getPrinterFilamentDetect(printer.id)
+      setSyncData(data)
+    } catch {
+      setSyncError('Could not read filament data from printer.')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  async function handleApply(assignments: { slotIndex: number; specId: number | null }[]) {
+    for (const { slotIndex, specId } of assignments) {
+      await setPrinterSlot(printer.id, slotIndex + 1, specId)
+    }
+    qc.invalidateQueries({ queryKey: ['printers'] })
+    setSyncData(null)
+  }
+
   return (
     <div className="border-t dark:border-gray-700 px-4 py-3">
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-          Filament Slots
-        </h3>
-        <button
-          onClick={handleAddSlot}
-          className="text-xs text-brand-600 hover:text-brand-700 flex items-center gap-1"
-        >
-          <Plus size={12} /> Add Slot
-        </button>
-      </div>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-1.5 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide hover:text-gray-600 dark:hover:text-gray-300 w-full text-left"
+      >
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        Filament Slots
+      </button>
 
-      {printer.slots.length === 0 ? (
-        <p className="text-xs text-gray-400 italic">No slots configured. Add slots to track which filament is loaded where.</p>
-      ) : (
-        <div className="space-y-1.5">
-          {printer.slots.map(slot => (
-            <div key={slot.slot_number} className="flex items-center gap-2">
-              <span className="text-xs font-medium text-gray-500 dark:text-gray-400 w-14 shrink-0">
-                Slot {slot.slot_number}
-              </span>
-              <select
-                className="flex-1 border rounded px-2 py-1 text-xs dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100 disabled:opacity-60"
-                value={slot.filament_spec_id ? String(slot.filament_spec_id) : ''}
-                disabled={saving === slot.slot_number}
-                onChange={e => handleSlotChange(slot.slot_number, e.target.value)}
-              >
-                <option value="">— none —</option>
-                {filaments.map(f => (
-                  <option key={f.id} value={f.id}>
-                    {f.material} — {f.color_name}{f.brand ? ` (${f.brand})` : ''}
-                  </option>
-                ))}
-              </select>
-              <button
-                onClick={() => handleDeleteSlot(slot.slot_number)}
-                className="text-gray-400 hover:text-red-500 shrink-0"
-              >
-                <X size={13} />
-              </button>
+      {open && (
+        <div className="mt-2 space-y-2">
+          <div className="flex items-center justify-between">
+            <button
+              onClick={handleSync}
+              disabled={syncing}
+              className="text-xs text-gray-500 hover:text-brand-600 flex items-center gap-1 disabled:opacity-50"
+            >
+              <RefreshCw size={11} className={syncing ? 'animate-spin' : ''} />
+              {syncing ? 'Reading…' : 'Sync from printer'}
+            </button>
+            <button
+              onClick={handleAddSlot}
+              className="text-xs text-brand-600 hover:text-brand-700 flex items-center gap-1"
+            >
+              <Plus size={12} /> Add Slot
+            </button>
+          </div>
+          {syncError && (
+            <p className="text-xs text-red-500">{syncError}</p>
+          )}
+          {printer.slots.length === 0 ? (
+            <p className="text-xs text-gray-400 italic">No slots configured. Add slots to track which filament is loaded where.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {printer.slots.map(slot => (
+                <div key={slot.slot_number} className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-gray-500 dark:text-gray-400 w-14 shrink-0">
+                    Slot {slot.slot_number}
+                  </span>
+                  <select
+                    className="flex-1 border rounded px-2 py-1 text-xs dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100 disabled:opacity-60"
+                    value={slot.filament_spec_id ? String(slot.filament_spec_id) : ''}
+                    disabled={saving === slot.slot_number}
+                    onChange={e => handleSlotChange(slot.slot_number, e.target.value)}
+                  >
+                    <option value="">— none —</option>
+                    {filaments.map(f => (
+                      <option key={f.id} value={f.id}>
+                        {f.material} — {f.color_name}{f.brand ? ` (${f.brand})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => handleDeleteSlot(slot.slot_number)}
+                    className="text-gray-400 hover:text-red-500 shrink-0"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              ))}
             </div>
-          ))}
+          )}
         </div>
+      )}
+
+      {syncData && (
+        <SyncSlotsModal
+          slots={syncData}
+          filaments={filaments}
+          onClose={() => setSyncData(null)}
+          onApply={handleApply}
+        />
       )}
     </div>
   )
@@ -579,13 +872,13 @@ export default function Printers() {
                 className="flex items-center justify-between px-4 py-3 cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-700/30"
                 onClick={() => setExpanded(isOpen ? null : printer.id)}
               >
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 min-w-0">
                   {isOpen
                     ? <ChevronDown size={14} className="text-gray-400 shrink-0" />
                     : <ChevronRight size={14} className="text-gray-400 shrink-0" />}
                   <PrinterAvatar printer={printer} />
-                  <span className="font-medium text-sm">{printer.name}</span>
-                  <span className="text-xs text-gray-400">{printer.url}</span>
+                  <span className="font-medium text-sm shrink-0">{printer.name}</span>
+                  <PrinterStatusDisplay printerId={printer.id} />
                 </div>
                 <button
                   onClick={e => { e.stopPropagation(); if (confirm('Remove this printer?')) deleteMutation.mutate(printer.id) }}
@@ -596,6 +889,7 @@ export default function Printers() {
               </div>
               {isOpen && (
                 <>
+                  <PrinterCamera printer={printer} />
                   <PrinterSlotConfig printer={printer} filaments={filaments} />
                   <PrinterSlicerSection printer={printer} />
                   <PrinterHistory printer={printer} filaments={filaments} />

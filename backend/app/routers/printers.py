@@ -1,4 +1,5 @@
 import os
+import math
 import shutil
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import Response, FileResponse
@@ -7,8 +8,8 @@ from typing import List
 import httpx
 
 from ..database import get_db
-from ..models import Printer, PrinterSlot
-from ..schemas import PrinterCreate, PrinterOut, PrinterHistoryResponse, MoonrakerJob, PrinterSlotOut, PrinterSlotSet, PrinterSlicerConfig
+from ..models import Printer, PrinterSlot, FilamentSpec
+from ..schemas import PrinterCreate, PrinterOut, PrinterHistoryResponse, MoonrakerJob, PrinterSlotOut, PrinterSlotSet, PrinterSlicerConfig, PrinterStatus, WebcamInfo, FilamentDetectSlot
 
 router = APIRouter(prefix="/api/printers", tags=["printers"])
 
@@ -132,6 +133,150 @@ def delete_slot(printer_id: int, slot_number: int, db: Session = Depends(get_db)
         raise HTTPException(status_code=404, detail="Slot not found")
     db.delete(slot)
     db.commit()
+
+
+@router.get("/{printer_id}/webcams", response_model=List[WebcamInfo])
+async def get_webcams(printer_id: int, db: Session = Depends(get_db)):
+    printer = db.query(Printer).filter(Printer.id == printer_id).first()
+    if not printer:
+        raise HTTPException(status_code=404, detail="Printer not found")
+
+    base = printer.url.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{base}/server/webcams/list")
+            resp.raise_for_status()
+    except (httpx.RequestError, httpx.HTTPStatusError):
+        return []
+
+    def resolve(url: str) -> str:
+        return url if url.startswith("http") else f"{base}{url}"
+
+    result = []
+    for cam in resp.json().get("result", {}).get("webcams", []):
+        if not cam.get("enabled", True):
+            continue
+        stream_url = resolve(cam.get("stream_url", ""))
+        snapshot_url = resolve(cam.get("snapshot_url", ""))
+        if not snapshot_url:
+            continue
+        result.append(WebcamInfo(
+            name=cam.get("name", "Camera"),
+            stream_url=stream_url,
+            snapshot_url=snapshot_url,
+            flip_horizontal=cam.get("flip_horizontal", False),
+            flip_vertical=cam.get("flip_vertical", False),
+            rotation=cam.get("rotation", 0),
+        ))
+    return result
+
+
+@router.get("/{printer_id}/status", response_model=PrinterStatus)
+async def get_printer_status(printer_id: int, db: Session = Depends(get_db)):
+    printer = db.query(Printer).filter(Printer.id == printer_id).first()
+    if not printer:
+        raise HTTPException(status_code=404, detail="Printer not found")
+
+    url = printer.url.rstrip("/")
+    params = "print_stats=state,filename,print_duration&display_status=progress&extruder=temperature,target&heater_bed=temperature,target"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{url}/printer/objects/query?{params}")
+            resp.raise_for_status()
+    except (httpx.RequestError, httpx.HTTPStatusError):
+        return PrinterStatus(state="offline")
+
+    status = resp.json().get("result", {}).get("status", {})
+    ps = status.get("print_stats", {})
+    ds = status.get("display_status", {})
+    ex = status.get("extruder", {})
+    bed = status.get("heater_bed", {})
+
+    state = ps.get("state", "standby")
+    progress = ds.get("progress")
+    duration = ps.get("print_duration")
+
+    time_remaining = None
+    if progress and progress > 0 and duration is not None:
+        time_remaining = duration / progress - duration
+
+    return PrinterStatus(
+        state=state,
+        filename=ps.get("filename") or None,
+        progress=progress,
+        print_duration=duration,
+        time_remaining=time_remaining,
+        extruder_temp=ex.get("temperature"),
+        extruder_target=ex.get("target"),
+        bed_temp=bed.get("temperature"),
+        bed_target=bed.get("target"),
+    )
+
+
+def _rgb_int_to_hex(rgb: int) -> str:
+    return f"#{rgb & 0xFFFFFF:06X}"
+
+
+def _color_distance(hex1: str, hex2: str) -> float:
+    try:
+        r1, g1, b1 = int(hex1[1:3], 16), int(hex1[3:5], 16), int(hex1[5:7], 16)
+        r2, g2, b2 = int(hex2[1:3], 16), int(hex2[3:5], 16), int(hex2[5:7], 16)
+        return math.sqrt((r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2)
+    except Exception:
+        return 999.0
+
+
+@router.get("/{printer_id}/filament-detect", response_model=List[FilamentDetectSlot])
+async def get_filament_detect(printer_id: int, db: Session = Depends(get_db)):
+    printer = db.query(Printer).filter(Printer.id == printer_id).first()
+    if not printer:
+        raise HTTPException(status_code=404, detail="Printer not found")
+
+    url = printer.url.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{url}/printer/objects/query?filament_detect")
+            resp.raise_for_status()
+    except (httpx.RequestError, httpx.HTTPStatusError):
+        raise HTTPException(status_code=502, detail="Could not reach printer")
+
+    info_list = (
+        resp.json()
+        .get("result", {})
+        .get("status", {})
+        .get("filament_detect", {})
+        .get("info", [])
+    )
+
+    all_specs = db.query(FilamentSpec).all()
+
+    result = []
+    for i, info in enumerate(info_list):
+        material = info.get("MAIN_TYPE", "NONE")
+        vendor = info.get("VENDOR", "NONE")
+        sub_type = info.get("SUB_TYPE", "") or ""
+        detected = material != "NONE" and vendor != "NONE"
+        color_hex = _rgb_int_to_hex(info.get("RGB_1", 0xFFFFFF))
+
+        suggested_id = None
+        if detected and all_specs:
+            candidates = [s for s in all_specs if s.material.upper() == material.upper()]
+            if not candidates:
+                candidates = all_specs
+            best = min(candidates, key=lambda s: _color_distance(color_hex, s.color_hex or "#888888"))
+            suggested_id = best.id
+
+        result.append(FilamentDetectSlot(
+            slot_index=i,
+            detected=detected,
+            vendor=vendor,
+            material=material,
+            sub_type=sub_type,
+            color_hex=color_hex,
+            suggested_filament_spec_id=suggested_id,
+        ))
+
+    return result
 
 
 @router.get("/{printer_id}/history", response_model=PrinterHistoryResponse)

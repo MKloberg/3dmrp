@@ -35,6 +35,19 @@ class FilamentSpecOut(FilamentSpecBase):
     model_config = {"from_attributes": True}
 
 
+class TagOut(BaseModel):
+    id: int
+    name: str
+    color_hex: str
+
+    model_config = {"from_attributes": True}
+
+
+class TagCreate(BaseModel):
+    name: str
+    color_hex: str = "#6366f1"
+
+
 class ModelFilamentBase(BaseModel):
     filament_spec_id: int
     grams: float
@@ -102,6 +115,7 @@ class PrintModelOut(PrintModelBase):
     filament_requirements: List[ModelFilamentOut] = []
     images: List[ModelImageOut] = []
     slicer_files: List[SlicerFileOut] = []
+    tags: List[TagOut] = []
 
     model_config = {"from_attributes": True}
 
@@ -173,6 +187,27 @@ class PrinterOut(PrinterBase):
     model_config = {"from_attributes": True}
 
 
+class WebcamInfo(BaseModel):
+    name: str
+    stream_url: str
+    snapshot_url: str
+    flip_horizontal: bool = False
+    flip_vertical: bool = False
+    rotation: int = 0
+
+
+class PrinterStatus(BaseModel):
+    state: str  # standby, printing, paused, error, complete, offline
+    filename: Optional[str] = None
+    progress: Optional[float] = None
+    print_duration: Optional[float] = None
+    time_remaining: Optional[float] = None
+    extruder_temp: Optional[float] = None
+    extruder_target: Optional[float] = None
+    bed_temp: Optional[float] = None
+    bed_target: Optional[float] = None
+
+
 class MoonrakerJob(BaseModel):
     job_id: str
     filename: str
@@ -187,6 +222,16 @@ class MoonrakerJob(BaseModel):
 class PrinterHistoryResponse(BaseModel):
     count: int
     jobs: List[MoonrakerJob]
+
+
+class FilamentDetectSlot(BaseModel):
+    slot_index: int
+    detected: bool
+    vendor: str
+    material: str
+    sub_type: str
+    color_hex: str
+    suggested_filament_spec_id: Optional[int] = None
 
 
 class ForecastItem(BaseModel):

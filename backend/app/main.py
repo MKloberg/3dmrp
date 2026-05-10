@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from .database import engine, Base
-from .routers import filaments, print_models, orders, spoolman, forecast, settings, printers
+from .routers import filaments, print_models, orders, spoolman, forecast, settings, printers, tags
 
 Base.metadata.create_all(bind=engine)
 
@@ -43,6 +43,12 @@ with engine.connect() as conn:
     if "slicer_executable" not in existing_printers:
         conn.execute(text("ALTER TABLE printers ADD COLUMN slicer_executable TEXT"))
 
+    existing_tables = {row[0] for row in conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))}
+    if "tags" not in existing_tables:
+        conn.execute(text("CREATE TABLE tags (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, color_hex TEXT NOT NULL DEFAULT '#6366f1')"))
+    if "model_tags" not in existing_tables:
+        conn.execute(text("CREATE TABLE model_tags (model_id INTEGER NOT NULL REFERENCES print_models(id) ON DELETE CASCADE, tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE, PRIMARY KEY (model_id, tag_id))"))
+
     conn.commit()
 
 app = FastAPI(title="3DMRP", version="1.0.0")
@@ -62,6 +68,7 @@ app.include_router(spoolman.router)
 app.include_router(forecast.router)
 app.include_router(settings.router)
 app.include_router(printers.router)
+app.include_router(tags.router)
 
 
 @app.get("/api/health")
