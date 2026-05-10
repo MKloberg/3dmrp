@@ -24,7 +24,8 @@ A self-hosted web app for managing 3D print models, filament inventory, orders, 
 
 ### Print Models
 - Store models with name, description, notes, and multiple photos
-- Crop and download model images directly from the browser
+- Upload photos or paste images directly from the clipboard
+- Click any thumbnail to open a full-size lightbox with prev/next navigation, download, crop, and delete
 - Define filament requirements per model (material, color, grams) with drag-and-drop slot ordering
 - Tag models with color-coded categories and filter by tag
 - Associate a slicer project file (`.3mf`) per printer and launch the slicer directly from the browser
@@ -42,13 +43,20 @@ A self-hosted web app for managing 3D print models, filament inventory, orders, 
 - Thumbnail preview shown during import
 - Filament slot tracking with RFID auto-sync (reads `filament_detect` from Moonraker and matches to your filament library by material type and color)
 
+### Customers
+- Full CRM: store name, email, phone, address, notes, and category per customer
+- Import customers from [Square](https://squareup.com) via the Square API, with sync to keep records up to date
+- Link orders to customer records; order history visible per customer
+
 ### Orders
-- Track print orders with customer name, quantity, due date, and status (pending → printing → complete)
+- Track print orders with customer, quantity, due date, and status (pending → printing → complete)
 - Link each order to a model so filament requirements are always visible
+- Create orders for models that don't exist yet — a placeholder model is auto-created and can be filled in later
 
 ### Dashboard
 - Live overview: pending, printing, overdue, and stock alert counts
-- Live printer status cards with progress and temperatures
+- Quick-nav cards showing live counts for Models, Orders, Customers, Printers, and Filaments
+- Live printer status cards with progress and temperatures; click any card to jump to that printer
 - Active orders sorted by urgency with due-date badges
 - Filament stock alerts with one-click purchase links
 
@@ -60,6 +68,7 @@ A self-hosted web app for managing 3D print models, filament inventory, orders, 
 ### Settings
 - Light/dark theme
 - Spoolman URL with connection test
+- Square Personal Access Token for customer import/sync
 - Database backup (download) and restore (upload)
 
 ## Stack
