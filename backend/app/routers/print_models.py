@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List
+from PIL import Image as PILImage
 
 from ..database import get_db
 from ..models import PrintModel, ModelFilament, FilamentSpec, ModelImage, ModelSlicerFile, Printer
@@ -14,7 +15,7 @@ from ..schemas import (
     PrintModelCreate, PrintModelOut,
     ModelFilamentCreate, ModelFilamentUpdate, ModelFilamentOut,
     FilamentReorderItem,
-    ModelImageOut, ModelImageFromPrinter,
+    ModelImageOut, ModelImageFromPrinter, ImageCropBox,
     SlicerFileOut, SlicerFileSet,
 )
 
@@ -182,6 +183,42 @@ def get_model_image(model_id: int, image_id: int, db: Session = Depends(get_db))
     if not img or not os.path.exists(img.image_path):
         raise HTTPException(status_code=404, detail="Image not found")
     return FileResponse(img.image_path)
+
+
+@router.post("/{model_id}/images/{image_id}/crop", response_model=ModelImageOut)
+def crop_model_image(model_id: int, image_id: int, data: ImageCropBox, db: Session = Depends(get_db)):
+    img_record = db.query(ModelImage).filter(
+        ModelImage.id == image_id,
+        ModelImage.print_model_id == model_id,
+    ).first()
+    if not img_record or not os.path.exists(img_record.image_path):
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    with PILImage.open(img_record.image_path) as pil_img:
+        pil_img = pil_img.convert("RGB")
+        w, h = pil_img.size
+        left   = max(0, int(round(data.x * w)))
+        top    = max(0, int(round(data.y * h)))
+        right  = min(w, int(round((data.x + data.width) * w)))
+        bottom = min(h, int(round((data.y + data.height) * h)))
+        cropped = pil_img.crop((left, top, right, bottom))
+
+    new_path = os.path.join(IMAGE_DIR, f"{model_id}_{uuid.uuid4().hex}.jpg")
+    cropped.save(new_path, "JPEG", quality=92)
+
+    old_path = img_record.image_path
+    db.delete(img_record)
+    db.flush()
+
+    new_img = ModelImage(print_model_id=model_id, image_path=new_path)
+    db.add(new_img)
+    db.commit()
+    db.refresh(new_img)
+
+    if os.path.exists(old_path):
+        os.remove(old_path)
+
+    return new_img
 
 
 @router.delete("/{model_id}/images/{image_id}", status_code=204)

@@ -1,14 +1,94 @@
 import { useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import ReactCrop, { Crop, PixelCrop } from 'react-image-crop'
+import 'react-image-crop/dist/ReactCrop.css'
 import {
   getModels, createModel, updateModel, deleteModel,
   getFilaments, getPrinters, addFilamentReq, updateFilamentReq, removeFilamentReq, reorderFilaments,
-  uploadModelImage, deleteModelImage, setSlicerFile, deleteSlicerFile, openInSlicer,
+  uploadModelImage, deleteModelImage, cropModelImage, setSlicerFile, deleteSlicerFile, openInSlicer,
   getTags, createTag, updateTag, deleteTag, addTagToModel, removeTagFromModel,
   PrintModel, FilamentSpec, Printer, Tag,
 } from '../api/client'
 import Modal from '../components/Modal'
-import { Plus, Trash2, ChevronDown, ChevronRight, Pencil, Check, X, Upload, ShoppingCart, Play, Scissors, GripVertical, Tag as TagIcon, Settings2 } from 'lucide-react'
+import { Plus, Trash2, ChevronDown, ChevronRight, Pencil, Check, X, Upload, ShoppingCart, Play, Scissors, GripVertical, Tag as TagIcon, Settings2, Crop as CropIcon, Download } from 'lucide-react'
+
+function CropModal({
+  modelId,
+  imageId,
+  imageUrl,
+  onClose,
+  onDone,
+}: {
+  modelId: number
+  imageId: number
+  imageUrl: string
+  onClose: () => void
+  onDone: () => void
+}) {
+  const qc = useQueryClient()
+  const imgRef = useRef<HTMLImageElement>(null)
+  const [crop, setCrop] = useState<Crop>()
+  const [completedCrop, setCompletedCrop] = useState<PixelCrop>()
+  const [saving, setSaving] = useState(false)
+
+  function onImageLoad(e: React.SyntheticEvent<HTMLImageElement>) {
+    const { width, height } = e.currentTarget
+    setCrop({ unit: '%', x: 0, y: 0, width: 100, height: 100 })
+    setCompletedCrop({ unit: 'px', x: 0, y: 0, width, height })
+  }
+
+  async function handleSave() {
+    if (!completedCrop?.width || !completedCrop?.height || !imgRef.current) return
+    const { width, height } = imgRef.current
+    const box = {
+      x: completedCrop.x / width,
+      y: completedCrop.y / height,
+      width: completedCrop.width / width,
+      height: completedCrop.height / height,
+    }
+    setSaving(true)
+    try {
+      await cropModelImage(modelId, imageId, box)
+      await qc.refetchQueries({ queryKey: ['models'] })
+      onDone()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title="Crop Image" onClose={onClose} wide>
+      <div className="space-y-4">
+        <div className="flex justify-center bg-gray-100 dark:bg-gray-900 rounded-lg overflow-hidden">
+          <ReactCrop
+            crop={crop}
+            onChange={(_, pct) => setCrop(pct)}
+            onComplete={c => setCompletedCrop(c)}
+          >
+            <img
+              ref={imgRef}
+              src={imageUrl}
+              alt="Crop"
+              onLoad={onImageLoad}
+              className="max-h-[60vh] max-w-full"
+            />
+          </ReactCrop>
+        </div>
+        <p className="text-xs text-gray-400 text-center">Drag to adjust the crop area. The original image will be replaced.</p>
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Cancel</button>
+          <button
+            onClick={handleSave}
+            disabled={!completedCrop?.width || saving}
+            className="bg-brand-600 text-white px-4 py-2 text-sm rounded-lg disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Apply Crop'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
 
 const TAG_COLORS = [
   '#6366f1','#8b5cf6','#ec4899','#ef4444','#f97316',
@@ -39,6 +119,7 @@ function ModelDetail({ model, filaments, printers, allTags }: { model: PrintMode
   const qc = useQueryClient()
   const imageInputRef = useRef<HTMLInputElement>(null)
   const [uploadingImage, setUploadingImage] = useState(false)
+  const [cropTarget, setCropTarget] = useState<{ imageId: number; url: string } | null>(null)
   const [editingReq, setEditingReq] = useState<{ reqId: number; specId: string; grams: string } | null>(null)
   const [reqForm, setReqForm] = useState<{ specId: string; grams: string } | null>(null)
   const [slicerPaths, setSlicerPaths] = useState<Record<number, string>>(() =>
@@ -250,16 +331,35 @@ function ModelDetail({ model, filaments, printers, allTags }: { model: PrintMode
           {model.images.map(img => (
             <div key={img.id} className="relative group">
               <img
-                src={`/api/models/${model.id}/images/${img.id}`}
+                src={`/api/models/${model.id}/images/${img.id}?v=${new Date(img.created_at).getTime()}`}
                 alt=""
                 className="w-24 h-24 object-cover rounded-lg border border-gray-200 dark:border-gray-600"
               />
-              <button
-                onClick={() => deleteImageMutation.mutate(img.id)}
-                className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                <X size={10} />
-              </button>
+              <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <a
+                  href={`/api/models/${model.id}/images/${img.id}`}
+                  download={model.name}
+                  onClick={e => e.stopPropagation()}
+                  className="bg-black/60 text-white rounded-full p-0.5"
+                  title="Download"
+                >
+                  <Download size={10} />
+                </a>
+                <button
+                  onClick={() => setCropTarget({ imageId: img.id, url: `/api/models/${model.id}/images/${img.id}?v=${new Date(img.created_at).getTime()}` })}
+                  className="bg-black/60 text-white rounded-full p-0.5"
+                  title="Crop"
+                >
+                  <CropIcon size={10} />
+                </button>
+                <button
+                  onClick={() => deleteImageMutation.mutate(img.id)}
+                  className="bg-black/60 text-white rounded-full p-0.5"
+                  title="Delete"
+                >
+                  <X size={10} />
+                </button>
+              </div>
             </div>
           ))}
           <button
@@ -275,6 +375,16 @@ function ModelDetail({ model, filaments, printers, allTags }: { model: PrintMode
           <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
         </div>
       </div>
+
+      {cropTarget && (
+        <CropModal
+          modelId={model.id}
+          imageId={cropTarget.imageId}
+          imageUrl={cropTarget.url}
+          onClose={() => setCropTarget(null)}
+          onDone={() => setCropTarget(null)}
+        />
+      )}
 
       {/* Filaments */}
       <div>
@@ -616,7 +726,7 @@ export default function Models() {
                   {isOpen ? <ChevronDown size={15} className="text-gray-400" /> : <ChevronRight size={15} className="text-gray-400" />}
                   {firstImage ? (
                     <img
-                      src={`/api/models/${model.id}/images/${firstImage.id}`}
+                      src={`/api/models/${model.id}/images/${firstImage.id}?v=${new Date(firstImage.created_at).getTime()}`}
                       alt=""
                       className="w-8 h-8 rounded object-cover border border-gray-200 dark:border-gray-600 shrink-0"
                     />

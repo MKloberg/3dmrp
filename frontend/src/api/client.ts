@@ -145,6 +145,8 @@ export const copyThumbnailToModel = (modelId: number, printerId: number, thumbna
   })
 export const deleteModelImage = (modelId: number, imageId: number) =>
   req<void>(`/models/${modelId}/images/${imageId}`, { method: 'DELETE' })
+export const cropModelImage = (modelId: number, imageId: number, box: { x: number; y: number; width: number; height: number }) =>
+  req<ModelImage>(`/models/${modelId}/images/${imageId}/crop`, { method: 'POST', body: JSON.stringify(box) })
 
 export const setSlicerFile = (modelId: number, printerId: number, filePath: string) =>
   req<SlicerFile>(`/models/${modelId}/slicer-files/${printerId}`, { method: 'PUT', body: JSON.stringify({ file_path: filePath }) })

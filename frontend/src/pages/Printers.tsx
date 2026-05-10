@@ -342,7 +342,7 @@ function PrinterAvatar({ printer }: { printer: Printer }) {
   )
 }
 
-function CameraFeed({ cam }: { cam: WebcamInfo }) {
+function CameraFeed({ cam, onUnavailable }: { cam: WebcamInfo; onUnavailable: () => void }) {
   const [src, setSrc] = useState('')
   const [error, setError] = useState(false)
   const imgRef = useRef<HTMLImageElement>(null)
@@ -362,11 +362,7 @@ function CameraFeed({ cam }: { cam: WebcamInfo }) {
     cam.rotation ? `rotate(${cam.rotation}deg)` : '',
   ].filter(Boolean).join(' ') || undefined
 
-  if (error) return (
-    <div className="flex items-center justify-center h-32 bg-gray-100 dark:bg-gray-700 rounded-lg text-xs text-gray-400">
-      Camera unavailable
-    </div>
-  )
+  if (error) return null
 
   return (
     <img
@@ -374,13 +370,14 @@ function CameraFeed({ cam }: { cam: WebcamInfo }) {
       src={src}
       alt={cam.name}
       style={{ transform }}
-      onError={() => setError(true)}
+      onError={() => { setError(true); onUnavailable() }}
       className="w-full rounded-lg object-contain bg-black max-h-64"
     />
   )
 }
 
 function PrinterCamera({ printer }: { printer: Printer }) {
+  const [unavailable, setUnavailable] = useState<Set<string>>(new Set())
   const { data: webcams, isLoading } = useQuery({
     queryKey: ['printer-webcams', printer.id],
     queryFn: () => getPrinterWebcams(printer.id),
@@ -390,18 +387,24 @@ function PrinterCamera({ printer }: { printer: Printer }) {
 
   if (isLoading || !webcams?.length) return null
 
+  const visibleCams = webcams.filter(c => !unavailable.has(c.name))
+  if (visibleCams.length === 0) return null
+
   return (
     <div className="border-t dark:border-gray-700 px-4 py-3 space-y-3">
       <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide flex items-center gap-1.5">
-        <Video size={11} /> Camera{webcams.length > 1 ? 's' : ''}
+        <Video size={11} /> Camera{visibleCams.length > 1 ? 's' : ''}
       </h3>
-      <div className={webcams.length > 1 ? 'grid grid-cols-2 gap-3' : ''}>
-        {webcams.map(cam => (
+      <div className={visibleCams.length > 1 ? 'grid grid-cols-2 gap-3' : ''}>
+        {visibleCams.map(cam => (
           <div key={cam.name}>
-            {webcams.length > 1 && (
+            {visibleCams.length > 1 && (
               <p className="text-xs text-gray-400 mb-1">{cam.name}</p>
             )}
-            <CameraFeed cam={cam} />
+            <CameraFeed
+              cam={cam}
+              onUnavailable={() => setUnavailable(prev => new Set([...prev, cam.name]))}
+            />
           </div>
         ))}
       </div>

@@ -87,6 +87,13 @@ class ModelImageFromPrinter(BaseModel):
     thumbnail_path: str
 
 
+class ImageCropBox(BaseModel):
+    x: float
+    y: float
+    width: float
+    height: float
+
+
 class PrintModelBase(BaseModel):
     name: str
     description: str = ""

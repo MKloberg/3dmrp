@@ -2,13 +2,30 @@
 
 A self-hosted web app for managing 3D print models, filament inventory, orders, and print queues. Built for multi-printer workshops that want a single place to track what gets printed, with what filament, and for whom.
 
+## Screenshots
+
+### Dashboard
+![Dashboard](docs/screenshots/dashboard.png)
+
+### Models
+![Models](docs/screenshots/models.png)
+
+### Printers
+![Printers](docs/screenshots/printers.png)
+
+### Filaments
+![Filaments](docs/screenshots/filaments.png)
+
+---
+
 ## Features
 
 ### Print Models
 - Store models with name, description, notes, and multiple photos
+- Crop and download model images directly from the browser
 - Define filament requirements per model (material, color, grams) with drag-and-drop slot ordering
+- Tag models with color-coded categories and filter by tag
 - Associate a slicer project file (`.3mf`) per printer and launch the slicer directly from the browser
-- Shopping cart links for quick filament reordering
 
 ### Filaments
 - Manage a filament spec library with material, color, brand, temperature settings, and purchase URL
@@ -17,13 +34,21 @@ A self-hosted web app for managing 3D print models, filament inventory, orders, 
 
 ### Printers
 - Connect to [Klipper/Moonraker](https://moonraker.readthedocs.io) printers by URL
+- Live status display: print state, progress bar, temperatures, and ETA
+- Webcam feed via snapshot polling (works with Moonraker's camera API)
 - Browse print job history and import jobs directly as model records
 - Thumbnail preview shown during import
-- Configure per-printer filament slots and slicer executable
+- Filament slot tracking with RFID auto-sync (reads `filament_detect` from Moonraker and matches to your filament library by material type and color)
 
 ### Orders
 - Track print orders with customer name, quantity, due date, and status (pending → printing → complete)
 - Link each order to a model so filament requirements are always visible
+
+### Dashboard
+- Live overview: pending, printing, overdue, and stock alert counts
+- Live printer status cards with progress and temperatures
+- Active orders sorted by urgency with due-date badges
+- Filament stock alerts with one-click purchase links
 
 ### Forecast
 - Demand forecast based on recent order history
