@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from .database import engine, Base
-from .routers import filaments, print_models, orders, spoolman, forecast, settings, printers, tags
+from .routers import filaments, print_models, orders, spoolman, forecast, settings, printers, tags, customers
 
 Base.metadata.create_all(bind=engine)
 
@@ -49,6 +49,38 @@ with engine.connect() as conn:
     if "model_tags" not in existing_tables:
         conn.execute(text("CREATE TABLE model_tags (model_id INTEGER NOT NULL REFERENCES print_models(id) ON DELETE CASCADE, tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE, PRIMARY KEY (model_id, tag_id))"))
 
+    if "customers" not in existing_tables:
+        conn.execute(text("""
+            CREATE TABLE customers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                given_name TEXT NOT NULL DEFAULT '',
+                family_name TEXT NOT NULL DEFAULT '',
+                company_name TEXT NOT NULL DEFAULT '',
+                email TEXT NOT NULL DEFAULT '',
+                phone TEXT NOT NULL DEFAULT '',
+                address_line1 TEXT NOT NULL DEFAULT '',
+                address_line2 TEXT NOT NULL DEFAULT '',
+                city TEXT NOT NULL DEFAULT '',
+                state TEXT NOT NULL DEFAULT '',
+                postal_code TEXT NOT NULL DEFAULT '',
+                country TEXT NOT NULL DEFAULT '',
+                notes TEXT NOT NULL DEFAULT '',
+                category TEXT NOT NULL DEFAULT '',
+                square_id TEXT UNIQUE,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+
+    existing_orders = {row[1] for row in conn.execute(text("PRAGMA table_info(orders)"))}
+    if "customer_id" not in existing_orders:
+        conn.execute(text("ALTER TABLE orders ADD COLUMN customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL"))
+        # Migrate existing customer_name text into customer records
+        rows = conn.execute(text("SELECT DISTINCT customer_name FROM orders WHERE customer_name != '' AND customer_name IS NOT NULL")).fetchall()
+        for (name,) in rows:
+            conn.execute(text("INSERT INTO customers (given_name) VALUES (:name)"), {"name": name})
+            cust_id = conn.execute(text("SELECT id FROM customers WHERE given_name = :name ORDER BY id DESC LIMIT 1"), {"name": name}).scalar()
+            conn.execute(text("UPDATE orders SET customer_id = :cid WHERE customer_name = :name"), {"cid": cust_id, "name": name})
+
     conn.commit()
 
 app = FastAPI(title="3DMRP", version="1.0.0")
@@ -69,6 +101,7 @@ app.include_router(forecast.router)
 app.include_router(settings.router)
 app.include_router(printers.router)
 app.include_router(tags.router)
+app.include_router(customers.router)
 
 
 @app.get("/api/health")

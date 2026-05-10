@@ -253,6 +253,29 @@ export default function Filaments() {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<FilamentSpec | null>(null)
   const [form, setForm] = useState<FilamentSpecInput>(emptyForm())
+  const [showSpoolmanIds, setShowSpoolmanIds] = useState(
+    () => localStorage.getItem('showSpoolmanIds') === 'true'
+  )
+  const [filterMaterial, setFilterMaterial] = useState('')
+  const [filterBrand, setFilterBrand] = useState('')
+  const [filterColor, setFilterColor] = useState('')
+  const [filterSpoolman, setFilterSpoolman] = useState<'' | 'linked' | 'unlinked'>('')
+  const [sortBy, setSortBy] = useState<'color_name' | 'brand' | 'material' | 'spoolman_id'>('color_name')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+
+  function toggleSpoolmanIds() {
+    setShowSpoolmanIds(v => {
+      localStorage.setItem('showSpoolmanIds', String(!v))
+      return !v
+    })
+  }
+
+  function clearFilters() {
+    setFilterMaterial(''); setFilterBrand(''); setFilterColor(''); setFilterSpoolman('')
+    setSortBy('color_name'); setSortDir('asc')
+  }
+
+  const hasActiveFilters = filterMaterial || filterBrand || filterColor || filterSpoolman || sortBy !== 'color_name' || sortDir !== 'asc'
 
   const saveMutation = useMutation({
     mutationFn: () => editing ? updateFilament(editing.id, form) : createFilament(form),
@@ -268,17 +291,51 @@ export default function Filaments() {
   function openImport(sf: SpoolmanFilament) { setEditing(null); setForm(spoolmanToInput(sf)); setShowForm(true) }
   function closeForm() { setShowForm(false); setEditing(null) }
 
+  const importedSpoolmanIds = new Set(filaments.map(f => f.spoolman_id).filter(Boolean))
   const localKeys = new Set(
     filaments.map(f => `${f.material.toLowerCase()}::${f.color_name.toLowerCase()}`)
   )
   const isImported = (sf: SpoolmanFilament) =>
+    importedSpoolmanIds.has(sf.id) ||
     localKeys.has(`${sf.material.toLowerCase()}::${sf.name.toLowerCase()}`)
 
-  const grouped = filaments.reduce<Record<string, FilamentSpec[]>>((acc, f) => {
+  const spoolmanMultiColorMap = new Map(
+    (spoolmanData?.filaments ?? [])
+      .filter(sf => sf.multi_color_hexes)
+      .map(sf => [sf.id, sf.multi_color_hexes!])
+  )
+
+  const allMaterials = [...new Set(filaments.map(f => f.material))].sort()
+  const allBrands = [...new Set(filaments.map(f => f.brand).filter(Boolean))].sort()
+
+  const filteredFilaments = filaments.filter(f => {
+    if (filterMaterial && f.material !== filterMaterial) return false
+    if (filterBrand && f.brand !== filterBrand) return false
+    if (filterColor && !f.color_name.toLowerCase().includes(filterColor.toLowerCase())) return false
+    if (filterSpoolman === 'linked' && !f.spoolman_id) return false
+    if (filterSpoolman === 'unlinked' && f.spoolman_id) return false
+    return true
+  })
+
+  const sortedFilaments = [...filteredFilaments].sort((a, b) => {
+    let cmp = 0
+    if (sortBy === 'color_name') cmp = a.color_name.localeCompare(b.color_name)
+    else if (sortBy === 'brand') cmp = (a.brand || '').localeCompare(b.brand || '')
+    else if (sortBy === 'material') cmp = a.material.localeCompare(b.material)
+    else if (sortBy === 'spoolman_id') cmp = (a.spoolman_id ?? 0) - (b.spoolman_id ?? 0)
+    return sortDir === 'asc' ? cmp : -cmp
+  })
+
+  const grouped = sortedFilaments.reduce<Record<string, FilamentSpec[]>>((acc, f) => {
     ;(acc[f.material] ??= []).push(f); return acc
   }, {})
 
-  const spoolmanFilaments = spoolmanData?.filaments ?? []
+  const spoolmanFilaments = (spoolmanData?.filaments ?? []).filter(
+    (sf, i, arr) => arr.findIndex(x =>
+      x.id === sf.id ||
+      (sf.external_id && x.external_id === sf.external_id)
+    ) === i
+  )
   const notImported = spoolmanFilaments.filter(sf => !isImported(sf))
 
   return (
@@ -305,11 +362,20 @@ export default function Filaments() {
               {notImported.map(sf => (
                 <div key={sf.id} className="flex items-center justify-between px-4 py-3">
                   <div className="flex items-center gap-3">
-                    <div className="w-4 h-4 rounded-full border border-gray-300 shrink-0"
-                      style={{ backgroundColor: normalizeHex(sf.color_hex) }} />
+                    {sf.multi_color_hexes ? (
+                      <div
+                        className="w-4 h-4 rounded-full border border-gray-300 shrink-0"
+                        style={{ background: `linear-gradient(to right, ${sf.multi_color_hexes.split(',').map(h => `#${h.trim()}`).join(', ')})` }}
+                        title={sf.multi_color_hexes}
+                      />
+                    ) : (
+                      <div className="w-4 h-4 rounded-full border border-gray-300 shrink-0"
+                        style={{ backgroundColor: normalizeHex(sf.color_hex) }} />
+                    )}
                     <span className="text-sm font-medium">{sf.name}</span>
                     <span className="text-xs text-gray-500">{sf.material}</span>
                     {sf.vendor?.name && <span className="text-xs text-gray-400">{sf.vendor.name}</span>}
+                    <span className="text-xs text-gray-300 dark:text-gray-600 font-mono">#{sf.id}</span>
                     {sf.weight && <span className="text-xs text-gray-400">{sf.weight}g</span>}
                     {sf.settings_extruder_temp && (
                       <span className="text-xs text-gray-400">{sf.settings_extruder_temp}°C / {sf.settings_bed_temp}°C</span>
@@ -335,7 +401,89 @@ export default function Filaments() {
       {/* Local catalog */}
       <div className="space-y-4">
         {filaments.length > 0 && (
-          <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Local Catalog</h2>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                Local Catalog
+                {filteredFilaments.length !== filaments.length && (
+                  <span className="font-normal normal-case text-gray-400 ml-1">— {filteredFilaments.length} of {filaments.length}</span>
+                )}
+              </h2>
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <span className="text-xs text-gray-400">Spoolman IDs</span>
+                <span
+                  onClick={toggleSpoolmanIds}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${showSpoolmanIds ? 'bg-brand-600' : 'bg-gray-300 dark:bg-gray-600'}`}
+                >
+                  <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${showSpoolmanIds ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                </span>
+              </label>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                className="border rounded-lg px-2 py-1 text-xs dark:bg-gray-800 dark:border-gray-600 text-gray-600 dark:text-gray-300"
+                value={filterMaterial}
+                onChange={e => setFilterMaterial(e.target.value)}
+              >
+                <option value="">All materials</option>
+                {allMaterials.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+
+              <select
+                className="border rounded-lg px-2 py-1 text-xs dark:bg-gray-800 dark:border-gray-600 text-gray-600 dark:text-gray-300"
+                value={filterBrand}
+                onChange={e => setFilterBrand(e.target.value)}
+              >
+                <option value="">All brands</option>
+                {allBrands.map(b => <option key={b} value={b}>{b}</option>)}
+              </select>
+
+              <input
+                type="text"
+                placeholder="Color…"
+                className="border rounded-lg px-2 py-1 text-xs w-28 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300"
+                value={filterColor}
+                onChange={e => setFilterColor(e.target.value)}
+              />
+
+              <select
+                className="border rounded-lg px-2 py-1 text-xs dark:bg-gray-800 dark:border-gray-600 text-gray-600 dark:text-gray-300"
+                value={filterSpoolman}
+                onChange={e => setFilterSpoolman(e.target.value as '' | 'linked' | 'unlinked')}
+              >
+                <option value="">All Spoolman</option>
+                <option value="linked">Linked only</option>
+                <option value="unlinked">Unlinked only</option>
+              </select>
+
+              <div className="flex items-center gap-1 ml-auto">
+                <span className="text-xs text-gray-400">Sort:</span>
+                <select
+                  className="border rounded-lg px-2 py-1 text-xs dark:bg-gray-800 dark:border-gray-600 text-gray-600 dark:text-gray-300"
+                  value={sortBy}
+                  onChange={e => setSortBy(e.target.value as typeof sortBy)}
+                >
+                  <option value="color_name">Color</option>
+                  <option value="brand">Brand</option>
+                  <option value="material">Material</option>
+                  <option value="spoolman_id">Spoolman ID</option>
+                </select>
+                <button
+                  onClick={() => setSortDir(d => d === 'asc' ? 'desc' : 'asc')}
+                  className="border rounded-lg px-2 py-1 text-xs dark:bg-gray-800 dark:border-gray-600 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+                  title="Toggle sort direction"
+                >
+                  {sortDir === 'asc' ? '↑' : '↓'}
+                </button>
+                {hasActiveFilters && (
+                  <button onClick={clearFilters} className="text-xs text-gray-400 hover:text-red-500 px-1">
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
         )}
         {filaments.length === 0 && !spoolmanData?.connected && (
           <p className="text-sm text-gray-400 italic">No filaments yet. Add them manually or connect Spoolman to import.</p>
@@ -357,10 +505,21 @@ export default function Filaments() {
                         {isOpen
                           ? <ChevronDown size={14} className="text-gray-400 shrink-0" />
                           : <ChevronRight size={14} className="text-gray-400 shrink-0" />}
-                        <div className="w-5 h-5 rounded-full border border-gray-300 shrink-0"
-                          style={{ backgroundColor: f.color_hex }} />
+                        {f.spoolman_id && spoolmanMultiColorMap.has(f.spoolman_id) ? (
+                          <div
+                            className="w-5 h-5 rounded-full border border-gray-300 shrink-0"
+                            style={{ background: `linear-gradient(to right, ${spoolmanMultiColorMap.get(f.spoolman_id)!.split(',').map(h => `#${h.trim()}`).join(', ')})` }}
+                            title={spoolmanMultiColorMap.get(f.spoolman_id)!}
+                          />
+                        ) : (
+                          <div className="w-5 h-5 rounded-full border border-gray-300 shrink-0"
+                            style={{ backgroundColor: f.color_hex }} />
+                        )}
                         <span className="font-medium text-sm">{f.color_name}</span>
                         {f.brand && <span className="text-xs text-gray-400">{f.brand}</span>}
+                        {showSpoolmanIds && f.spoolman_id && (
+                          <span className="text-xs text-gray-300 dark:text-gray-600 font-mono">#{f.spoolman_id}</span>
+                        )}
                         {f.weight && <span className="text-xs text-gray-400">{f.weight}g</span>}
                         {f.settings_extruder_temp && (
                           <span className="text-xs text-gray-400">{f.settings_extruder_temp}°C / {f.settings_bed_temp}°C</span>

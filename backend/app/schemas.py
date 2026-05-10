@@ -127,6 +127,39 @@ class PrintModelOut(PrintModelBase):
     model_config = {"from_attributes": True}
 
 
+class CustomerBase(BaseModel):
+    given_name: str = ""
+    family_name: str = ""
+    company_name: str = ""
+    email: str = ""
+    phone: str = ""
+    address_line1: str = ""
+    address_line2: str = ""
+    city: str = ""
+    state: str = ""
+    postal_code: str = ""
+    country: str = ""
+    notes: str = ""
+    category: str = ""
+
+
+class CustomerCreate(CustomerBase):
+    pass
+
+
+class CustomerUpdate(CustomerBase):
+    pass
+
+
+class CustomerOut(CustomerBase):
+    id: int
+    square_id: Optional[str] = None
+    display_name: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class OrderBase(BaseModel):
     print_model_id: int
     quantity: int = 1
@@ -135,12 +168,19 @@ class OrderBase(BaseModel):
     date_needed: Optional[datetime] = None
 
 
-class OrderCreate(OrderBase):
-    pass
+class OrderCreate(BaseModel):
+    print_model_id: Optional[int] = None
+    model_name: Optional[str] = None
+    customer_id: Optional[int] = None
+    quantity: int = 1
+    customer_name: str = ""
+    customer_notes: str = ""
+    date_needed: Optional[datetime] = None
 
 
 class OrderUpdate(BaseModel):
     quantity: Optional[int] = None
+    customer_id: Optional[int] = None
     customer_name: Optional[str] = None
     customer_notes: Optional[str] = None
     date_needed: Optional[datetime] = None
@@ -149,9 +189,11 @@ class OrderUpdate(BaseModel):
 
 class OrderOut(OrderBase):
     id: int
+    customer_id: Optional[int] = None
     date_ordered: datetime
     status: OrderStatus
     print_model: PrintModelOut
+    customer: Optional[CustomerOut] = None
 
     model_config = {"from_attributes": True}
 

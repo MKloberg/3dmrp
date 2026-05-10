@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import ReactCrop, { Crop, PixelCrop } from 'react-image-crop'
 import 'react-image-crop/dist/ReactCrop.css'
@@ -119,6 +119,8 @@ function ModelDetail({ model, filaments, printers, allTags }: { model: PrintMode
   const qc = useQueryClient()
   const imageInputRef = useRef<HTMLInputElement>(null)
   const [uploadingImage, setUploadingImage] = useState(false)
+  const [pasteError, setPasteError] = useState<string | null>(null)
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
   const [cropTarget, setCropTarget] = useState<{ imageId: number; url: string } | null>(null)
   const [editingReq, setEditingReq] = useState<{ reqId: number; specId: string; grams: string } | null>(null)
   const [reqForm, setReqForm] = useState<{ specId: string; grams: string } | null>(null)
@@ -188,6 +190,67 @@ function ModelDetail({ model, filaments, printers, allTags }: { model: PrintMode
       e.target.value = ''
     }
   }
+
+  useEffect(() => {
+    async function handlePaste(e: ClipboardEvent) {
+      const target = e.target as HTMLElement
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
+
+      setPasteError(null)
+      let file: File | null = null
+
+      const items = Array.from(e.clipboardData?.items ?? [])
+      const files = Array.from(e.clipboardData?.files ?? [])
+
+      // Raw image data — screenshots, browser "Copy image"
+      const imageItem = items.find(i => i.type.startsWith('image/'))
+      if (imageItem) file = imageItem.getAsFile()
+
+      // File reference — copying an image file from Explorer or another app
+      if (!file) {
+        file = files.find(f =>
+          f.type.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|tiff?)$/i.test(f.name)
+        ) ?? null
+      }
+
+      // Any file item at all (some apps omit MIME type)
+      if (!file) {
+        const anyFile = items.find(i => i.kind === 'file')
+        if (anyFile) file = anyFile.getAsFile()
+      }
+
+      if (!file) return
+      e.preventDefault()
+
+      if (file.size === 0) {
+        setPasteError('Clipboard image has no data. Try saving it to a file first, then uploading.')
+        return
+      }
+
+      setUploadingImage(true)
+      try {
+        await uploadModelImage(model.id, file)
+        qc.invalidateQueries({ queryKey: ['models'] })
+      } catch (err) {
+        setPasteError(err instanceof Error ? err.message : 'Upload failed')
+      } finally {
+        setUploadingImage(false)
+      }
+    }
+    document.addEventListener('paste', handlePaste)
+    return () => document.removeEventListener('paste', handlePaste)
+  }, [model.id, qc])
+
+  useEffect(() => {
+    if (lightboxIndex === null) return
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setLightboxIndex(null)
+      if (e.key === 'ArrowRight') setLightboxIndex(i => i !== null ? Math.min(i + 1, model.images.length - 1) : null)
+      if (e.key === 'ArrowLeft') setLightboxIndex(i => i !== null ? Math.max(i - 1, 0) : null)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [lightboxIndex, model.images.length])
 
   const deleteImageMutation = useMutation({
     mutationFn: (imageId: number) => deleteModelImage(model.id, imageId),
@@ -326,14 +389,20 @@ function ModelDetail({ model, filaments, printers, allTags }: { model: PrintMode
 
       {/* Images */}
       <div>
-        <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2">Images</p>
+        <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2">
+          Images <span className="normal-case font-normal text-gray-300 dark:text-gray-600 ml-1">— or paste from clipboard</span>
+        </p>
+        {pasteError && (
+          <p className="text-xs text-red-500 mb-2">{pasteError}</p>
+        )}
         <div className="flex flex-wrap gap-2 items-end">
-          {model.images.map(img => (
+          {model.images.map((img, idx) => (
             <div key={img.id} className="relative group">
               <img
                 src={`/api/models/${model.id}/images/${img.id}?v=${new Date(img.created_at).getTime()}`}
                 alt=""
-                className="w-24 h-24 object-cover rounded-lg border border-gray-200 dark:border-gray-600"
+                onClick={() => setLightboxIndex(idx)}
+                className="w-24 h-24 object-cover rounded-lg border border-gray-200 dark:border-gray-600 cursor-zoom-in"
               />
               <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 <a
@@ -385,6 +454,81 @@ function ModelDetail({ model, filaments, printers, allTags }: { model: PrintMode
           onDone={() => setCropTarget(null)}
         />
       )}
+
+      {lightboxIndex !== null && model.images[lightboxIndex] && (() => {
+        const img = model.images[lightboxIndex]
+        const url = `/api/models/${model.id}/images/${img.id}?v=${new Date(img.created_at).getTime()}`
+        return (
+          <div
+            className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center"
+            onClick={() => setLightboxIndex(null)}
+          >
+            <img
+              src={url}
+              alt=""
+              onClick={e => e.stopPropagation()}
+              className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
+            />
+
+            {/* Close */}
+            <button
+              onClick={() => setLightboxIndex(null)}
+              className="absolute top-4 right-4 text-white/70 hover:text-white bg-black/40 rounded-full p-1.5"
+            >
+              <X size={20} />
+            </button>
+
+            {/* Prev */}
+            {lightboxIndex > 0 && (
+              <button
+                onClick={e => { e.stopPropagation(); setLightboxIndex(lightboxIndex - 1) }}
+                className="absolute left-4 top-1/2 -translate-y-1/2 text-white/70 hover:text-white bg-black/40 rounded-full p-2"
+              >
+                <ChevronRight size={24} className="rotate-180" />
+              </button>
+            )}
+
+            {/* Next */}
+            {lightboxIndex < model.images.length - 1 && (
+              <button
+                onClick={e => { e.stopPropagation(); setLightboxIndex(lightboxIndex + 1) }}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-white/70 hover:text-white bg-black/40 rounded-full p-2"
+              >
+                <ChevronRight size={24} />
+              </button>
+            )}
+
+            {/* Action bar */}
+            <div
+              className="absolute bottom-4 flex items-center gap-3"
+              onClick={e => e.stopPropagation()}
+            >
+              <a
+                href={`/api/models/${model.id}/images/${img.id}`}
+                download={model.name}
+                className="flex items-center gap-1.5 text-sm text-white/80 hover:text-white bg-black/50 px-3 py-1.5 rounded-full"
+              >
+                <Download size={14} /> Download
+              </a>
+              <button
+                onClick={() => { setCropTarget({ imageId: img.id, url }); setLightboxIndex(null) }}
+                className="flex items-center gap-1.5 text-sm text-white/80 hover:text-white bg-black/50 px-3 py-1.5 rounded-full"
+              >
+                <CropIcon size={14} /> Crop
+              </button>
+              <button
+                onClick={() => { deleteImageMutation.mutate(img.id); setLightboxIndex(null) }}
+                className="flex items-center gap-1.5 text-sm text-white/80 hover:text-red-400 bg-black/50 px-3 py-1.5 rounded-full"
+              >
+                <X size={14} /> Delete
+              </button>
+              {model.images.length > 1 && (
+                <span className="text-xs text-white/40">{lightboxIndex + 1} / {model.images.length}</span>
+              )}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Filaments */}
       <div>

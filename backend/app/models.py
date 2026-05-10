@@ -156,11 +156,41 @@ class PrinterSlot(Base):
     __table_args__ = (UniqueConstraint("printer_id", "slot_number", name="uq_printer_slot"),)
 
 
+class Customer(Base):
+    __tablename__ = "customers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    given_name = Column(String, default="")
+    family_name = Column(String, default="")
+    company_name = Column(String, default="")
+    email = Column(String, default="")
+    phone = Column(String, default="")
+    address_line1 = Column(String, default="")
+    address_line2 = Column(String, default="")
+    city = Column(String, default="")
+    state = Column(String, default="")
+    postal_code = Column(String, default="")
+    country = Column(String, default="")
+    notes = Column(Text, default="")
+    category = Column(String, default="")
+    square_id = Column(String, nullable=True, unique=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    orders = relationship("Order", back_populates="customer")
+
+    @property
+    def display_name(self) -> str:
+        parts = [self.given_name, self.family_name]
+        full = " ".join(p for p in parts if p).strip()
+        return full or self.company_name or "—"
+
+
 class Order(Base):
     __tablename__ = "orders"
 
     id = Column(Integer, primary_key=True, index=True)
     print_model_id = Column(Integer, ForeignKey("print_models.id"), nullable=False)
+    customer_id = Column(Integer, ForeignKey("customers.id", ondelete="SET NULL"), nullable=True)
     quantity = Column(Integer, nullable=False, default=1)
     customer_name = Column(String, default="")
     customer_notes = Column(String, default="")
@@ -169,3 +199,4 @@ class Order(Base):
     status = Column(Enum(OrderStatus), default=OrderStatus.pending)
 
     print_model = relationship("PrintModel", back_populates="orders")
+    customer = relationship("Customer", back_populates="orders")

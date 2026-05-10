@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getPrinters, createPrinter, deletePrinter, getPrinterHistory, getPrinterStatus, getPrinterWebcams,
@@ -835,10 +836,20 @@ function PrinterHistory({ printer, filaments }: { printer: Printer; filaments: F
 
 export default function Printers() {
   const qc = useQueryClient()
+  const location = useLocation()
   const { data: printers = [] } = useQuery({ queryKey: ['printers'], queryFn: getPrinters })
   const { data: filaments = [] } = useQuery({ queryKey: ['filaments'], queryFn: getFilaments })
 
-  const [expanded, setExpanded] = useState<number | null>(null)
+  const openPrinterId = (location.state as { openPrinterId?: number } | null)?.openPrinterId ?? null
+  const [expanded, setExpanded] = useState<number | null>(openPrinterId)
+
+  useEffect(() => {
+    if (openPrinterId) {
+      setTimeout(() => {
+        document.getElementById(`printer-${openPrinterId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 100)
+    }
+  }, [openPrinterId])
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ name: '', url: '' })
 
@@ -870,7 +881,7 @@ export default function Printers() {
         {printers.map(printer => {
           const isOpen = expanded === printer.id
           return (
-            <div key={printer.id} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+            <div key={printer.id} id={`printer-${printer.id}`} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
               <div
                 className="flex items-center justify-between px-4 py-3 cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-700/30"
                 onClick={() => setExpanded(isOpen ? null : printer.id)}

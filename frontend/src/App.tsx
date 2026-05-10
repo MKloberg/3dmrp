@@ -3,6 +3,7 @@ import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
 import Models from './pages/Models'
 import Orders from './pages/Orders'
+import Customers from './pages/Customers'
 import Forecast from './pages/Forecast'
 import Filaments from './pages/Filaments'
 import Printers from './pages/Printers'
@@ -15,6 +16,7 @@ export default function App() {
         <Route index element={<Dashboard />} />
         <Route path="models" element={<Models />} />
         <Route path="orders" element={<Orders />} />
+        <Route path="customers" element={<Customers />} />
         <Route path="forecast" element={<Forecast />} />
         <Route path="filaments" element={<Filaments />} />
         <Route path="printers" element={<Printers />} />

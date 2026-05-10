@@ -76,6 +76,7 @@ export interface PrintModel {
 export interface Order {
   id: number
   print_model_id: number
+  customer_id: number | null
   quantity: number
   customer_name: string
   customer_notes: string
@@ -83,6 +84,7 @@ export interface Order {
   date_needed: string | null
   status: 'pending' | 'printing' | 'complete' | 'cancelled'
   print_model: PrintModel
+  customer: Customer | null
 }
 
 export interface ForecastItem {
@@ -159,7 +161,9 @@ export const openInSlicer = (modelId: number, printerId: number) =>
 export const getOrders = (status?: string) =>
   req<Order[]>(`/orders${status ? `?status=${status}` : ''}`)
 export const createOrder = (data: {
-  print_model_id: number
+  print_model_id?: number
+  model_name?: string
+  customer_id?: number | null
   quantity: number
   customer_name?: string
   customer_notes?: string
@@ -182,6 +186,62 @@ export const addTagToModel = (tagId: number, modelId: number) =>
   req<void>(`/tags/${tagId}/models/${modelId}`, { method: 'POST' })
 export const removeTagFromModel = (tagId: number, modelId: number) =>
   req<void>(`/tags/${tagId}/models/${modelId}`, { method: 'DELETE' })
+
+// --- Customers ---
+export interface Customer {
+  id: number
+  given_name: string
+  family_name: string
+  company_name: string
+  email: string
+  phone: string
+  address_line1: string
+  address_line2: string
+  city: string
+  state: string
+  postal_code: string
+  country: string
+  notes: string
+  category: string
+  square_id: string | null
+  display_name: string
+  created_at: string
+}
+
+export type CustomerInput = Omit<Customer, 'id' | 'square_id' | 'display_name' | 'created_at'>
+
+export interface SquarePreviewCustomer {
+  given_name: string
+  family_name: string
+  company_name: string
+  email: string
+  phone: string
+  address_line1: string
+  address_line2: string
+  city: string
+  state: string
+  postal_code: string
+  country: string
+  notes: string
+  square_id: string
+  already_imported: boolean
+}
+
+export const getCustomers = () => req<Customer[]>('/customers')
+export const createCustomer = (data: CustomerInput) =>
+  req<Customer>('/customers', { method: 'POST', body: JSON.stringify(data) })
+export const updateCustomer = (id: number, data: CustomerInput) =>
+  req<Customer>(`/customers/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
+export const deleteCustomer = (id: number) =>
+  req<void>(`/customers/${id}`, { method: 'DELETE' })
+export const getCustomerOrders = (id: number) =>
+  req<Order[]>(`/customers/${id}/orders`)
+export const squarePreview = () =>
+  req<SquarePreviewCustomer[]>('/customers/square/preview')
+export const squareImport = (square_ids: string[]) =>
+  req<{ imported: number }>('/customers/square/import', { method: 'POST', body: JSON.stringify({ square_ids }) })
+export const squareSync = () =>
+  req<{ synced: number }>('/customers/square/sync', { method: 'POST' })
 
 // --- Forecast ---
 export const getForecast = (forecastWeeks = 4, lookbackWeeks = 4) =>
@@ -208,6 +268,8 @@ export interface SpoolmanFilament {
   settings_extruder_temp: number | null
   settings_bed_temp: number | null
   color_hex: string
+  multi_color_hexes: string | null
+  multi_color_direction: string | null
   external_id: string | null
   article_number: string | null
   comment: string | null

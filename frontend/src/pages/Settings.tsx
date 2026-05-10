@@ -39,10 +39,12 @@ export default function Settings() {
   const [testing, setTesting] = useState(false)
   const [saved, setSaved] = useState(false)
 
+  const [squareToken, setSquareToken] = useState('')
+  const [squareSaved, setSquareSaved] = useState(false)
+
   useEffect(() => {
-    if (settings?.spoolman_url !== undefined) {
-      setSpoolmanUrl(settings.spoolman_url)
-    }
+    if (settings?.spoolman_url !== undefined) setSpoolmanUrl(settings.spoolman_url)
+    if (settings?.square_api_token !== undefined) setSquareToken(settings.square_api_token)
   }, [settings])
 
   const saveMutation = useMutation({
@@ -51,6 +53,15 @@ export default function Settings() {
       qc.invalidateQueries({ queryKey: ['settings'] })
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
+    },
+  })
+
+  const saveSquareMutation = useMutation({
+    mutationFn: () => setSetting('square_api_token', squareToken.trim()),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['settings'] })
+      setSquareSaved(true)
+      setTimeout(() => setSquareSaved(false), 2000)
     },
   })
 
@@ -166,6 +177,41 @@ export default function Settings() {
           )}
         </div>
       </section>
+      {/* Square */}
+      <section className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4">
+        <div>
+          <h2 className="font-semibold text-gray-800 dark:text-gray-100">Square Integration</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+            Connect your Square account to import and sync customers.
+          </p>
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Personal Access Token</label>
+          <input
+            type="password"
+            className="w-full border rounded-lg px-3 py-2 text-sm font-mono"
+            placeholder="EAAAl…"
+            value={squareToken}
+            onChange={e => setSquareToken(e.target.value)}
+          />
+          <p className="text-xs text-gray-400 mt-1">
+            Found in your Square Developer dashboard under Credentials.
+          </p>
+        </div>
+        <div className="flex items-center gap-3 pt-1">
+          <button
+            onClick={() => saveSquareMutation.mutate()}
+            disabled={saveSquareMutation.isPending}
+            className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 text-sm rounded-lg disabled:opacity-50"
+          >
+            {squareSaved ? 'Saved!' : saveSquareMutation.isPending ? 'Saving…' : 'Save'}
+          </button>
+          {squareToken && (
+            <button onClick={() => setSquareToken('')} className="text-sm text-gray-400 hover:text-red-500">Clear</button>
+          )}
+        </div>
+      </section>
+
       {/* Database */}
       <section className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4">
         <div>

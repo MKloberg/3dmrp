@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getOrders, createOrder, updateOrder, deleteOrder, getModels, Order } from '../api/client'
+import { getOrders, createOrder, updateOrder, deleteOrder, getModels, getCustomers, Order } from '../api/client'
 import Modal from '../components/Modal'
 import StatusBadge from '../components/StatusBadge'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, Pencil, User } from 'lucide-react'
 
 const STATUSES = ['pending', 'printing', 'complete', 'cancelled'] as const
 type Status = typeof STATUSES[number]
@@ -16,30 +16,55 @@ export default function Orders() {
     queryFn: () => getOrders(filterStatus || undefined),
   })
   const { data: models = [] } = useQuery({ queryKey: ['models'], queryFn: getModels })
+  const { data: customers = [] } = useQuery({ queryKey: ['customers'], queryFn: getCustomers })
 
   const [showForm, setShowForm] = useState(false)
+  const [editing, setEditing] = useState<Order | null>(null)
+  const [modelMode, setModelMode] = useState<'existing' | 'new'>('existing')
+
   const [form, setForm] = useState({
-    print_model_id: '',
-    quantity: '1',
-    customer_name: '',
-    customer_notes: '',
-    date_needed: '',
+    print_model_id: '', model_name: '',
+    customer_id: '', customer_name: '', customer_notes: '', date_needed: '', quantity: '1',
+  })
+  const [editForm, setEditForm] = useState({
+    quantity: '1', customer_id: '', customer_name: '', customer_notes: '',
+    date_needed: '', status: 'pending' as Status,
   })
 
   const createMutation = useMutation({
-    mutationFn: () =>
-      createOrder({
-        print_model_id: Number(form.print_model_id),
-        quantity: Number(form.quantity),
-        customer_name: form.customer_name,
-        customer_notes: form.customer_notes,
-        date_needed: form.date_needed || null,
-      }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['orders'] }); setShowForm(false); resetForm() },
+    mutationFn: () => createOrder({
+      ...(modelMode === 'existing'
+        ? { print_model_id: Number(form.print_model_id) }
+        : { model_name: form.model_name }),
+      customer_id: form.customer_id ? Number(form.customer_id) : null,
+      customer_name: form.customer_id ? '' : form.customer_name,
+      customer_notes: form.customer_notes,
+      quantity: Number(form.quantity),
+      date_needed: form.date_needed || null,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orders'] })
+      qc.invalidateQueries({ queryKey: ['models'] })
+      setShowForm(false)
+      resetForm()
+    },
+  })
+
+  const updateMutation = useMutation({
+    mutationFn: () => updateOrder(editing!.id, {
+      quantity: Number(editForm.quantity),
+      customer_id: editForm.customer_id ? Number(editForm.customer_id) : null,
+      customer_name: editForm.customer_id ? '' : editForm.customer_name,
+      customer_notes: editForm.customer_notes,
+      date_needed: editForm.date_needed || null,
+      status: editForm.status,
+    }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['orders'] }); setEditing(null) },
   })
 
   const statusMutation = useMutation({
-    mutationFn: ({ id, status }: { id: number; status: string }) => updateOrder(id, { status } as Partial<Order>),
+    mutationFn: ({ id, status }: { id: number; status: string }) =>
+      updateOrder(id, { status } as Partial<Order>),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['orders'] }),
   })
 
@@ -49,7 +74,26 @@ export default function Orders() {
   })
 
   function resetForm() {
-    setForm({ print_model_id: '', quantity: '1', customer_name: '', customer_notes: '', date_needed: '' })
+    setForm({ print_model_id: '', model_name: '', customer_id: '', customer_name: '', customer_notes: '', date_needed: '', quantity: '1' })
+    setModelMode('existing')
+  }
+
+  function openEdit(order: Order) {
+    setEditing(order)
+    setEditForm({
+      quantity: String(order.quantity),
+      customer_id: order.customer_id ? String(order.customer_id) : '',
+      customer_name: order.customer_name,
+      customer_notes: order.customer_notes,
+      date_needed: order.date_needed ? order.date_needed.split('T')[0] : '',
+      status: order.status,
+    })
+  }
+
+  function orderCustomerLabel(order: Order) {
+    if (order.customer) return order.customer.display_name
+    if (order.customer_name) return order.customer_name
+    return null
   }
 
   return (
@@ -58,7 +102,7 @@ export default function Orders() {
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Orders</h1>
         <div className="flex items-center gap-3">
           <select
-            className="border rounded-lg px-3 py-1.5 text-sm"
+            className="border rounded-lg px-3 py-1.5 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300"
             value={filterStatus}
             onChange={e => setFilterStatus(e.target.value)}
           >
@@ -78,8 +122,8 @@ export default function Orders() {
         <p className="text-sm text-gray-400 italic">No orders found.</p>
       )}
 
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-        {orders.length > 0 && (
+      {orders.length > 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 dark:bg-gray-700/50 border-b dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
               <tr>
@@ -93,98 +137,258 @@ export default function Orders() {
               </tr>
             </thead>
             <tbody className="divide-y dark:divide-gray-700">
-              {orders.map(order => (
-                <tr key={order.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
-                  <td className="px-4 py-3 font-medium">{order.print_model.name}</td>
-                  <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{order.customer_name || <span className="text-gray-300 dark:text-gray-600">—</span>}</td>
-                  <td className="px-4 py-3 text-center">{order.quantity}</td>
-                  <td className="px-4 py-3 text-gray-500 dark:text-gray-400">{new Date(order.date_ordered).toLocaleDateString()}</td>
-                  <td className="px-4 py-3 text-gray-500 dark:text-gray-400">
-                    {order.date_needed ? new Date(order.date_needed).toLocaleDateString() : <span className="text-gray-300 dark:text-gray-600">—</span>}
-                  </td>
-                  <td className="px-4 py-3">
-                    <select
-                      className="text-xs border rounded px-1.5 py-0.5"
-                      value={order.status}
-                      onChange={e => statusMutation.mutate({ id: order.id, status: e.target.value })}
-                    >
-                      {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => { if (confirm('Delete order?')) deleteMutation.mutate(order.id) }}
-                      className="text-red-400 hover:text-red-600"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {orders.map(order => {
+                const firstImage = order.print_model.images[0]
+                const customerLabel = orderCustomerLabel(order)
+                return (
+                  <tr key={order.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        {firstImage ? (
+                          <img
+                            src={`/api/models/${order.print_model.id}/images/${firstImage.id}?v=${new Date(firstImage.created_at).getTime()}`}
+                            alt=""
+                            className="w-8 h-8 rounded object-cover border border-gray-200 dark:border-gray-600 shrink-0"
+                          />
+                        ) : (
+                          <div className="w-8 h-8 rounded bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 shrink-0" />
+                        )}
+                        <span className="font-medium">{order.print_model.name}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-gray-600 dark:text-gray-300">
+                      {customerLabel ? (
+                        <div className="flex items-center gap-1.5">
+                          {order.customer && <User size={12} className="text-brand-500 shrink-0" />}
+                          <div>
+                            <span>{customerLabel}</span>
+                            {order.customer_notes && (
+                              <p className="text-xs text-gray-400 truncate max-w-40" title={order.customer_notes}>
+                                {order.customer_notes}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-gray-300 dark:text-gray-600">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-center">{order.quantity}</td>
+                    <td className="px-4 py-3 text-gray-500 dark:text-gray-400">
+                      {new Date(order.date_ordered).toLocaleDateString()}
+                    </td>
+                    <td className="px-4 py-3 text-gray-500 dark:text-gray-400">
+                      {order.date_needed
+                        ? new Date(order.date_needed).toLocaleDateString()
+                        : <span className="text-gray-300 dark:text-gray-600">—</span>}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="relative inline-block">
+                        <StatusBadge status={order.status} />
+                        <select
+                          className="absolute inset-0 opacity-0 cursor-pointer w-full"
+                          value={order.status}
+                          onChange={e => statusMutation.mutate({ id: order.id, status: e.target.value })}
+                        >
+                          {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2 justify-end">
+                        <button onClick={() => openEdit(order)} className="text-gray-400 hover:text-brand-600">
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          onClick={() => { if (confirm('Delete order?')) deleteMutation.mutate(order.id) }}
+                          className="text-gray-400 hover:text-red-500"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
-        )}
-      </div>
+        </div>
+      )}
 
       {showForm && (
         <Modal title="New Order" onClose={() => { setShowForm(false); resetForm() }}>
           <div className="space-y-3">
+            {/* Model */}
             <div>
-              <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Model *</label>
-              <select
-                className="w-full border rounded-lg px-3 py-2 text-sm"
-                value={form.print_model_id}
-                onChange={e => setForm(f => ({ ...f, print_model_id: e.target.value }))}
-              >
-                <option value="">— select model —</option>
-                {models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-              </select>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs text-gray-500 dark:text-gray-400">Model *</label>
+                <div className="flex text-xs rounded-md overflow-hidden border border-gray-200 dark:border-gray-600">
+                  <button type="button" onClick={() => setModelMode('existing')}
+                    className={`px-2 py-0.5 ${modelMode === 'existing' ? 'bg-brand-600 text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
+                    Existing
+                  </button>
+                  <button type="button" onClick={() => setModelMode('new')}
+                    className={`px-2 py-0.5 ${modelMode === 'new' ? 'bg-brand-600 text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
+                    New
+                  </button>
+                </div>
+              </div>
+              {modelMode === 'existing' ? (
+                <select
+                  className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:border-gray-600"
+                  value={form.print_model_id}
+                  onChange={e => setForm(f => ({ ...f, print_model_id: e.target.value }))}
+                >
+                  <option value="">— select model —</option>
+                  {models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </select>
+              ) : (
+                <input
+                  className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:border-gray-600"
+                  placeholder="Model name…"
+                  value={form.model_name}
+                  onChange={e => setForm(f => ({ ...f, model_name: e.target.value }))}
+                />
+              )}
             </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Quantity *</label>
-                <input
-                  type="number" min="1"
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                <input type="number" min="1"
+                  className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:border-gray-600"
                   value={form.quantity}
                   onChange={e => setForm(f => ({ ...f, quantity: e.target.value }))}
                 />
               </div>
               <div>
                 <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Needed by</label>
-                <input
-                  type="date"
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
+                <input type="date"
+                  className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:border-gray-600"
                   value={form.date_needed}
                   onChange={e => setForm(f => ({ ...f, date_needed: e.target.value }))}
                 />
               </div>
             </div>
+
+            {/* Customer */}
             <div>
-              <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Customer name</label>
-              <input
-                className="w-full border rounded-lg px-3 py-2 text-sm"
-                value={form.customer_name}
-                onChange={e => setForm(f => ({ ...f, customer_name: e.target.value }))}
-              />
+              <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Customer</label>
+              <select
+                className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:border-gray-600"
+                value={form.customer_id}
+                onChange={e => setForm(f => ({ ...f, customer_id: e.target.value, customer_name: '' }))}
+              >
+                <option value="">— walk-in / no account —</option>
+                {customers.map(c => (
+                  <option key={c.id} value={c.id}>{c.display_name}{c.company_name && c.given_name ? ` (${c.company_name})` : ''}</option>
+                ))}
+              </select>
+              {!form.customer_id && (
+                <input
+                  className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:border-gray-600 mt-2"
+                  placeholder="Walk-in name (optional)"
+                  value={form.customer_name}
+                  onChange={e => setForm(f => ({ ...f, customer_name: e.target.value }))}
+                />
+              )}
             </div>
+
             <div>
-              <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Notes</label>
-              <textarea
-                className="w-full border rounded-lg px-3 py-2 text-sm"
-                rows={2}
+              <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Order notes</label>
+              <textarea rows={2} className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:border-gray-600"
                 value={form.customer_notes}
                 onChange={e => setForm(f => ({ ...f, customer_notes: e.target.value }))}
               />
             </div>
+
             <div className="flex justify-end gap-2 pt-2">
-              <button onClick={() => { setShowForm(false); resetForm() }} className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Cancel</button>
+              <button onClick={() => { setShowForm(false); resetForm() }}
+                className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Cancel</button>
               <button
-                disabled={!form.print_model_id || !form.quantity || createMutation.isPending}
+                disabled={
+                  (modelMode === 'existing' ? !form.print_model_id : !form.model_name.trim()) ||
+                  !form.quantity || createMutation.isPending
+                }
                 onClick={() => createMutation.mutate()}
                 className="bg-brand-600 text-white px-4 py-2 text-sm rounded-lg disabled:opacity-50"
               >
                 {createMutation.isPending ? 'Saving…' : 'Create Order'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {editing && (
+        <Modal title="Edit Order" onClose={() => setEditing(null)}>
+          <div className="space-y-3">
+            <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{editing.print_model.name}</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Quantity</label>
+                <input type="number" min="1"
+                  className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:border-gray-600"
+                  value={editForm.quantity}
+                  onChange={e => setEditForm(f => ({ ...f, quantity: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Needed by</label>
+                <input type="date"
+                  className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:border-gray-600"
+                  value={editForm.date_needed}
+                  onChange={e => setEditForm(f => ({ ...f, date_needed: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Status</label>
+              <select
+                className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:border-gray-600"
+                value={editForm.status}
+                onChange={e => setEditForm(f => ({ ...f, status: e.target.value as Status }))}
+              >
+                {STATUSES.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Customer</label>
+              <select
+                className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:border-gray-600"
+                value={editForm.customer_id}
+                onChange={e => setEditForm(f => ({ ...f, customer_id: e.target.value, customer_name: '' }))}
+              >
+                <option value="">— walk-in / no account —</option>
+                {customers.map(c => (
+                  <option key={c.id} value={c.id}>{c.display_name}{c.company_name && c.given_name ? ` (${c.company_name})` : ''}</option>
+                ))}
+              </select>
+              {!editForm.customer_id && (
+                <input
+                  className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:border-gray-600 mt-2"
+                  placeholder="Walk-in name (optional)"
+                  value={editForm.customer_name}
+                  onChange={e => setEditForm(f => ({ ...f, customer_name: e.target.value }))}
+                />
+              )}
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Order notes</label>
+              <textarea rows={2} className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:border-gray-600"
+                value={editForm.customer_notes}
+                onChange={e => setEditForm(f => ({ ...f, customer_notes: e.target.value }))}
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={() => setEditing(null)}
+                className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Cancel</button>
+              <button
+                disabled={!editForm.quantity || updateMutation.isPending}
+                onClick={() => updateMutation.mutate()}
+                className="bg-brand-600 text-white px-4 py-2 text-sm rounded-lg disabled:opacity-50"
+              >
+                {updateMutation.isPending ? 'Saving…' : 'Save'}
               </button>
             </div>
           </div>

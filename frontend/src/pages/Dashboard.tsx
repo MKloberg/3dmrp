@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
-import { getOrders, getForecast, getPrinters, getPrinterStatus, PrinterStatus, Printer } from '../api/client'
+import { useNavigate } from 'react-router-dom'
+import { getOrders, getForecast, getPrinters, getPrinterStatus, getModels, getCustomers, getFilaments, PrinterStatus, Printer } from '../api/client'
 import StatusBadge from '../components/StatusBadge'
-import { AlertTriangle, ClipboardList, Wifi, WifiOff, Printer as PrinterIcon, ShoppingCart, Clock } from 'lucide-react'
+import { AlertTriangle, ClipboardList, Wifi, WifiOff, Printer as PrinterIcon, ShoppingCart, Clock, Box, Users, Layers } from 'lucide-react'
 
 // ---- helpers ----
 
@@ -48,6 +49,7 @@ const STATE_LABEL: Record<string, string> = {
 }
 
 function PrinterCard({ printer }: { printer: Printer }) {
+  const navigate = useNavigate()
   const { data: status } = useQuery<PrinterStatus>({
     queryKey: ['printer-status', printer.id],
     queryFn: () => getPrinterStatus(printer.id),
@@ -63,7 +65,10 @@ function PrinterCard({ printer }: { printer: Printer }) {
   const bed = formatTemp(status?.bed_temp ?? null, status?.bed_target ?? null)
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-3 space-y-2">
+    <div
+      className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-3 space-y-2 cursor-pointer hover:border-brand-400 dark:hover:border-brand-500 transition-colors"
+      onClick={() => navigate('/printers', { state: { openPrinterId: printer.id } })}
+    >
       <div className="flex items-center gap-3">
         <PrinterIcon size={14} className="text-gray-400 shrink-0" />
         <span className="font-medium text-sm truncate flex-1">{printer.name}</span>
@@ -109,9 +114,13 @@ function PrinterCard({ printer }: { printer: Printer }) {
 // ---- Dashboard ----
 
 export default function Dashboard() {
+  const navigate = useNavigate()
   const { data: orders } = useQuery({ queryKey: ['orders'], queryFn: () => getOrders() })
   const { data: forecast } = useQuery({ queryKey: ['forecast'], queryFn: () => getForecast(4, 4) })
   const { data: printers = [] } = useQuery({ queryKey: ['printers'], queryFn: getPrinters })
+  const { data: models = [] } = useQuery({ queryKey: ['models'], queryFn: getModels })
+  const { data: customers = [] } = useQuery({ queryKey: ['customers'], queryFn: getCustomers })
+  const { data: filaments = [] } = useQuery({ queryKey: ['filaments'], queryFn: getFilaments })
 
   const pending  = orders?.filter(o => o.status === 'pending')  ?? []
   const printing = orders?.filter(o => o.status === 'printing') ?? []
@@ -153,6 +162,27 @@ export default function Dashboard() {
             <div className={`text-3xl font-bold ${color}`}>{value}</div>
             <div className="text-sm text-gray-600 dark:text-gray-300">{label}</div>
           </div>
+        ))}
+      </div>
+
+      {/* Nav cards */}
+      <div className="grid grid-cols-5 gap-3">
+        {[
+          { label: 'Models',    value: models.length,        icon: Box,          to: '/models',     color: 'text-indigo-600', bg: 'bg-indigo-50 dark:bg-indigo-900/20' },
+          { label: 'Orders',    value: orders?.length ?? 0,  icon: ClipboardList,to: '/orders',     color: 'text-blue-600',   bg: 'bg-blue-50 dark:bg-blue-900/20' },
+          { label: 'Customers', value: customers.length,     icon: Users,        to: '/customers',  color: 'text-green-600',  bg: 'bg-green-50 dark:bg-green-900/20' },
+          { label: 'Printers',  value: printers.length,      icon: PrinterIcon,  to: '/printers',   color: 'text-slate-600',  bg: 'bg-slate-50 dark:bg-slate-900/20' },
+          { label: 'Filaments', value: filaments.length,     icon: Layers,       to: '/filaments',  color: 'text-teal-600',   bg: 'bg-teal-50 dark:bg-teal-900/20' },
+        ].map(({ label, value, icon: Icon, to, color, bg }) => (
+          <button
+            key={label}
+            onClick={() => navigate(to)}
+            className={`${bg} rounded-lg px-3 py-1.5 flex items-center gap-2 hover:brightness-95 transition-all text-left`}
+          >
+            <Icon size={14} className={`${color} shrink-0`} />
+            <span className={`text-sm font-semibold ${color}`}>{value}</span>
+            <span className="text-sm text-gray-500 dark:text-gray-400">{label}</span>
+          </button>
         ))}
       </div>
 

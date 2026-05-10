@@ -1,11 +1,13 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { LayoutDashboard, Box, ClipboardList, TrendingUp, Layers, Printer, Settings } from 'lucide-react'
+import { LayoutDashboard, Box, ClipboardList, TrendingUp, Layers, Printer, Settings, Users } from 'lucide-react'
 import clsx from 'clsx'
+
 
 const nav = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/models', label: 'Models', icon: Box },
   { to: '/orders', label: 'Orders', icon: ClipboardList },
+  { to: '/customers', label: 'Customers', icon: Users },
   { to: '/filaments', label: 'Filaments', icon: Layers },
   { to: '/forecast', label: 'Forecast', icon: TrendingUp },
   { to: '/printers', label: 'Printers', icon: Printer },
@@ -16,9 +18,8 @@ export default function Layout() {
   return (
     <div className="flex h-screen overflow-hidden">
       <aside className="w-56 bg-gray-900 text-white flex flex-col shrink-0">
-        <div className="px-5 py-4 border-b border-gray-700">
-          <span className="text-lg font-bold tracking-tight text-brand-500">3DMRP</span>
-          <p className="text-xs text-gray-400 mt-0.5">3D Print Planning</p>
+        <div className="px-4 py-3 border-b border-gray-700">
+          <img src="/logo.png" alt="3DMRP" className="h-16 w-auto" />
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1">
           {nav.map(({ to, label, icon: Icon }) => (

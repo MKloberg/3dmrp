@@ -1,5 +1,7 @@
 # 3DMRP — 3D Print Management & Resource Planning
 
+![3DMRP Logo](frontend/public/logo.png)
+
 A self-hosted web app for managing 3D print models, filament inventory, orders, and print queues. Built for multi-printer workshops that want a single place to track what gets printed, with what filament, and for whom.
 
 ## Screenshots
