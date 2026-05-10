@@ -1,0 +1,98 @@
+# 3DMRP — 3D Print Management & Resource Planning
+
+A self-hosted web app for managing 3D print models, filament inventory, orders, and print queues. Built for multi-printer workshops that want a single place to track what gets printed, with what filament, and for whom.
+
+## Features
+
+### Print Models
+- Store models with name, description, notes, and multiple photos
+- Define filament requirements per model (material, color, grams) with drag-and-drop slot ordering
+- Associate a slicer project file (`.3mf`) per printer and launch the slicer directly from the browser
+- Shopping cart links for quick filament reordering
+
+### Filaments
+- Manage a filament spec library with material, color, brand, temperature settings, and purchase URL
+- Sync specs directly from a [Spoolman](https://github.com/Donkie/Spoolman) instance
+- Live stock levels pulled from Spoolman for forecasting
+
+### Printers
+- Connect to [Klipper/Moonraker](https://moonraker.readthedocs.io) printers by URL
+- Browse print job history and import jobs directly as model records
+- Thumbnail preview shown during import
+- Configure per-printer filament slots and slicer executable
+
+### Orders
+- Track print orders with customer name, quantity, due date, and status (pending → printing → complete)
+- Link each order to a model so filament requirements are always visible
+
+### Forecast
+- Demand forecast based on recent order history
+- Shows projected filament consumption vs. Spoolman stock levels
+- Flags filaments as OK / low / critical
+
+### Settings
+- Light/dark theme
+- Spoolman URL with connection test
+- Database backup (download) and restore (upload)
+
+## Stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | React 18, TypeScript, Vite, TailwindCSS, React Query |
+| Backend | Python, FastAPI, SQLAlchemy, SQLite |
+| Frontend serving | nginx in Docker |
+| Backend | Native (Windows), started via `start.ps1` |
+
+The frontend runs in Docker behind nginx. The backend runs natively on the host so it can launch local slicer applications (OrcaSlicer, PrusaSlicer, etc.) directly.
+
+## Setup
+
+### Prerequisites
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (for the frontend)
+- [uv](https://github.com/astral-sh/uv) (Python package manager, for the backend)
+
+### 1. Start the backend
+
+```powershell
+cd backend
+.\start.ps1
+```
+
+This creates `backend/data/` for the SQLite database and uploaded images, then starts the API on `http://localhost:8000`.
+
+### 2. Start the frontend
+
+```powershell
+docker compose up -d
+```
+
+The app is now available at `http://localhost:7891` (or set `PORT` in a `.env` file to use a different port).
+
+### Environment variables
+
+Copy `.env.example` to `.env` and adjust as needed:
+
+```
+PORT=7891
+```
+
+The backend reads `DATABASE_URL` and `DATA_DIR` from the environment — these are set automatically by `start.ps1`.
+
+## Data
+
+All data is stored in `backend/data/`:
+- `3dmrp.db` — SQLite database
+- `images/` — uploaded model and printer images
+
+Use **Settings → Database** in the UI to download a backup or restore from one.
+
+## Slicer integration
+
+In the Printers page, set the slicer executable path for each printer (e.g. `C:\Program Files\OrcaSlicer\OrcaSlicer.exe`). Then on any model, set the path to its `.3mf` file for that printer. An **Open** button will appear that launches the slicer with the file pre-loaded.
+
+## Spoolman integration
+
+Set the Spoolman URL in Settings (e.g. `http://192.168.1.100:7912`). Once connected:
+- Filament specs can be imported from Spoolman
+- Live spool weights are used in the forecast to calculate shortfalls
