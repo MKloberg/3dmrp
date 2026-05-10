@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-50 text-gray-900 antialiased;
+  }
+  .dark body {
+    @apply bg-gray-900 text-gray-100;
+  }
+}
+
+/* Global dark mode form elements — avoids repeating dark: variants on every input */
+.dark input:not([type="color"]),
+.dark select,
+.dark textarea {
+  background-color: rgb(55 65 81);   /* gray-700 */
+  border-color: rgb(75 85 99);       /* gray-600 */
+  color: rgb(243 244 246);           /* gray-100 */
+}
+
+.dark input:not([type="color"])::placeholder,
+.dark textarea::placeholder {
+  color: rgb(156 163 175);           /* gray-400 */
+}
