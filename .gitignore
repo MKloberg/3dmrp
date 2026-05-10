@@ -16,8 +16,8 @@ frontend/dist/
 .env
 .env.local
 
-# Claude Code local overrides
-.claude/settings.local.json
+# Claude Code
+.claude/
 
 # OS
 .DS_Store
