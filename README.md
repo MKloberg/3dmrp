@@ -32,6 +32,7 @@ Store and manage your printable models.
 - Define filament requirements (material, color, grams) with drag-and-drop slot ordering
 - Tag items with color-coded categories and filter by tag
 - Associate a slicer project file (`.3mf`) per printer and launch the slicer directly from the browser
+- **STL Source URL** — store a link to the original STL source (Printables, Thingiverse, etc.); clickable directly from the item list
 
 ![Items](docs/screenshots/items.png)
 
@@ -44,6 +45,20 @@ Define how an item gets made — step by step.
 - Each step carries its own filament requirements, auto-populated from the item's filament specs
 - Switch between simple mode (single default routing) and advanced mode (multiple named routings)
 - Rename routings inline; reorder and delete steps
+
+#### G-Code in Production Steps
+
+Send G-Code files to printers directly from within each production step.
+
+- Files are served from the **G-Code Repository** (see Settings → Slicers) organized by slicer and printer type
+- Dropdown file selector per step — selection persists across sessions
+- **Send** uploads the file to the printer via Moonraker; a progress bar tracks the upload
+- **Send & Start** uploads and immediately starts the print — but first shows a **Filament Check** modal:
+  - Printer image, name, and live job status at the top
+  - Slot-by-slot comparison table: what's loaded vs. what the step requires (with manufacturer and color names)
+  - Header turns green when all slots match, red when there's a mismatch
+  - Refresh button re-reads loaded filament state from the printer in real time
+- Live printer status is shown inline for each printer: current state dot, active filename, and print progress bar
 
 ---
 
@@ -82,6 +97,7 @@ Track print orders from intake to delivery.
 - Customer, quantity, due date, and status (pending → printing → complete)
 - Link each order to an item so filament requirements are always visible
 - Create orders before an item exists — a placeholder is auto-created and can be filled in later
+- **STL Source URL** — pre-filled from the linked item, editable per order, and written back to the item on save
 
 ![Orders](docs/screenshots/orders.png)
 
@@ -128,9 +144,20 @@ Settings are split into focused sub-pages accessible from a landing page.
 ![Settings](docs/screenshots/settings.png)
 
 - **General** — light/dark theme; Spoolman URL with live connection test; Square Personal Access Token; preferred Amazon store for purchase link auto-fill
-- **Slicers** — add, edit, and remove slicer software entries with executable paths
+- **Slicers** — add, edit, and remove slicer software entries with executable paths; configure and scaffold the **G-Code Repository**
 - **Printer Types** — define printer categories with default slot counts and slicer assignments
 - **Database** — download a full backup or restore from a previous backup file
+
+#### G-Code Repository
+
+A structured folder tree that stores G-Code files for each item, organized by slicer and printer type.
+
+- Path structure: `{repo root}/{slicer name}/{printer type name}/{item name}/*.gcode`
+- Only printer types that have a slicer assigned are included in the tree
+- Configure the root folder path in **Settings → Slicers**
+- **Scaffold** button creates the full folder structure for all current items and printer types in one click
+- Renaming an item automatically offers to rename its corresponding G-Code folders
+- Files placed in the correct folder appear in the file dropdown on the Production Steps page
 
 ---
 
@@ -204,6 +231,13 @@ Use **Settings → Database** to download a backup or restore from one.
 2. Go to **Settings → Printer Types**, create a type, and assign the slicer to it.
 3. On the Printers page, assign each printer to its type.
 4. On any item, set the path to its `.3mf` file for a given printer. An **Open** button will appear that launches the slicer with the file pre-loaded.
+
+### G-Code Repository setup
+
+1. In **Settings → Slicers**, set the **G-Code Repository Root** to a folder on your machine (e.g. `D:\gcode`).
+2. Click **Scaffold Repository** — this creates the full `{slicer}/{printer type}/{item}` folder tree for all current items.
+3. Export G-Code from your slicer into the matching folder. The file will appear automatically in the production step dropdown.
+4. On the Items page, open any item's Production Steps, expand the G-Code section for a step, select a file, and use **Send** or **Send & Start** to push it to a printer.
 
 ---
 
