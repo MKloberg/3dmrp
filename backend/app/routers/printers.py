@@ -17,6 +17,11 @@ class PrinterTypeAssign(BaseModel):
     printer_type_id: Optional[int] = None
     slot_count_override: Optional[int] = None
 
+
+class SendGcodeRequest(BaseModel):
+    file_path: str
+    start_print: bool = False
+
 router = APIRouter(prefix="/api/printers", tags=["printers"])
 
 _DATA_DIR = os.environ.get("DATA_DIR", "/app/data")
@@ -343,6 +348,41 @@ async def get_printer_history(printer_id: int, limit: int = 50, db: Session = De
     ]
 
     return PrinterHistoryResponse(count=result.get("count", len(jobs)), jobs=jobs)
+
+
+@router.post("/{printer_id}/send-gcode")
+async def send_gcode(printer_id: int, data: SendGcodeRequest, db: Session = Depends(get_db)):
+    printer = db.query(Printer).filter(Printer.id == printer_id).first()
+    if not printer:
+        raise HTTPException(status_code=404, detail="Printer not found")
+    if not os.path.exists(data.file_path):
+        raise HTTPException(status_code=404, detail="G-Code file not found on host")
+
+    filename = os.path.basename(data.file_path)
+    url = printer.url.rstrip("/")
+
+    with open(data.file_path, "rb") as f:
+        file_content = f.read()
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        try:
+            resp = await client.post(
+                f"{url}/server/files/upload",
+                files={"file": (filename, file_content, "application/octet-stream")},
+                data={"root": "gcodes"},
+            )
+            resp.raise_for_status()
+        except (httpx.RequestError, httpx.HTTPStatusError) as exc:
+            raise HTTPException(status_code=502, detail=f"Could not upload to printer: {exc}")
+
+    if data.start_print:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            try:
+                await client.post(f"{url}/printer/print/start", json={"filename": filename})
+            except Exception:
+                pass
+
+    return {"ok": True, "filename": filename}
 
 
 @router.get("/{printer_id}/thumbnail")

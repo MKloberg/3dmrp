@@ -74,6 +74,7 @@ class Item(Base):
     sku = Column(String, default="")
     description = Column(String, default="")
     notes = Column(String, default="")
+    stl_source_url = Column(String, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
 
     use_advanced_routing = Column(Boolean, nullable=False, default=False)

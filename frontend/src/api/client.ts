@@ -93,6 +93,7 @@ export interface Item {
   description: string
   notes: string
   sku: string
+  stl_source_url: string
   use_advanced_routing: boolean
   created_at: string
   filament_requirements: ModelFilament[]
@@ -159,7 +160,7 @@ export const deleteFilament = (id: number) =>
 export const getItems = () => req<Item[]>('/items')
 export const createItem = (data: Pick<Item, 'name' | 'description' | 'notes' | 'sku'>) =>
   req<Item>('/items', { method: 'POST', body: JSON.stringify(data) })
-export const updateItem = (id: number, data: Pick<Item, 'name' | 'description' | 'notes' | 'sku' | 'use_advanced_routing'>) =>
+export const updateItem = (id: number, data: Pick<Item, 'name' | 'description' | 'notes' | 'sku' | 'stl_source_url' | 'use_advanced_routing'>) =>
   req<Item>(`/items/${id}`, { method: 'PUT', body: JSON.stringify(data) })
 export const deleteItem = (id: number) =>
   req<void>(`/items/${id}`, { method: 'DELETE' })
@@ -507,6 +508,31 @@ export const uploadPrinterImage = async (id: number, file: File): Promise<void> 
   const res = await fetch(`${BASE}/printers/${id}/image`, { method: 'POST', body: form })
   if (!res.ok) throw new Error(res.statusText)
 }
+
+// --- G-Code Repository ---
+export interface GcodeFilesResult {
+  files: string[]
+  folder: string | null
+  error: string | null
+}
+export const getGcodeFiles = (itemName: string, slicerName: string, printerTypeName: string) =>
+  req<GcodeFilesResult>(`/gcode/files?item_name=${encodeURIComponent(itemName)}&slicer_name=${encodeURIComponent(slicerName)}&printer_type_name=${encodeURIComponent(printerTypeName)}`)
+export const getGcodeRepoStatus = () =>
+  req<{ configured: boolean; exists: boolean; root: string | null }>('/gcode/status')
+export const scaffoldGcodeRepo = () =>
+  req<{ created: string[]; skipped: string[]; error: string | null }>('/gcode/scaffold', { method: 'POST' })
+export const sendGcodeToPrinter = (printerId: number, filePath: string, startPrint = false) =>
+  req<{ ok: boolean; filename: string }>(`/printers/${printerId}/send-gcode`, {
+    method: 'POST',
+    body: JSON.stringify({ file_path: filePath, start_print: startPrint }),
+  })
+export const checkGcodeItemFolders = (itemName: string) =>
+  req<{ folders: string[] }>(`/gcode/item-folders?item_name=${encodeURIComponent(itemName)}`)
+export const renameGcodeItemFolders = (oldName: string, newName: string) =>
+  req<{ renamed: string[]; error: string | null }>('/gcode/rename-item-folders', {
+    method: 'POST',
+    body: JSON.stringify({ old_name: oldName, new_name: newName }),
+  })
 
 // --- Settings ---
 export const getSettings = () => req<Record<string, string>>('/settings')

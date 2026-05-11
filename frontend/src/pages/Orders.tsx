@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getOrders, createOrder, updateOrder, deleteOrder, getItems, getCustomers, Order } from '../api/client'
+import { getOrders, createOrder, updateOrder, deleteOrder, getItems, updateItem, getCustomers, Order } from '../api/client'
 import Modal from '../components/Modal'
 import StatusBadge from '../components/StatusBadge'
-import { Plus, Trash2, Pencil, User } from 'lucide-react'
+import { Plus, Trash2, Pencil, User, ExternalLink } from 'lucide-react'
 
 const STATUSES = ['pending', 'printing', 'complete', 'cancelled'] as const
 type Status = typeof STATUSES[number]
@@ -23,7 +23,7 @@ export default function Orders() {
   const [modelMode, setModelMode] = useState<'existing' | 'new'>('existing')
 
   const [form, setForm] = useState({
-    item_id: '', item_name: '',
+    item_id: '', item_name: '', stl_source_url: '',
     customer_id: '', customer_name: '', customer_notes: '', date_needed: '', quantity: '1',
   })
   const [editForm, setEditForm] = useState({
@@ -32,16 +32,24 @@ export default function Orders() {
   })
 
   const createMutation = useMutation({
-    mutationFn: () => createOrder({
-      ...(modelMode === 'existing'
-        ? { item_id: Number(form.item_id) }
-        : { item_name: form.item_name }),
-      customer_id: form.customer_id ? Number(form.customer_id) : null,
-      customer_name: form.customer_id ? '' : form.customer_name,
-      customer_notes: form.customer_notes,
-      quantity: Number(form.quantity),
-      date_needed: form.date_needed || null,
-    }),
+    mutationFn: async () => {
+      const order = await createOrder({
+        ...(modelMode === 'existing'
+          ? { item_id: Number(form.item_id) }
+          : { item_name: form.item_name }),
+        customer_id: form.customer_id ? Number(form.customer_id) : null,
+        customer_name: form.customer_id ? '' : form.customer_name,
+        customer_notes: form.customer_notes,
+        quantity: Number(form.quantity),
+        date_needed: form.date_needed || null,
+      })
+      if (form.stl_source_url) {
+        const original = order.item
+        if (original.stl_source_url !== form.stl_source_url) {
+          await updateItem(original.id, { ...original, stl_source_url: form.stl_source_url })
+        }
+      }
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['orders'] })
       qc.invalidateQueries({ queryKey: ['items'] })
@@ -74,7 +82,7 @@ export default function Orders() {
   })
 
   function resetForm() {
-    setForm({ item_id: '', item_name: '', customer_id: '', customer_name: '', customer_notes: '', date_needed: '', quantity: '1' })
+    setForm({ item_id: '', item_name: '', stl_source_url: '', customer_id: '', customer_name: '', customer_notes: '', date_needed: '', quantity: '1' })
     setModelMode('existing')
   }
 
@@ -127,7 +135,7 @@ export default function Orders() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 dark:bg-gray-700/50 border-b dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
               <tr>
-                <th className="px-4 py-2 text-left">Model</th>
+                <th className="px-4 py-2 text-left">Item</th>
                 <th className="px-4 py-2 text-left">Customer</th>
                 <th className="px-4 py-2 text-center">Qty</th>
                 <th className="px-4 py-2 text-left">Ordered</th>
@@ -218,10 +226,10 @@ export default function Orders() {
       {showForm && (
         <Modal title="New Order" onClose={() => { setShowForm(false); resetForm() }}>
           <div className="space-y-3">
-            {/* Model */}
+            {/* Item */}
             <div>
               <div className="flex items-center justify-between mb-1">
-                <label className="text-xs text-gray-500 dark:text-gray-400">Model *</label>
+                <label className="text-xs text-gray-500 dark:text-gray-400">Item *</label>
                 <div className="flex text-xs rounded-md overflow-hidden border border-gray-200 dark:border-gray-600">
                   <button type="button" onClick={() => setModelMode('existing')}
                     className={`px-2 py-0.5 ${modelMode === 'existing' ? 'bg-brand-600 text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}`}>
@@ -237,7 +245,10 @@ export default function Orders() {
                 <select
                   className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:border-gray-600"
                   value={form.item_id}
-                  onChange={e => setForm(f => ({ ...f, item_id: e.target.value }))}
+                  onChange={e => {
+                    const url = items.find(m => String(m.id) === e.target.value)?.stl_source_url ?? ''
+                    setForm(f => ({ ...f, item_id: e.target.value, stl_source_url: url }))
+                  }}
                 >
                   <option value="">— select item —</option>
                   {items.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -250,6 +261,23 @@ export default function Orders() {
                   onChange={e => setForm(f => ({ ...f, item_name: e.target.value }))}
                 />
               )}
+              <div className="flex items-center gap-1.5 mt-1.5">
+                <input
+                  className="flex-1 border rounded-lg px-3 py-1.5 text-sm dark:bg-gray-700 dark:border-gray-600"
+                  placeholder="STL Source URL"
+                  value={form.stl_source_url}
+                  onChange={e => setForm(f => ({ ...f, stl_source_url: e.target.value }))}
+                />
+                <a
+                  href={form.stl_source_url || '#'}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={e => !form.stl_source_url && e.preventDefault()}
+                  className={`shrink-0 p-1.5 rounded-lg border ${form.stl_source_url ? 'text-brand-600 border-brand-300 dark:border-brand-700 hover:bg-brand-50 dark:hover:bg-brand-900/20' : 'text-gray-300 dark:text-gray-600 border-gray-200 dark:border-gray-700 pointer-events-none'}`}
+                >
+                  <ExternalLink size={14} />
+                </a>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">

@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from .database import engine, Base
-from .routers import filaments, items, orders, spoolman, forecast, settings, printers, tags, customers, slicers, printer_types
+from .routers import filaments, items, orders, spoolman, forecast, settings, printers, tags, customers, slicers, printer_types, gcode
 
 Base.metadata.create_all(bind=engine)
 
@@ -132,6 +132,8 @@ with engine.connect() as conn:
     existing_items_cols2 = {row[1] for row in conn.execute(text("PRAGMA table_info(items)"))}
     if "use_advanced_routing" not in existing_items_cols2:
         conn.execute(text("ALTER TABLE items ADD COLUMN use_advanced_routing BOOLEAN NOT NULL DEFAULT 0"))
+    if "stl_source_url" not in existing_items_cols2:
+        conn.execute(text("ALTER TABLE items ADD COLUMN stl_source_url TEXT NOT NULL DEFAULT ''"))
 
     conn.commit()
 
@@ -156,6 +158,7 @@ app.include_router(tags.router)
 app.include_router(customers.router)
 app.include_router(slicers.router)
 app.include_router(printer_types.router)
+app.include_router(gcode.router)
 
 
 @app.get("/api/health")

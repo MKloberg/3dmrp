@@ -7,14 +7,17 @@ import {
   getFilaments, addFilamentReq, updateFilamentReq, removeFilamentReq, reorderFilaments,
   uploadItemImage, deleteItemImage, cropItemImage,
   getTags, createTag, updateTag, deleteTag, addTagToItem, removeTagFromItem,
-  getPrinterTypes,
+  getPrinterTypes, getPrinters,
   createRouting, updateRouting, deleteRouting,
   createRoutingStep, updateRoutingStep, deleteRoutingStep,
   addRoutingStepFilament, updateRoutingStepFilament, deleteRoutingStepFilament,
-  Item, FilamentSpec, Tag, PrinterType, Routing,
+  getGcodeFiles, sendGcodeToPrinter, checkGcodeItemFolders, renameGcodeItemFolders,
+  getPrinterStatus,
+  Item, FilamentSpec, Tag, PrinterType, Printer, Routing,
 } from '../api/client'
 import Modal from '../components/Modal'
-import { Plus, Trash2, ChevronDown, ChevronRight, Pencil, Check, X, Upload, ShoppingCart, GripVertical, Tag as TagIcon, Crop as CropIcon, Download, Route } from 'lucide-react'
+import ConfirmModal from '../components/ConfirmModal'
+import { Plus, Trash2, ChevronDown, ChevronRight, Pencil, Check, X, Upload, ShoppingCart, GripVertical, Tag as TagIcon, Crop as CropIcon, Download, Route, Send, RefreshCw } from 'lucide-react'
 
 function CropModal({
   itemId,
@@ -119,7 +122,364 @@ function FilamentDot({ hex }: { hex: string }) {
   return <span className="inline-block w-3 h-3 rounded-full border border-gray-300 dark:border-gray-600 shrink-0" style={{ backgroundColor: hex }} />
 }
 
-function ItemDetail({ item, filaments, allTags, printerTypes }: { item: Item; filaments: FilamentSpec[]; allTags: Tag[]; printerTypes: PrinterType[] }) {
+const STATE_COLORS: Record<string, string> = {
+  printing: 'bg-blue-500',
+  paused:   'bg-yellow-400',
+  error:    'bg-red-500',
+  complete: 'bg-green-500',
+  offline:  'bg-gray-400',
+  standby:  'bg-gray-400',
+}
+
+function FilamentCheckModal({ printer, stepFilaments, onConfirm, onCancel }: {
+  printer: Printer
+  stepFilaments: FilamentSpec[]
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  const qc = useQueryClient()
+  const { data: status, refetch: refetchStatus, isFetching: fetchingStatus } = useQuery({
+    queryKey: ['printer-status', printer.id],
+    queryFn: () => getPrinterStatus(printer.id),
+    staleTime: 0,
+    refetchInterval: 5000,
+  })
+
+  const livePrinters = qc.getQueryData<Printer[]>(['printers']) ?? []
+  const livePrinter = livePrinters.find(p => p.id === printer.id) ?? printer
+  const [refreshingSlots, setRefreshingSlots] = useState(false)
+
+  async function handleRefresh() {
+    setRefreshingSlots(true)
+    await Promise.all([
+      qc.refetchQueries({ queryKey: ['printers'] }),
+      refetchStatus(),
+    ])
+    setRefreshingSlots(false)
+  }
+
+  const stateColor = STATE_COLORS[status?.state ?? 'offline'] ?? 'bg-gray-400'
+
+  const allMatch = stepFilaments.every((req, idx) => {
+    const slot = livePrinter.slots.find(s => s.slot_number === idx + 1)
+    return slot?.filament_spec_id === req.id
+  })
+  const headerBg = allMatch
+    ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
+    : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800'
+
+  function tempLabel(temp: number | null | undefined, target: number | null | undefined) {
+    if (temp == null) return '—'
+    return target ? `${Math.round(temp)}° / ${Math.round(target)}°` : `${Math.round(temp)}°`
+  }
+
+  return (
+    <Modal title="Filament Check" onClose={onCancel}>
+      <div className="space-y-4">
+
+        {/* Printer header */}
+        <div className={`flex items-center gap-4 p-3 rounded-lg ${headerBg}`}>
+          {printer.has_image ? (
+            <img src={`/api/printers/${printer.id}/image`} alt={printer.name}
+              className="w-16 h-16 rounded-lg object-cover shrink-0 border border-gray-200 dark:border-gray-600" />
+          ) : (
+            <div className="w-16 h-16 rounded-lg bg-gray-200 dark:bg-gray-600 shrink-0 flex items-center justify-center text-gray-400 text-xs">No image</div>
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="font-semibold text-gray-900 dark:text-gray-100 truncate">{printer.name}</p>
+            {printer.printer_type && (
+              <p className="text-sm text-gray-500 dark:text-gray-400">{printer.printer_type.name}</p>
+            )}
+            <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+              <div className="flex items-center gap-1.5">
+                <span className={`w-2 h-2 rounded-full shrink-0 ${stateColor}`} />
+                <span className="text-xs text-gray-500 dark:text-gray-400 capitalize">{status?.state ?? '…'}</span>
+              </div>
+              {status?.extruder_temp != null && (
+                <span className="text-xs text-gray-400">Hotend {tempLabel(status.extruder_temp, status.extruder_target)}</span>
+              )}
+              {status?.bed_temp != null && (
+                <span className="text-xs text-gray-400">Bed {tempLabel(status.bed_temp, status.bed_target)}</span>
+              )}
+              {status?.state === 'printing' && status.progress != null && (
+                <span className="text-xs text-blue-500">{Math.round(status.progress * 100)}%</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Filament comparison table */}
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="border-b dark:border-gray-600">
+              <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 pr-4 w-10">Slot</th>
+              <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 pr-4">
+                <div className="flex items-center gap-1.5">
+                  Filament Loaded
+                  <button onClick={handleRefresh} disabled={refreshingSlots || fetchingStatus}
+                    className="text-gray-400 hover:text-gray-600 disabled:opacity-40" title="Refresh loaded filaments">
+                    <RefreshCw size={11} className={refreshingSlots || fetchingStatus ? 'animate-spin' : ''} />
+                  </button>
+                </div>
+              </th>
+              <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2">Required for this Model</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y dark:divide-gray-700">
+            {stepFilaments.map((req, idx) => {
+              const slotNumber = idx + 1
+              const slot = livePrinter.slots.find(s => s.slot_number === slotNumber)
+              const loaded = slot?.filament_spec
+              const matches = slot?.filament_spec_id === req.id
+              return (
+                <tr key={req.id}>
+                  <td className="py-2 pr-4 text-xs text-gray-400 tabular-nums">
+                    #{slotNumber}
+                  </td>
+                  <td className="py-2 pr-4">
+                    {loaded ? (
+                      <div className="flex items-center gap-2">
+                        <FilamentDot hex={loaded.color_hex} />
+                        <span className="text-gray-700 dark:text-gray-200">{loaded.brand ? `${loaded.brand} ` : ''}{loaded.material} {loaded.color_name}</span>
+                        <span className="text-green-500 ml-auto">✓</span>
+                      </div>
+                    ) : (
+                      <span className="text-red-400 italic">Unknown</span>
+                    )}
+                  </td>
+                  <td className="py-2">
+                    <div className="flex items-center gap-2">
+                      <FilamentDot hex={req.color_hex} />
+                      <span className={matches ? 'text-gray-700 dark:text-gray-200' : 'text-red-500 font-medium'}>
+                        {req.brand ? `${req.brand} ` : ''}{req.material} {req.color_name}
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onCancel}
+            className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200">
+            Cancel
+          </button>
+          <button onClick={onConfirm}
+            className="px-4 py-2 text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-lg">
+            Start Print
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+function PrinterStatusRow({ printer, sending, onSend }: {
+  printer: Printer
+  sending: boolean
+  onSend: (printerId: number, startPrint: boolean) => void
+}) {
+  const { data: status } = useQuery({
+    queryKey: ['printer-status', printer.id],
+    queryFn: () => getPrinterStatus(printer.id),
+    staleTime: 0,
+    refetchInterval: 10_000,
+  })
+
+  const stateColor = STATE_COLORS[status?.state ?? 'offline'] ?? 'bg-gray-400'
+  const isPrinting = status?.state === 'printing'
+
+  return (
+    <div className="flex items-start gap-1.5">
+      <div className="flex-1 min-w-0 space-y-0.5">
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-gray-600 dark:text-gray-300 font-medium truncate">{printer.name}</span>
+          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${stateColor}`} />
+          <span className="text-xs text-gray-400 capitalize shrink-0">{status?.state ?? '…'}</span>
+        </div>
+        {isPrinting && (
+          <div className="space-y-0.5">
+            {status.filename && (
+              <p className="text-xs text-gray-400 font-mono truncate">{status.filename}</p>
+            )}
+            {status.progress != null && (
+              <div className="flex items-center gap-1.5">
+                <div className="flex-1 bg-gray-200 dark:bg-gray-600 rounded-full h-1 overflow-hidden">
+                  <div className="h-full bg-blue-500 rounded-full transition-all duration-500"
+                    style={{ width: `${Math.round(status.progress * 100)}%` }} />
+                </div>
+                <span className="text-xs text-gray-400 shrink-0">{Math.round(status.progress * 100)}%</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      <div className="flex items-center gap-1 shrink-0">
+        <button
+          disabled={sending}
+          onClick={() => onSend(printer.id, false)}
+          className="flex items-center gap-1 text-xs border border-brand-300 dark:border-brand-700 text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/20 px-2 py-0.5 rounded disabled:opacity-50"
+        >
+          <Send size={9} /> Send
+        </button>
+        <button
+          disabled={sending}
+          onClick={() => onSend(printer.id, true)}
+          className="flex items-center gap-1 text-xs border border-green-300 dark:border-green-700 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 px-2 py-0.5 rounded disabled:opacity-50"
+        >
+          ▶ Send & Start
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function GcodePanel({ itemName, slicerName, printerTypeName, printerTypeId, printers, stepFilaments }: {
+  itemName: string
+  slicerName: string
+  printerTypeName: string
+  printerTypeId: number
+  printers: Printer[]
+  stepFilaments: FilamentSpec[]
+}) {
+  const storageKey = `gcode-sel:${slicerName}:${printerTypeName}:${itemName}`
+
+  const { data, isLoading, refetch, isFetching } = useQuery({
+    queryKey: ['gcode-files', itemName, slicerName, printerTypeName],
+    queryFn: () => getGcodeFiles(itemName, slicerName, printerTypeName),
+    staleTime: 0,
+  })
+
+  const [selected, setSelected] = useState<string>(() => localStorage.getItem(storageKey) ?? '')
+  const [sending, setSending] = useState(false)
+  const [sent, setSent] = useState(false)
+  const [sendError, setSendError] = useState<string | null>(null)
+  const [progress, setProgress] = useState(0)
+  const [filamentWarning, setFilamentWarning] = useState<{ printer: Printer } | null>(null)
+
+  useEffect(() => {
+    if (!sending) return
+    setProgress(0)
+    const start = Date.now()
+    const id = setInterval(() => {
+      const elapsed = Date.now() - start
+      // ease toward 85% over ~4s, never reaching it until confirmed done
+      setProgress(85 * (1 - Math.exp(-elapsed / 4000)))
+    }, 80)
+    return () => clearInterval(id)
+  }, [sending])
+
+  useEffect(() => {
+    if (sent) setProgress(100)
+  }, [sent])
+
+  const files = data?.files ?? []
+  const activeFile = files.includes(selected) ? selected : (files[0] ?? '')
+
+  function selectFile(f: string) {
+    setSelected(f)
+    localStorage.setItem(storageKey, f)
+    setSent(false)
+    setSendError(null)
+    setProgress(0)
+  }
+
+  const matchingPrinters = printers.filter(p => p.printer_type_id === printerTypeId)
+
+  async function doSend(printerId: number, startPrint: boolean) {
+    if (!data?.folder || !activeFile) return
+    const filePath = `${data.folder}\\${activeFile}`
+    setSending(true)
+    setSendError(null)
+    try {
+      await sendGcodeToPrinter(printerId, filePath, startPrint)
+      setSent(true)
+      setTimeout(() => { setSent(false); setProgress(0) }, 3000)
+    } catch (e) {
+      setSendError(e instanceof Error ? e.message : 'Send failed')
+      setProgress(0)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  function handleSend(printerId: number, startPrint: boolean) {
+    if (startPrint && stepFilaments.length > 0) {
+      const printer = matchingPrinters.find(p => p.id === printerId)
+      const loadedIds = new Set(printer?.slots.map(s => s.filament_spec_id).filter(Boolean) ?? [])
+      const missing = stepFilaments.filter(f => !loadedIds.has(f.id))
+      if (missing.length > 0 && printer) {
+        setFilamentWarning({ printer })
+        return
+      }
+    }
+    doSend(printerId, startPrint)
+  }
+
+  const header = (
+    <div className="flex items-center gap-1 mb-1">
+      <Send size={9} className="text-gray-400" />
+      <p className="text-xs text-gray-400 flex-1">G-Code</p>
+      <button onClick={() => refetch()} disabled={isFetching} className="text-gray-300 hover:text-gray-500 disabled:opacity-40">
+        <RefreshCw size={10} className={isFetching ? 'animate-spin' : ''} />
+      </button>
+    </div>
+  )
+
+  if (isLoading) return <div>{header}<p className="text-xs text-gray-400">Loading…</p></div>
+  if (data?.error && !files.length) return (
+    <div>{header}<p className="text-xs text-gray-400 italic">{data.error}</p></div>
+  )
+  if (!files.length) return (
+    <div>{header}<p className="text-xs text-gray-400 italic">
+      No .gcode files in <span className="font-mono">{slicerName}/{printerTypeName}/{itemName}/</span>
+    </p></div>
+  )
+
+  return (
+    <div className="space-y-1.5">
+      {header}
+      <select
+        value={activeFile}
+        onChange={e => selectFile(e.target.value)}
+        className="w-full border rounded px-2 py-1 text-xs font-mono dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
+      >
+        {files.map(f => <option key={f} value={f}>{f}</option>)}
+      </select>
+      {(sending || sent || sendError) && (
+        <div className="space-y-0.5">
+          {(sending || sent) && (
+            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-300 ${sent ? 'bg-green-500' : 'bg-brand-500'}`}
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+          )}
+          {sent && <p className="text-xs text-green-600">Sent!</p>}
+          {sendError && <p className="text-xs text-red-500">{sendError}</p>}
+        </div>
+      )}
+      {matchingPrinters.length === 0 ? (
+        <p className="text-xs text-gray-400 italic">No printers of this type</p>
+      ) : matchingPrinters.map(printer => (
+        <PrinterStatusRow key={printer.id} printer={printer} sending={sending} onSend={handleSend} />
+      ))}
+      {filamentWarning && (
+        <FilamentCheckModal
+          printer={filamentWarning.printer}
+          stepFilaments={stepFilaments}
+          onConfirm={() => { const p = filamentWarning.printer; setFilamentWarning(null); doSend(p.id, true) }}
+          onCancel={() => setFilamentWarning(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+function ItemDetail({ item, filaments, allTags, printerTypes, printers }: { item: Item; filaments: FilamentSpec[]; allTags: Tag[]; printerTypes: PrinterType[]; printers: Printer[] }) {
   const qc = useQueryClient()
   const imageInputRef = useRef<HTMLInputElement>(null)
   const [uploadingImage, setUploadingImage] = useState(false)
@@ -292,7 +652,7 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
   const toggleAdvancedMutation = useMutation({
     mutationFn: () => updateItem(item.id, {
       name: item.name, description: item.description, notes: item.notes, sku: item.sku,
-      use_advanced_routing: !item.use_advanced_routing,
+      stl_source_url: item.stl_source_url, use_advanced_routing: !item.use_advanced_routing,
     }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['items'] }),
   })
@@ -459,7 +819,7 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                       ) : (
                         <>
                           <FilamentDot hex={fil.filament_spec.color_hex} />
-                          <span className="flex-1 text-gray-600 dark:text-gray-300">{fil.filament_spec.material} — {fil.filament_spec.color_name}</span>
+                          <span className="flex-1 text-gray-600 dark:text-gray-300">{fil.filament_spec.brand ? `${fil.filament_spec.brand} ` : ''}{fil.filament_spec.material} {fil.filament_spec.color_name}</span>
                           <span className="font-medium text-gray-700 dark:text-gray-200">{fil.grams}g/plate</span>
                           <button onClick={() => setEditingStepFil({ routingId: routing.id, stepId: step.id, filId: fil.id, specId: String(fil.filament_spec_id), grams: String(fil.grams) })} className="text-gray-400 hover:text-brand-600"><Pencil size={11} /></button>
                           <button onClick={() => deleteStepFilMutation.mutate({ routingId: routing.id, stepId: step.id, filId: fil.id })} className="text-red-400 hover:text-red-600"><Trash2 size={11} /></button>
@@ -468,6 +828,19 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                     </div>
                   )
                 })}
+                {/* G-Code files */}
+                {printerType?.slicer && (
+                  <div className="pt-1 border-t border-gray-200 dark:border-gray-600 mt-1">
+                    <GcodePanel
+                      itemName={item.name}
+                      slicerName={printerType.slicer.name}
+                      printerTypeName={printerType.name}
+                      printerTypeId={printerType.id}
+                      printers={printers}
+                      stepFilaments={step.filaments.map(f => f.filament_spec)}
+                    />
+                  </div>
+                )}
                 {isAddingFilHere && addingStepFil ? (
                   <div className="flex items-center gap-1.5">
                     <select className="flex-1 border rounded px-1.5 py-0.5 text-xs dark:bg-gray-700 dark:border-gray-600" value={newStepFilForm.specId} onChange={e => setNewStepFilForm(f => ({ ...f, specId: e.target.value }))}>
@@ -1016,13 +1389,15 @@ export default function Items() {
   const { data: filaments = [] } = useQuery({ queryKey: ['filaments'], queryFn: getFilaments })
   const { data: allTags = [] } = useQuery({ queryKey: ['tags'], queryFn: getTags })
   const { data: printerTypes = [] } = useQuery({ queryKey: ['printer-types'], queryFn: getPrinterTypes })
+  const { data: printers = [] } = useQuery({ queryKey: ['printers'], queryFn: getPrinters })
 
   const [expanded, setExpanded] = useState<number | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [showTagManager, setShowTagManager] = useState(false)
   const [filterTagIds, setFilterTagIds] = useState<Set<number>>(new Set())
   const [editing, setEditing] = useState<Item | null>(null)
-  const [form, setForm] = useState({ name: '', sku: '', description: '', notes: '' })
+  const [form, setForm] = useState({ name: '', sku: '', description: '', notes: '', stl_source_url: '' })
+  const [gcodeRenamePrompt, setGcodeRenamePrompt] = useState<{ oldName: string; newName: string } | null>(null)
 
   function toggleFilterTag(id: number) {
     setFilterTagIds(prev => {
@@ -1040,7 +1415,19 @@ export default function Items() {
     mutationFn: () => editing
       ? updateItem(editing.id, { ...form, use_advanced_routing: editing.use_advanced_routing })
       : createItem(form),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['items'] }); closeForm() },
+    onSuccess: async () => {
+      qc.invalidateQueries({ queryKey: ['items'] })
+      const wasRename = editing && form.name !== editing.name
+      const oldName = editing?.name
+      const newName = form.name
+      closeForm()
+      if (wasRename && oldName) {
+        const { folders } = await checkGcodeItemFolders(oldName)
+        if (folders.length > 0) {
+          setGcodeRenamePrompt({ oldName, newName })
+        }
+      }
+    },
   })
 
   const deleteMutation = useMutation({
@@ -1050,17 +1437,17 @@ export default function Items() {
 
   function openCreate() {
     setEditing(null)
-    setForm({ name: '', sku: '', description: '', notes: '' })
+    setForm({ name: '', sku: '', description: '', notes: '', stl_source_url: '' })
     setShowForm(true)
   }
 
   function openEdit(item: Item) {
     setEditing(item)
-    setForm({ name: item.name, sku: item.sku, description: item.description, notes: item.notes })
+    setForm({ name: item.name, sku: item.sku, description: item.description, notes: item.notes, stl_source_url: item.stl_source_url })
     setShowForm(true)
   }
 
-  function closeForm() { setShowForm(false); setEditing(null) }
+  function closeForm() { setShowForm(false); setEditing(null); setForm({ name: '', sku: '', description: '', notes: '', stl_source_url: '' }) }
 
   return (
     <div className="p-6 space-y-4">
@@ -1138,6 +1525,13 @@ export default function Items() {
                   {item.tags.map(tag => <TagPill key={tag.id} tag={tag} />)}
                 </div>
                 <div className="flex items-center gap-2">
+                  {item.stl_source_url && (
+                    <a href={item.stl_source_url} target="_blank" rel="noopener noreferrer"
+                      onClick={e => e.stopPropagation()}
+                      className="text-xs text-brand-500 hover:text-brand-700 hover:underline">
+                      STL Source
+                    </a>
+                  )}
                   <span className="text-xs text-gray-400">{item.filament_requirements.length} filament{item.filament_requirements.length !== 1 ? 's' : ''}</span>
                   <button onClick={e => { e.stopPropagation(); openEdit(item) }} className="text-xs text-brand-600 hover:underline px-2">Edit</button>
                   <button
@@ -1149,13 +1543,27 @@ export default function Items() {
                 </div>
               </div>
 
-              {isOpen && <ItemDetail item={item} filaments={filaments} allTags={allTags} printerTypes={printerTypes} />}
+              {isOpen && <ItemDetail item={item} filaments={filaments} allTags={allTags} printerTypes={printerTypes} printers={printers} />}
             </div>
           )
         })}
       </div>
 
       {showTagManager && <TagManager onClose={() => setShowTagManager(false)} />}
+
+      {gcodeRenamePrompt && (
+        <ConfirmModal
+          title="Rename G-Code Folders"
+          message={`Rename G-Code folders from "${gcodeRenamePrompt.oldName}" to "${gcodeRenamePrompt.newName}"?`}
+          confirmLabel="Yes"
+          cancelLabel="No"
+          onConfirm={async () => {
+            await renameGcodeItemFolders(gcodeRenamePrompt.oldName, gcodeRenamePrompt.newName)
+            setGcodeRenamePrompt(null)
+          }}
+          onCancel={() => setGcodeRenamePrompt(null)}
+        />
+      )}
 
       {showForm && (
         <Modal title={editing ? 'Edit Item' : 'New Item'} onClose={closeForm}>
@@ -1180,10 +1588,12 @@ export default function Items() {
             </div>
             <div>
               <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Description</label>
-              <input
-                className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:border-gray-600"
+              <textarea
+                className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:border-gray-600 resize-none overflow-hidden"
+                rows={4}
                 value={form.description}
                 onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                onInput={e => { const t = e.currentTarget; t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px' }}
               />
             </div>
             <div>
@@ -1193,6 +1603,15 @@ export default function Items() {
                 rows={2}
                 value={form.notes}
                 onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">STL Source URL</label>
+              <input
+                className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:border-gray-600"
+                placeholder="https://"
+                value={form.stl_source_url}
+                onChange={e => setForm(f => ({ ...f, stl_source_url: e.target.value }))}
               />
             </div>
             <div className="flex justify-end gap-2 pt-2">

@@ -103,7 +103,7 @@ function NavTreeItem({ item }: { item: NavItemDef }) {
       </NavLink>
 
       {open && (
-        <div className="mt-0.5 ml-3 pl-3 border-l border-gray-700 space-y-0.5">
+        <div className="mt-0.5 ml-6 pl-3 border-l border-gray-700 space-y-0.5">
           {item.children!.map(child => (
             <NavLink
               key={child.to}

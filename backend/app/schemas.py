@@ -166,6 +166,7 @@ class ItemBase(BaseModel):
     sku: str = ""
     description: str = ""
     notes: str = ""
+    stl_source_url: str = ""
     use_advanced_routing: bool = False
 
 
@@ -408,6 +409,8 @@ class FilamentDetectSlot(BaseModel):
 
 
 class ContributingOrder(BaseModel):
+    model_config = {"protected_namespaces": ()}
+
     order_id: int
     model_name: str
     customer_name: str
