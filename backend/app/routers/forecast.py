@@ -7,7 +7,7 @@ from collections import defaultdict
 
 from ..database import get_db
 from ..models import Order, OrderStatus, FilamentSpec
-from ..schemas import ForecastItem, ForecastResponse
+from ..schemas import ForecastItem, ForecastResponse, ContributingOrder
 from .settings import get_setting
 
 router = APIRouter(prefix="/api/forecast", tags=["forecast"])
@@ -47,30 +47,49 @@ async def get_forecast(
 ):
     cutoff = datetime.utcnow() - timedelta(weeks=lookback_weeks)
 
+    # Historical rate from recently completed orders
     completed_orders = (
         db.query(Order)
         .filter(Order.status == OrderStatus.complete, Order.date_ordered >= cutoff)
         .all()
     )
-
-    # Aggregate grams used per filament spec over the lookback window
     grams_used: Dict[int, float] = defaultdict(float)
     for order in completed_orders:
-        for req in order.print_model.filament_requirements:
+        for req in order.item.filament_requirements:
             grams_used[req.filament_spec_id] += req.grams * order.quantity
+
+    # Committed demand from all pending/printing orders (actual grams needed)
+    committed_grams: Dict[int, float] = defaultdict(float)
+    contributing_orders_map: Dict[int, list] = defaultdict(list)
+    active_orders = (
+        db.query(Order)
+        .filter(Order.status.in_([OrderStatus.pending, OrderStatus.printing]))
+        .all()
+    )
+    for order in active_orders:
+        c = order.customer
+        if c:
+            customer_name = " ".join(filter(None, [c.given_name, c.family_name])) or c.company_name or ""
+        else:
+            customer_name = order.customer_name or ""
+        for req in order.item.filament_requirements:
+            committed_grams[req.filament_spec_id] += req.grams * order.quantity
+            contributing_orders_map[req.filament_spec_id].append(ContributingOrder(
+                order_id=order.id,
+                model_name=order.item.name,
+                customer_name=customer_name,
+                quantity=order.quantity,
+                grams_needed=round(req.grams * order.quantity, 1),
+                status=order.status.value,
+            ))
 
     spoolman_url = get_setting(db, "spoolman_url")
     connected, stock = await _fetch_spoolman_stock(spoolman_url)
 
     all_specs = db.query(FilamentSpec).all()
 
-    # Include specs that appear in any model, even with zero recent demand
-    model_spec_ids: set[int] = set()
-    for order in db.query(Order).filter(Order.status != OrderStatus.cancelled).all():
-        for req in order.print_model.filament_requirements:
-            model_spec_ids.add(req.filament_spec_id)
-    for spec_id in grams_used:
-        model_spec_ids.add(spec_id)
+    # Include specs with any committed or historical demand
+    model_spec_ids: set[int] = set(grams_used.keys()) | set(committed_grams.keys())
 
     items = []
     for spec in all_specs:
@@ -79,7 +98,11 @@ async def get_forecast(
 
         used = grams_used.get(spec.id, 0.0)
         per_week = used / lookback_weeks
-        total_demand = per_week * forecast_weeks
+        rate_demand = per_week * forecast_weeks
+        committed = committed_grams.get(spec.id, 0.0)
+
+        # Use whichever is greater: rate-based projection or known pending demand
+        total_demand = max(rate_demand, committed)
 
         key = _material_color_key(spec.material, spec.color_name)
         on_hand = stock.get(key, 0.0)
@@ -100,6 +123,7 @@ async def get_forecast(
             spoolman_stock_grams=round(on_hand, 1),
             shortfall_grams=round(shortfall, 1),
             status=status,
+            contributing_orders=contributing_orders_map.get(spec.id, []),
         ))
 
     items.sort(key=lambda x: (-x.shortfall_grams, x.filament_spec.material))

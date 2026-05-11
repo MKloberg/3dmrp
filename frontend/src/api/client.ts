@@ -61,21 +61,50 @@ export interface SlicerFile {
   file_path: string
 }
 
-export interface PrintModel {
+export interface RoutingStepFilament {
+  id: number
+  filament_spec_id: number
+  grams: number
+  filament_spec: FilamentSpec
+}
+
+export interface RoutingStep {
+  id: number
+  routing_id: number
+  sort_order: number
+  description: string
+  printer_type_id: number | null
+  quantity_on_plate: number
+  filaments: RoutingStepFilament[]
+}
+
+export interface Routing {
+  id: number
+  item_id: number
+  name: string
+  is_default: boolean
+  sort_order: number
+  steps: RoutingStep[]
+}
+
+export interface Item {
   id: number
   name: string
   description: string
   notes: string
+  sku: string
+  use_advanced_routing: boolean
   created_at: string
   filament_requirements: ModelFilament[]
   images: ModelImage[]
   slicer_files: SlicerFile[]
   tags: Tag[]
+  routings: Routing[]
 }
 
 export interface Order {
   id: number
-  print_model_id: number
+  item_id: number
   customer_id: number | null
   quantity: number
   customer_name: string
@@ -83,8 +112,17 @@ export interface Order {
   date_ordered: string
   date_needed: string | null
   status: 'pending' | 'printing' | 'complete' | 'cancelled'
-  print_model: PrintModel
+  item: Item
   customer: Customer | null
+}
+
+export interface ContributingOrder {
+  order_id: number
+  model_name: string
+  customer_name: string
+  quantity: number
+  grams_needed: number
+  status: 'pending' | 'printing'
 }
 
 export interface ForecastItem {
@@ -95,6 +133,7 @@ export interface ForecastItem {
   spoolman_stock_grams: number
   shortfall_grams: number
   status: 'ok' | 'low' | 'critical'
+  contributing_orders: ContributingOrder[]
 }
 
 export interface ForecastResponse {
@@ -116,53 +155,79 @@ export const updateFilament = (id: number, data: FilamentSpecInput) =>
 export const deleteFilament = (id: number) =>
   req<void>(`/filaments/${id}`, { method: 'DELETE' })
 
-// --- Models ---
-export const getModels = () => req<PrintModel[]>('/models')
-export const createModel = (data: Pick<PrintModel, 'name' | 'description' | 'notes'>) =>
-  req<PrintModel>('/models', { method: 'POST', body: JSON.stringify(data) })
-export const updateModel = (id: number, data: Pick<PrintModel, 'name' | 'description' | 'notes'>) =>
-  req<PrintModel>(`/models/${id}`, { method: 'PUT', body: JSON.stringify(data) })
-export const deleteModel = (id: number) =>
-  req<void>(`/models/${id}`, { method: 'DELETE' })
-export const addFilamentReq = (modelId: number, data: { filament_spec_id: number; grams: number }) =>
-  req<ModelFilament>(`/models/${modelId}/filaments`, { method: 'POST', body: JSON.stringify(data) })
-export const updateFilamentReq = (modelId: number, reqId: number, data: { grams: number; filament_spec_id: number }) =>
-  req<ModelFilament>(`/models/${modelId}/filaments/${reqId}`, { method: 'PATCH', body: JSON.stringify(data) })
-export const reorderFilaments = (modelId: number, items: { id: number; sort_order: number }[]) =>
-  req<void>(`/models/${modelId}/filaments/reorder`, { method: 'POST', body: JSON.stringify(items) })
-export const removeFilamentReq = (modelId: number, reqId: number) =>
-  req<void>(`/models/${modelId}/filaments/${reqId}`, { method: 'DELETE' })
+// --- Items ---
+export const getItems = () => req<Item[]>('/items')
+export const createItem = (data: Pick<Item, 'name' | 'description' | 'notes' | 'sku'>) =>
+  req<Item>('/items', { method: 'POST', body: JSON.stringify(data) })
+export const updateItem = (id: number, data: Pick<Item, 'name' | 'description' | 'notes' | 'sku' | 'use_advanced_routing'>) =>
+  req<Item>(`/items/${id}`, { method: 'PUT', body: JSON.stringify(data) })
+export const deleteItem = (id: number) =>
+  req<void>(`/items/${id}`, { method: 'DELETE' })
+export const addFilamentReq = (itemId: number, data: { filament_spec_id: number; grams: number }) =>
+  req<ModelFilament>(`/items/${itemId}/filaments`, { method: 'POST', body: JSON.stringify(data) })
+export const updateFilamentReq = (itemId: number, reqId: number, data: { grams: number; filament_spec_id: number }) =>
+  req<ModelFilament>(`/items/${itemId}/filaments/${reqId}`, { method: 'PATCH', body: JSON.stringify(data) })
+export const reorderFilaments = (itemId: number, items: { id: number; sort_order: number }[]) =>
+  req<void>(`/items/${itemId}/filaments/reorder`, { method: 'POST', body: JSON.stringify(items) })
+export const removeFilamentReq = (itemId: number, reqId: number) =>
+  req<void>(`/items/${itemId}/filaments/${reqId}`, { method: 'DELETE' })
 
-export const uploadModelImage = async (modelId: number, file: File): Promise<ModelImage> => {
+export const uploadItemImage = async (itemId: number, file: File): Promise<ModelImage> => {
   const form = new FormData()
   form.append('file', file)
-  const res = await fetch(`${BASE}/models/${modelId}/images`, { method: 'POST', body: form })
+  const res = await fetch(`${BASE}/items/${itemId}/images`, { method: 'POST', body: form })
   if (!res.ok) throw new Error(res.statusText)
   return res.json()
 }
-export const copyThumbnailToModel = (modelId: number, printerId: number, thumbnailPath: string) =>
-  req<ModelImage>(`/models/${modelId}/images/from-printer`, {
+export const copyThumbnailToItem = (itemId: number, printerId: number, thumbnailPath: string) =>
+  req<ModelImage>(`/items/${itemId}/images/from-printer`, {
     method: 'POST',
     body: JSON.stringify({ printer_id: printerId, thumbnail_path: thumbnailPath }),
   })
-export const deleteModelImage = (modelId: number, imageId: number) =>
-  req<void>(`/models/${modelId}/images/${imageId}`, { method: 'DELETE' })
-export const cropModelImage = (modelId: number, imageId: number, box: { x: number; y: number; width: number; height: number }) =>
-  req<ModelImage>(`/models/${modelId}/images/${imageId}/crop`, { method: 'POST', body: JSON.stringify(box) })
+export const deleteItemImage = (itemId: number, imageId: number) =>
+  req<void>(`/items/${itemId}/images/${imageId}`, { method: 'DELETE' })
+export const cropItemImage = (itemId: number, imageId: number, box: { x: number; y: number; width: number; height: number }) =>
+  req<ModelImage>(`/items/${itemId}/images/${imageId}/crop`, { method: 'POST', body: JSON.stringify(box) })
 
-export const setSlicerFile = (modelId: number, printerId: number, filePath: string) =>
-  req<SlicerFile>(`/models/${modelId}/slicer-files/${printerId}`, { method: 'PUT', body: JSON.stringify({ file_path: filePath }) })
-export const deleteSlicerFile = (modelId: number, printerId: number) =>
-  req<void>(`/models/${modelId}/slicer-files/${printerId}`, { method: 'DELETE' })
-export const openInSlicer = (modelId: number, printerId: number) =>
-  req<void>(`/models/${modelId}/open-slicer/${printerId}`, { method: 'POST' })
+export const setSlicerFile = (itemId: number, printerId: number, filePath: string) =>
+  req<SlicerFile>(`/items/${itemId}/slicer-files/${printerId}`, { method: 'PUT', body: JSON.stringify({ file_path: filePath }) })
+export const deleteSlicerFile = (itemId: number, printerId: number) =>
+  req<void>(`/items/${itemId}/slicer-files/${printerId}`, { method: 'DELETE' })
+export const openInSlicer = (itemId: number, printerId: number) =>
+  req<void>(`/items/${itemId}/open-slicer/${printerId}`, { method: 'POST' })
+
+// --- Routings ---
+export const updateItemRouting = (itemId: number, data: { use_advanced_routing: boolean }) =>
+  req<Item>(`/items/${itemId}`, { method: 'PUT', body: JSON.stringify(data) })
+export const createRouting = (itemId: number, data: { name?: string; is_default?: boolean }) =>
+  req<Routing>(`/items/${itemId}/routings`, { method: 'POST', body: JSON.stringify(data) })
+export const updateRouting = (itemId: number, routingId: number, data: { name?: string; is_default?: boolean }) =>
+  req<Routing>(`/items/${itemId}/routings/${routingId}`, { method: 'PATCH', body: JSON.stringify(data) })
+export const deleteRouting = (itemId: number, routingId: number) =>
+  req<void>(`/items/${itemId}/routings/${routingId}`, { method: 'DELETE' })
+
+export const createRoutingStep = (itemId: number, routingId: number, data: { description?: string; printer_type_id?: number | null; quantity_on_plate?: number }) =>
+  req<RoutingStep>(`/items/${itemId}/routings/${routingId}/steps`, { method: 'POST', body: JSON.stringify(data) })
+export const updateRoutingStep = (itemId: number, routingId: number, stepId: number, data: { description?: string; printer_type_id?: number | null; quantity_on_plate?: number }) =>
+  req<RoutingStep>(`/items/${itemId}/routings/${routingId}/steps/${stepId}`, { method: 'PATCH', body: JSON.stringify(data) })
+export const deleteRoutingStep = (itemId: number, routingId: number, stepId: number) =>
+  req<void>(`/items/${itemId}/routings/${routingId}/steps/${stepId}`, { method: 'DELETE' })
+export const reorderRoutingSteps = (itemId: number, routingId: number, items: { id: number; sort_order: number }[]) =>
+  req<void>(`/items/${itemId}/routings/${routingId}/steps/reorder`, { method: 'POST', body: JSON.stringify(items) })
+
+export const addRoutingStepFilament = (itemId: number, routingId: number, stepId: number, data: { filament_spec_id: number; grams: number }) =>
+  req<RoutingStepFilament>(`/items/${itemId}/routings/${routingId}/steps/${stepId}/filaments`, { method: 'POST', body: JSON.stringify(data) })
+export const updateRoutingStepFilament = (itemId: number, routingId: number, stepId: number, filId: number, data: { grams: number; filament_spec_id: number }) =>
+  req<RoutingStepFilament>(`/items/${itemId}/routings/${routingId}/steps/${stepId}/filaments/${filId}`, { method: 'PATCH', body: JSON.stringify(data) })
+export const deleteRoutingStepFilament = (itemId: number, routingId: number, stepId: number, filId: number) =>
+  req<void>(`/items/${itemId}/routings/${routingId}/steps/${stepId}/filaments/${filId}`, { method: 'DELETE' })
 
 // --- Orders ---
 export const getOrders = (status?: string) =>
   req<Order[]>(`/orders${status ? `?status=${status}` : ''}`)
 export const createOrder = (data: {
-  print_model_id?: number
-  model_name?: string
+  item_id?: number
+  item_name?: string
   customer_id?: number | null
   quantity: number
   customer_name?: string
@@ -182,10 +247,10 @@ export const updateTag = (id: number, data: { name: string; color_hex: string })
   req<Tag>(`/tags/${id}`, { method: 'PUT', body: JSON.stringify(data) })
 export const deleteTag = (id: number) =>
   req<void>(`/tags/${id}`, { method: 'DELETE' })
-export const addTagToModel = (tagId: number, modelId: number) =>
-  req<void>(`/tags/${tagId}/models/${modelId}`, { method: 'POST' })
-export const removeTagFromModel = (tagId: number, modelId: number) =>
-  req<void>(`/tags/${tagId}/models/${modelId}`, { method: 'DELETE' })
+export const addTagToItem = (tagId: number, itemId: number) =>
+  req<void>(`/tags/${tagId}/items/${itemId}`, { method: 'POST' })
+export const removeTagFromItem = (tagId: number, itemId: number) =>
+  req<void>(`/tags/${tagId}/items/${itemId}`, { method: 'DELETE' })
 
 // --- Customers ---
 export interface Customer {
@@ -280,6 +345,65 @@ export interface SpoolmanFilament {
 export const getSpoolmanFilaments = () =>
   req<{ connected: boolean; filaments: SpoolmanFilament[]; error?: string }>('/spoolman/filaments')
 
+export interface SpoolmanSpool {
+  id: number
+  remaining_weight: number | null
+  used_weight: number | null
+  archived: boolean
+  location: string | null
+  filament: {
+    id: number
+    name: string
+    material: string
+    color_hex: string | null
+    vendor: { id: number; name: string } | null
+    weight: number | null
+  }
+}
+
+export const getSpoolmanStock = () =>
+  req<{ connected: boolean; spools: SpoolmanSpool[]; error?: string }>('/spoolman/stock')
+
+export const spoolmanBulkImport = (ids: number[]) =>
+  req<{ imported: number }>('/spoolman/import', { method: 'POST', body: JSON.stringify({ ids }) })
+
+export const spoolmanSync = () =>
+  req<{ updated: number }>('/spoolman/sync', { method: 'POST' })
+
+// --- Slicers ---
+export interface Slicer {
+  id: number
+  name: string
+  executable_path: string
+  created_at: string
+}
+
+export const getSlicers = () => req<Slicer[]>('/slicers')
+export const createSlicer = (data: { name: string; executable_path: string }) =>
+  req<Slicer>('/slicers', { method: 'POST', body: JSON.stringify(data) })
+export const updateSlicer = (id: number, data: { name?: string; executable_path?: string }) =>
+  req<Slicer>(`/slicers/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
+export const deleteSlicer = (id: number) =>
+  req<void>(`/slicers/${id}`, { method: 'DELETE' })
+
+// --- Printer Types ---
+export interface PrinterType {
+  id: number
+  name: string
+  slicer_id: number | null
+  slicer: Slicer | null
+  slot_count: number
+  created_at: string
+}
+
+export const getPrinterTypes = () => req<PrinterType[]>('/printer-types')
+export const createPrinterType = (data: { name: string; slicer_id: number | null; slot_count: number }) =>
+  req<PrinterType>('/printer-types', { method: 'POST', body: JSON.stringify(data) })
+export const updatePrinterType = (id: number, data: { name?: string; slicer_id?: number | null; slot_count?: number }) =>
+  req<PrinterType>(`/printer-types/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
+export const deletePrinterType = (id: number) =>
+  req<void>(`/printer-types/${id}`, { method: 'DELETE' })
+
 // --- Printers ---
 export interface PrinterSlot {
   id: number
@@ -295,6 +419,10 @@ export interface Printer {
   has_image: boolean
   slicer_name: string | null
   slicer_executable: string | null
+  printer_type_id: number | null
+  printer_type: PrinterType | null
+  slot_count_override: number | null
+  effective_slot_count: number
   created_at: string
   slots: PrinterSlot[]
 }
@@ -330,10 +458,14 @@ export interface PrinterHistoryResponse {
 export const getPrinters = () => req<Printer[]>('/printers')
 export const createPrinter = (data: { name: string; url: string }) =>
   req<Printer>('/printers', { method: 'POST', body: JSON.stringify(data) })
+export const updatePrinter = (id: number, data: { name?: string; url?: string }) =>
+  req<Printer>(`/printers/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
 export const deletePrinter = (id: number) =>
   req<void>(`/printers/${id}`, { method: 'DELETE' })
 export const setPrinterSlicer = (id: number, data: { slicer_name: string | null; slicer_executable: string | null }) =>
   req<Printer>(`/printers/${id}/slicer`, { method: 'PUT', body: JSON.stringify(data) })
+export const setPrinterType = (id: number, data: { printer_type_id: number | null; slot_count_override: number | null }) =>
+  req<Printer>(`/printers/${id}/type`, { method: 'PATCH', body: JSON.stringify(data) })
 export const setPrinterSlot = (printerId: number, slotNumber: number, filamentSpecId: number | null) =>
   req<PrinterSlot>(`/printers/${printerId}/slots/${slotNumber}`, {
     method: 'PUT',

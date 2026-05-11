@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getOrders, createOrder, updateOrder, deleteOrder, getModels, getCustomers, Order } from '../api/client'
+import { getOrders, createOrder, updateOrder, deleteOrder, getItems, getCustomers, Order } from '../api/client'
 import Modal from '../components/Modal'
 import StatusBadge from '../components/StatusBadge'
 import { Plus, Trash2, Pencil, User } from 'lucide-react'
@@ -15,7 +15,7 @@ export default function Orders() {
     queryKey: ['orders', filterStatus],
     queryFn: () => getOrders(filterStatus || undefined),
   })
-  const { data: models = [] } = useQuery({ queryKey: ['models'], queryFn: getModels })
+  const { data: items = [] } = useQuery({ queryKey: ['items'], queryFn: getItems })
   const { data: customers = [] } = useQuery({ queryKey: ['customers'], queryFn: getCustomers })
 
   const [showForm, setShowForm] = useState(false)
@@ -23,7 +23,7 @@ export default function Orders() {
   const [modelMode, setModelMode] = useState<'existing' | 'new'>('existing')
 
   const [form, setForm] = useState({
-    print_model_id: '', model_name: '',
+    item_id: '', item_name: '',
     customer_id: '', customer_name: '', customer_notes: '', date_needed: '', quantity: '1',
   })
   const [editForm, setEditForm] = useState({
@@ -34,8 +34,8 @@ export default function Orders() {
   const createMutation = useMutation({
     mutationFn: () => createOrder({
       ...(modelMode === 'existing'
-        ? { print_model_id: Number(form.print_model_id) }
-        : { model_name: form.model_name }),
+        ? { item_id: Number(form.item_id) }
+        : { item_name: form.item_name }),
       customer_id: form.customer_id ? Number(form.customer_id) : null,
       customer_name: form.customer_id ? '' : form.customer_name,
       customer_notes: form.customer_notes,
@@ -44,7 +44,7 @@ export default function Orders() {
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['orders'] })
-      qc.invalidateQueries({ queryKey: ['models'] })
+      qc.invalidateQueries({ queryKey: ['items'] })
       setShowForm(false)
       resetForm()
     },
@@ -74,7 +74,7 @@ export default function Orders() {
   })
 
   function resetForm() {
-    setForm({ print_model_id: '', model_name: '', customer_id: '', customer_name: '', customer_notes: '', date_needed: '', quantity: '1' })
+    setForm({ item_id: '', item_name: '', customer_id: '', customer_name: '', customer_notes: '', date_needed: '', quantity: '1' })
     setModelMode('existing')
   }
 
@@ -138,7 +138,7 @@ export default function Orders() {
             </thead>
             <tbody className="divide-y dark:divide-gray-700">
               {orders.map(order => {
-                const firstImage = order.print_model.images[0]
+                const firstImage = order.item.images[0]
                 const customerLabel = orderCustomerLabel(order)
                 return (
                   <tr key={order.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
@@ -146,14 +146,14 @@ export default function Orders() {
                       <div className="flex items-center gap-2">
                         {firstImage ? (
                           <img
-                            src={`/api/models/${order.print_model.id}/images/${firstImage.id}?v=${new Date(firstImage.created_at).getTime()}`}
+                            src={`/api/items/${order.item.id}/images/${firstImage.id}?v=${new Date(firstImage.created_at).getTime()}`}
                             alt=""
                             className="w-8 h-8 rounded object-cover border border-gray-200 dark:border-gray-600 shrink-0"
                           />
                         ) : (
                           <div className="w-8 h-8 rounded bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 shrink-0" />
                         )}
-                        <span className="font-medium">{order.print_model.name}</span>
+                        <span className="font-medium">{order.item.name}</span>
                       </div>
                     </td>
                     <td className="px-4 py-3 text-gray-600 dark:text-gray-300">
@@ -236,18 +236,18 @@ export default function Orders() {
               {modelMode === 'existing' ? (
                 <select
                   className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:border-gray-600"
-                  value={form.print_model_id}
-                  onChange={e => setForm(f => ({ ...f, print_model_id: e.target.value }))}
+                  value={form.item_id}
+                  onChange={e => setForm(f => ({ ...f, item_id: e.target.value }))}
                 >
-                  <option value="">— select model —</option>
-                  {models.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  <option value="">— select item —</option>
+                  {items.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                 </select>
               ) : (
                 <input
                   className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:border-gray-600"
-                  placeholder="Model name…"
-                  value={form.model_name}
-                  onChange={e => setForm(f => ({ ...f, model_name: e.target.value }))}
+                  placeholder="Item name…"
+                  value={form.item_name}
+                  onChange={e => setForm(f => ({ ...f, item_name: e.target.value }))}
                 />
               )}
             </div>
@@ -307,7 +307,7 @@ export default function Orders() {
                 className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Cancel</button>
               <button
                 disabled={
-                  (modelMode === 'existing' ? !form.print_model_id : !form.model_name.trim()) ||
+                  (modelMode === 'existing' ? !form.item_id : !form.item_name.trim()) ||
                   !form.quantity || createMutation.isPending
                 }
                 onClick={() => createMutation.mutate()}
@@ -323,7 +323,7 @@ export default function Orders() {
       {editing && (
         <Modal title="Edit Order" onClose={() => setEditing(null)}>
           <div className="space-y-3">
-            <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{editing.print_model.name}</p>
+            <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{editing.item.name}</p>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Quantity</label>

@@ -2,14 +2,15 @@ import { useState, useRef, useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  getPrinters, createPrinter, deletePrinter, getPrinterHistory, getPrinterStatus, getPrinterWebcams,
+  getPrinters, createPrinter, updatePrinter, deletePrinter, getPrinterHistory, getPrinterStatus, getPrinterWebcams,
   getPrinterFilamentDetect,
-  getFilaments, createModel, addFilamentReq, copyThumbnailToModel, uploadPrinterImage,
-  setPrinterSlot, deletePrinterSlot, setPrinterSlicer,
-  Printer, MoonrakerJob, FilamentSpec, PrinterStatus, WebcamInfo, FilamentDetectSlot,
+  getFilaments, createItem, addFilamentReq, copyThumbnailToItem, uploadPrinterImage,
+  setPrinterSlot, deletePrinterSlot, setPrinterType,
+  getPrinterTypes,
+  Printer, MoonrakerJob, FilamentSpec, PrinterStatus, WebcamInfo, FilamentDetectSlot, PrinterType,
 } from '../api/client'
 import Modal from '../components/Modal'
-import { Plus, Trash2, Printer as PrinterIcon, ChevronDown, ChevronRight, Upload, X, Scissors, Video, RefreshCw } from 'lucide-react'
+import { Plus, Trash2, Printer as PrinterIcon, ChevronDown, ChevronRight, Upload, X, Cpu, Video, RefreshCw, Pencil, Check } from 'lucide-react'
 
 function formatDuration(seconds: number | null): string {
   if (seconds == null) return '—'
@@ -642,26 +643,19 @@ function PrinterSlotConfig({ printer, filaments }: { printer: Printer; filaments
   )
 }
 
-function PrinterSlicerSection({ printer }: { printer: Printer }) {
+function PrinterTypeSection({ printer, printerTypes }: { printer: Printer; printerTypes: PrinterType[] }) {
   const qc = useQueryClient()
-  const [form, setForm] = useState({
-    slicer_name: printer.slicer_name ?? '',
-    slicer_executable: printer.slicer_executable ?? '',
-  })
+  const [typeId, setTypeId] = useState<string>(printer.printer_type_id ? String(printer.printer_type_id) : '')
+  const [override, setOverride] = useState<string>(printer.slot_count_override != null ? String(printer.slot_count_override) : '')
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
-
-  function update(patch: Partial<typeof form>) {
-    setForm(f => ({ ...f, ...patch }))
-    setDirty(true)
-  }
 
   async function save() {
     setSaving(true)
     try {
-      await setPrinterSlicer(printer.id, {
-        slicer_name: form.slicer_name || null,
-        slicer_executable: form.slicer_executable || null,
+      await setPrinterType(printer.id, {
+        printer_type_id: typeId ? Number(typeId) : null,
+        slot_count_override: override !== '' ? Number(override) : null,
       })
       qc.invalidateQueries({ queryKey: ['printers'] })
       setDirty(false)
@@ -670,42 +664,58 @@ function PrinterSlicerSection({ printer }: { printer: Printer }) {
     }
   }
 
+  const selectedType = printerTypes.find(pt => pt.id === Number(typeId))
+
   return (
     <div className="border-t dark:border-gray-700 px-4 py-3">
       <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2 flex items-center gap-1.5">
-        <Scissors size={11} /> Slicer
+        <Cpu size={11} /> Printer Type
       </h3>
-      <div className="flex flex-col sm:flex-row gap-2">
+      <div className="flex flex-col sm:flex-row gap-2 items-end">
         <div className="flex-1">
-          <label className="text-xs text-gray-400 block mb-1">Slicer name</label>
-          <input
+          <label className="text-xs text-gray-400 block mb-1">Type</label>
+          <select
             className="w-full border rounded px-2 py-1.5 text-xs dark:bg-gray-700 dark:border-gray-600"
-            placeholder="e.g. Bambu Studio"
-            value={form.slicer_name}
-            onChange={e => update({ slicer_name: e.target.value })}
-          />
+            value={typeId}
+            onChange={e => { setTypeId(e.target.value); setDirty(true) }}
+          >
+            <option value="">— unassigned —</option>
+            {printerTypes.map(pt => (
+              <option key={pt.id} value={pt.id}>{pt.name}</option>
+            ))}
+          </select>
         </div>
-        <div className="flex-[2]">
-          <label className="text-xs text-gray-400 block mb-1">Executable path</label>
+        <div className="w-32">
+          <label className="text-xs text-gray-400 block mb-1">
+            Slot override
+            {selectedType && (
+              <span className="ml-1 text-gray-300">(default: {selectedType.slot_count})</span>
+            )}
+          </label>
           <input
-            className="w-full border rounded px-2 py-1.5 text-xs font-mono dark:bg-gray-700 dark:border-gray-600"
-            placeholder="e.g. C:\Program Files\Bambu Studio\bambu-studio.exe"
-            value={form.slicer_executable}
-            onChange={e => update({ slicer_executable: e.target.value })}
+            type="number" min="1" placeholder="—"
+            className="w-full border rounded px-2 py-1.5 text-xs dark:bg-gray-700 dark:border-gray-600"
+            value={override}
+            onChange={e => { setOverride(e.target.value); setDirty(true) }}
           />
         </div>
         {dirty && (
-          <div className="flex items-end">
-            <button
-              onClick={save}
-              disabled={saving}
-              className="bg-brand-600 text-white px-3 py-1.5 rounded text-xs disabled:opacity-50"
-            >
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-          </div>
+          <button
+            onClick={save} disabled={saving}
+            className="bg-brand-600 text-white px-3 py-1.5 rounded text-xs disabled:opacity-50 shrink-0"
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
         )}
       </div>
+      {printer.printer_type && (
+        <p className="mt-1.5 text-xs text-gray-400">
+          {printer.printer_type.slicer
+            ? <>Slicer: <span className="text-gray-500 dark:text-gray-300">{printer.printer_type.slicer.name}</span></>
+            : <span className="italic">No slicer configured for this type</span>}
+          {' · '}Effective slots: <span className="text-gray-500 dark:text-gray-300">{printer.effective_slot_count}</span>
+        </p>
+      )}
     </div>
   )
 }
@@ -744,25 +754,25 @@ function PrinterHistory({ printer, filaments }: { printer: Printer; filaments: F
   async function handleImport(s: ImportState) {
     setImportSaving(true)
     try {
-      const model = await createModel({ name: s.modelName, description: s.description, notes: s.notes })
+      const item = await createItem({ name: s.modelName, sku: '', description: s.description, notes: s.notes })
       for (const slot of s.slots) {
         if (!slot.specId) continue
         const grams = parseFloat(slot.grams)
         if (isNaN(grams) || grams <= 0) continue
-        const perModel = grams / s.copies
-        await addFilamentReq(model.id, {
+        const perItem = grams / s.copies
+        await addFilamentReq(item.id, {
           filament_spec_id: Number(slot.specId),
-          grams: Math.round(perModel * 10) / 10,
+          grams: Math.round(perItem * 10) / 10,
         })
       }
       if (s.job.thumbnail_path) {
         try {
-          await copyThumbnailToModel(model.id, s.printerId, s.job.thumbnail_path)
+          await copyThumbnailToItem(item.id, s.printerId, s.job.thumbnail_path)
         } catch {
-          // non-critical — model was created successfully
+          // non-critical — item was created successfully
         }
       }
-      qc.invalidateQueries({ queryKey: ['models'] })
+      qc.invalidateQueries({ queryKey: ['items'] })
       setImportState(null)
     } finally {
       setImportSaving(false)
@@ -834,11 +844,125 @@ function PrinterHistory({ printer, filaments }: { printer: Printer; filaments: F
   )
 }
 
+function PrinterCard({
+  printer, isOpen, filaments, printerTypes, onToggle, onDelete,
+}: {
+  printer: Printer
+  isOpen: boolean
+  filaments: FilamentSpec[]
+  printerTypes: PrinterType[]
+  onToggle: () => void
+  onDelete: () => void
+}) {
+  const qc = useQueryClient()
+  const [editing, setEditing] = useState(false)
+  const [editForm, setEditForm] = useState({ name: printer.name, url: printer.url })
+  const [saving, setSaving] = useState(false)
+
+  async function saveEdit(e: React.MouseEvent) {
+    e.stopPropagation()
+    if (!editForm.name || !editForm.url) return
+    setSaving(true)
+    try {
+      await updatePrinter(printer.id, editForm)
+      qc.invalidateQueries({ queryKey: ['printers'] })
+      setEditing(false)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function startEdit(e: React.MouseEvent) {
+    e.stopPropagation()
+    setEditForm({ name: printer.name, url: printer.url })
+    setEditing(true)
+  }
+
+  function cancelEdit(e: React.MouseEvent) {
+    e.stopPropagation()
+    setEditing(false)
+  }
+
+  return (
+    <div id={`printer-${printer.id}`} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+      <div
+        className="flex items-center justify-between px-4 py-3 cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-700/30"
+        onClick={editing ? undefined : onToggle}
+      >
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          {isOpen
+            ? <ChevronDown size={14} className="text-gray-400 shrink-0" />
+            : <ChevronRight size={14} className="text-gray-400 shrink-0" />}
+          <PrinterAvatar printer={printer} />
+          {editing ? (
+            <div className="flex items-center gap-2 flex-1 min-w-0" onClick={e => e.stopPropagation()}>
+              <input
+                className="border rounded px-2 py-1 text-sm w-40 dark:bg-gray-700 dark:border-gray-600"
+                value={editForm.name}
+                autoFocus
+                onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
+              />
+              <input
+                className="flex-1 border rounded px-2 py-1 text-sm font-mono dark:bg-gray-700 dark:border-gray-600"
+                value={editForm.url}
+                onChange={e => setEditForm(f => ({ ...f, url: e.target.value }))}
+              />
+              <button onClick={saveEdit} disabled={!editForm.name || !editForm.url || saving}
+                className="text-green-600 hover:text-green-700 disabled:opacity-40 shrink-0">
+                <Check size={15} />
+              </button>
+              <button onClick={cancelEdit} className="text-gray-400 hover:text-gray-600 shrink-0">
+                <X size={15} />
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-col min-w-0 shrink-0">
+                <span className="font-medium text-sm leading-tight">{printer.name}</span>
+                {printer.printer_type ? (
+                  <span className="text-xs text-gray-400 leading-tight">
+                    {printer.printer_type.name} · {printer.effective_slot_count} slot{printer.effective_slot_count !== 1 ? 's' : ''}
+                  </span>
+                ) : (
+                  <span className="text-xs text-gray-400 font-mono leading-tight truncate max-w-48">{printer.url}</span>
+                )}
+              </div>
+              <PrinterStatusDisplay printerId={printer.id} />
+            </>
+          )}
+        </div>
+        {!editing && (
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={startEdit} className="text-gray-400 hover:text-gray-600">
+              <Pencil size={14} />
+            </button>
+            <button
+              onClick={e => { e.stopPropagation(); onDelete() }}
+              className="text-gray-400 hover:text-red-500"
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        )}
+      </div>
+      {isOpen && (
+        <>
+          <PrinterCamera printer={printer} />
+          <PrinterSlotConfig printer={printer} filaments={filaments} />
+          <PrinterTypeSection printer={printer} printerTypes={printerTypes} />
+          <PrinterHistory printer={printer} filaments={filaments} />
+        </>
+      )}
+    </div>
+  )
+}
+
 export default function Printers() {
   const qc = useQueryClient()
   const location = useLocation()
   const { data: printers = [] } = useQuery({ queryKey: ['printers'], queryFn: getPrinters })
   const { data: filaments = [] } = useQuery({ queryKey: ['filaments'], queryFn: getFilaments })
+  const { data: printerTypes = [] } = useQuery({ queryKey: ['printer-types'], queryFn: getPrinterTypes })
 
   const openPrinterId = (location.state as { openPrinterId?: number } | null)?.openPrinterId ?? null
   const [expanded, setExpanded] = useState<number | null>(openPrinterId)
@@ -881,35 +1005,15 @@ export default function Printers() {
         {printers.map(printer => {
           const isOpen = expanded === printer.id
           return (
-            <div key={printer.id} id={`printer-${printer.id}`} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-              <div
-                className="flex items-center justify-between px-4 py-3 cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-700/30"
-                onClick={() => setExpanded(isOpen ? null : printer.id)}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  {isOpen
-                    ? <ChevronDown size={14} className="text-gray-400 shrink-0" />
-                    : <ChevronRight size={14} className="text-gray-400 shrink-0" />}
-                  <PrinterAvatar printer={printer} />
-                  <span className="font-medium text-sm shrink-0">{printer.name}</span>
-                  <PrinterStatusDisplay printerId={printer.id} />
-                </div>
-                <button
-                  onClick={e => { e.stopPropagation(); if (confirm('Remove this printer?')) deleteMutation.mutate(printer.id) }}
-                  className="text-gray-400 hover:text-red-500"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-              {isOpen && (
-                <>
-                  <PrinterCamera printer={printer} />
-                  <PrinterSlotConfig printer={printer} filaments={filaments} />
-                  <PrinterSlicerSection printer={printer} />
-                  <PrinterHistory printer={printer} filaments={filaments} />
-                </>
-              )}
-            </div>
+            <PrinterCard
+              key={printer.id}
+              printer={printer}
+              isOpen={isOpen}
+              filaments={filaments}
+              printerTypes={printerTypes}
+              onToggle={() => setExpanded(isOpen ? null : printer.id)}
+              onDelete={() => { if (confirm('Remove this printer?')) deleteMutation.mutate(printer.id) }}
+            />
           )
         })}
       </div>

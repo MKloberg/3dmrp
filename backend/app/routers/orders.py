@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from ..database import get_db
-from ..models import Order, OrderStatus, PrintModel
+from ..models import Order, OrderStatus, Item
 from ..schemas import OrderCreate, OrderUpdate, OrderOut
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
@@ -22,16 +22,16 @@ def list_orders(
 
 @router.post("", response_model=OrderOut, status_code=201)
 def create_order(data: OrderCreate, db: Session = Depends(get_db)):
-    if data.print_model_id is None and not data.model_name:
-        raise HTTPException(status_code=422, detail="Either print_model_id or model_name is required")
-    model_id = data.print_model_id
-    if model_id is None:
-        new_model = PrintModel(name=data.model_name)
-        db.add(new_model)
+    if data.item_id is None and not data.item_name:
+        raise HTTPException(status_code=422, detail="Either item_id or item_name is required")
+    item_id = data.item_id
+    if item_id is None:
+        new_item = Item(name=data.item_name)
+        db.add(new_item)
         db.flush()
-        model_id = new_model.id
+        item_id = new_item.id
     order = Order(
-        print_model_id=model_id,
+        item_id=item_id,
         customer_id=data.customer_id,
         quantity=data.quantity,
         customer_name=data.customer_name,

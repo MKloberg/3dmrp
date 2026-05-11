@@ -1,0 +1,1213 @@
+import { useEffect, useRef, useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import ReactCrop, { Crop, PixelCrop } from 'react-image-crop'
+import 'react-image-crop/dist/ReactCrop.css'
+import {
+  getItems, createItem, updateItem, deleteItem,
+  getFilaments, addFilamentReq, updateFilamentReq, removeFilamentReq, reorderFilaments,
+  uploadItemImage, deleteItemImage, cropItemImage,
+  getTags, createTag, updateTag, deleteTag, addTagToItem, removeTagFromItem,
+  getPrinterTypes,
+  createRouting, updateRouting, deleteRouting,
+  createRoutingStep, updateRoutingStep, deleteRoutingStep,
+  addRoutingStepFilament, updateRoutingStepFilament, deleteRoutingStepFilament,
+  Item, FilamentSpec, Tag, PrinterType, Routing,
+} from '../api/client'
+import Modal from '../components/Modal'
+import { Plus, Trash2, ChevronDown, ChevronRight, Pencil, Check, X, Upload, ShoppingCart, GripVertical, Tag as TagIcon, Crop as CropIcon, Download, Route } from 'lucide-react'
+
+function CropModal({
+  itemId,
+  imageId,
+  imageUrl,
+  onClose,
+  onDone,
+}: {
+  itemId: number
+  imageId: number
+  imageUrl: string
+  onClose: () => void
+  onDone: () => void
+}) {
+  const qc = useQueryClient()
+  const imgRef = useRef<HTMLImageElement>(null)
+  const [crop, setCrop] = useState<Crop>()
+  const [completedCrop, setCompletedCrop] = useState<PixelCrop>()
+  const [saving, setSaving] = useState(false)
+
+  function onImageLoad(e: React.SyntheticEvent<HTMLImageElement>) {
+    const { width, height } = e.currentTarget
+    setCrop({ unit: '%', x: 0, y: 0, width: 100, height: 100 })
+    setCompletedCrop({ unit: 'px', x: 0, y: 0, width, height })
+  }
+
+  async function handleSave() {
+    if (!completedCrop?.width || !completedCrop?.height || !imgRef.current) return
+    const { width, height } = imgRef.current
+    const box = {
+      x: completedCrop.x / width,
+      y: completedCrop.y / height,
+      width: completedCrop.width / width,
+      height: completedCrop.height / height,
+    }
+    setSaving(true)
+    try {
+      await cropItemImage(itemId, imageId, box)
+      await qc.refetchQueries({ queryKey: ['items'] })
+      onDone()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title="Crop Image" onClose={onClose} wide>
+      <div className="space-y-4">
+        <div className="flex justify-center bg-gray-100 dark:bg-gray-900 rounded-lg overflow-hidden">
+          <ReactCrop
+            crop={crop}
+            onChange={(_, pct) => setCrop(pct)}
+            onComplete={c => setCompletedCrop(c)}
+          >
+            <img
+              ref={imgRef}
+              src={imageUrl}
+              alt="Crop"
+              onLoad={onImageLoad}
+              className="max-h-[60vh] max-w-full"
+            />
+          </ReactCrop>
+        </div>
+        <p className="text-xs text-gray-400 text-center">Drag to adjust the crop area. The original image will be replaced.</p>
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Cancel</button>
+          <button
+            onClick={handleSave}
+            disabled={!completedCrop?.width || saving}
+            className="bg-brand-600 text-white px-4 py-2 text-sm rounded-lg disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Apply Crop'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+const TAG_COLORS = [
+  '#6366f1','#8b5cf6','#ec4899','#ef4444','#f97316',
+  '#eab308','#22c55e','#14b8a6','#3b82f6','#64748b',
+]
+
+function TagPill({ tag, onRemove }: { tag: Tag; onRemove?: () => void }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium text-white shrink-0"
+      style={{ backgroundColor: tag.color_hex }}
+    >
+      {tag.name}
+      {onRemove && (
+        <button onClick={e => { e.stopPropagation(); onRemove() }} className="opacity-70 hover:opacity-100">
+          <X size={10} />
+        </button>
+      )}
+    </span>
+  )
+}
+
+function FilamentDot({ hex }: { hex: string }) {
+  return <span className="inline-block w-3 h-3 rounded-full border border-gray-300 dark:border-gray-600 shrink-0" style={{ backgroundColor: hex }} />
+}
+
+function ItemDetail({ item, filaments, allTags, printerTypes }: { item: Item; filaments: FilamentSpec[]; allTags: Tag[]; printerTypes: PrinterType[] }) {
+  const qc = useQueryClient()
+  const imageInputRef = useRef<HTMLInputElement>(null)
+  const [uploadingImage, setUploadingImage] = useState(false)
+  const [pasteError, setPasteError] = useState<string | null>(null)
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+  const [cropTarget, setCropTarget] = useState<{ imageId: number; url: string } | null>(null)
+  const [editingReq, setEditingReq] = useState<{ reqId: number; specId: string; grams: string } | null>(null)
+  const [reqForm, setReqForm] = useState<{ specId: string; grams: string } | null>(null)
+const addTagMutation = useMutation({
+    mutationFn: (tagId: number) => addTagToItem(tagId, item.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['items'] }),
+  })
+  const removeTagMutation = useMutation({
+    mutationFn: (tagId: number) => removeTagFromItem(tagId, item.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['items'] }),
+  })
+  const dragSrc = useRef<number | null>(null)
+  const [dragIndex, setDragIndex] = useState<number | null>(null)
+  const [overIndex, setOverIndex] = useState<number | null>(null)
+
+  const reorderMutation = useMutation({
+    mutationFn: (reorderItems: { id: number; sort_order: number }[]) =>
+      reorderFilaments(item.id, reorderItems),
+    onMutate: async (reorderItems) => {
+      await qc.cancelQueries({ queryKey: ['items'] })
+      const previous = qc.getQueryData<Item[]>(['items'])
+      qc.setQueryData<Item[]>(['items'], (old = []) =>
+        old.map(i => {
+          if (i.id !== item.id) return i
+          const sorted = [...i.filament_requirements].sort((a, b) => {
+            const ai = reorderItems.find(x => x.id === a.id)?.sort_order ?? 0
+            const bi = reorderItems.find(x => x.id === b.id)?.sort_order ?? 0
+            return ai - bi
+          })
+          return { ...i, filament_requirements: sorted }
+        })
+      )
+      return { previous }
+    },
+    onError: (_err, _reorderItems, context) => {
+      if (context?.previous) qc.setQueryData(['items'], context.previous)
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['items'] }),
+  })
+
+  function clearDrag() { dragSrc.current = null; setDragIndex(null); setOverIndex(null) }
+
+  function handleDrop(dropIndex: number) {
+    const from = dragSrc.current
+    if (from === null || from === dropIndex) { clearDrag(); return }
+    const reqs = [...item.filament_requirements]
+    const [moved] = reqs.splice(from, 1)
+    reqs.splice(dropIndex, 0, moved)
+    reorderMutation.mutate(reqs.map((r, i) => ({ id: r.id, sort_order: i })))
+    clearDrag()
+  }
+
+  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploadingImage(true)
+    try {
+      await uploadItemImage(item.id, file)
+      qc.invalidateQueries({ queryKey: ['items'] })
+    } finally {
+      setUploadingImage(false)
+      e.target.value = ''
+    }
+  }
+
+  useEffect(() => {
+    async function handlePaste(e: ClipboardEvent) {
+      const target = e.target as HTMLElement
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
+
+      setPasteError(null)
+      let file: File | null = null
+
+      const items = Array.from(e.clipboardData?.items ?? [])
+      const files = Array.from(e.clipboardData?.files ?? [])
+
+      const imageItem = items.find(i => i.type.startsWith('image/'))
+      if (imageItem) file = imageItem.getAsFile()
+
+      if (!file) {
+        file = files.find(f =>
+          f.type.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|tiff?)$/i.test(f.name)
+        ) ?? null
+      }
+
+      if (!file) {
+        const anyFile = items.find(i => i.kind === 'file')
+        if (anyFile) file = anyFile.getAsFile()
+      }
+
+      if (!file) return
+      e.preventDefault()
+
+      if (file.size === 0) {
+        setPasteError('Clipboard image has no data. Try saving it to a file first, then uploading.')
+        return
+      }
+
+      setUploadingImage(true)
+      try {
+        await uploadItemImage(item.id, file)
+        qc.invalidateQueries({ queryKey: ['items'] })
+      } catch (err) {
+        setPasteError(err instanceof Error ? err.message : 'Upload failed')
+      } finally {
+        setUploadingImage(false)
+      }
+    }
+    document.addEventListener('paste', handlePaste)
+    return () => document.removeEventListener('paste', handlePaste)
+  }, [item.id, qc])
+
+  useEffect(() => {
+    if (lightboxIndex === null) return
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setLightboxIndex(null)
+      if (e.key === 'ArrowRight') setLightboxIndex(i => i !== null ? Math.min(i + 1, item.images.length - 1) : null)
+      if (e.key === 'ArrowLeft') setLightboxIndex(i => i !== null ? Math.max(i - 1, 0) : null)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [lightboxIndex, item.images.length])
+
+  const deleteImageMutation = useMutation({
+    mutationFn: (imageId: number) => deleteItemImage(item.id, imageId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['items'] }),
+  })
+
+  const removeReqMutation = useMutation({
+    mutationFn: (reqId: number) => removeFilamentReq(item.id, reqId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['items'] }),
+  })
+
+  const updateReqMutation = useMutation({
+    mutationFn: ({ reqId, grams, filament_spec_id }: { reqId: number; grams: number; filament_spec_id: number }) =>
+      updateFilamentReq(item.id, reqId, { grams, filament_spec_id }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['items'] }); setEditingReq(null) },
+  })
+
+  const addReqMutation = useMutation({
+    mutationFn: (data: { filament_spec_id: number; grams: number }) =>
+      addFilamentReq(item.id, data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['items'] }); setReqForm(null) },
+  })
+
+function confirmEdit(reqId: number, specId: string, gramsStr: string) {
+    const g = parseFloat(gramsStr)
+    if (!isNaN(g) && g > 0 && specId) updateReqMutation.mutate({ reqId, grams: g, filament_spec_id: Number(specId) })
+  }
+
+  // --- Routing state ---
+  const [editingRoutingId, setEditingRoutingId] = useState<number | null>(null)
+  const [editingRoutingName, setEditingRoutingName] = useState('')
+  const [editingStep, setEditingStep] = useState<{
+    routingId: number; stepId: number; desc: string; printerTypeId: string; qty: string
+  } | null>(null)
+  const [addingStep, setAddingStep] = useState<{ routingId: number } | null>(null)
+  const [newStepForm, setNewStepForm] = useState({ desc: '', printerTypeId: '', qty: '1' })
+  const [editingStepFil, setEditingStepFil] = useState<{
+    routingId: number; stepId: number; filId: number; specId: string; grams: string
+  } | null>(null)
+  const [addingStepFil, setAddingStepFil] = useState<{ routingId: number; stepId: number } | null>(null)
+  const [newStepFilForm, setNewStepFilForm] = useState({ specId: '', grams: '' })
+
+  const toggleAdvancedMutation = useMutation({
+    mutationFn: () => updateItem(item.id, {
+      name: item.name, description: item.description, notes: item.notes, sku: item.sku,
+      use_advanced_routing: !item.use_advanced_routing,
+    }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['items'] }),
+  })
+
+  const createRoutingMutation = useMutation({
+    mutationFn: (data: { name?: string }) => createRouting(item.id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['items'] }),
+  })
+
+  const updateRoutingMutation = useMutation({
+    mutationFn: ({ routingId, name }: { routingId: number; name: string }) =>
+      updateRouting(item.id, routingId, { name }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['items'] }); setEditingRoutingId(null) },
+  })
+
+  const deleteRoutingMutation = useMutation({
+    mutationFn: (routingId: number) => deleteRouting(item.id, routingId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['items'] }),
+  })
+
+  const createStepMutation = useMutation({
+    mutationFn: async ({ routingId, desc, printerTypeId, qty }: { routingId: number; desc: string; printerTypeId: string; qty: string }) => {
+      const step = await createRoutingStep(item.id, routingId, {
+        description: desc,
+        printer_type_id: printerTypeId ? Number(printerTypeId) : null,
+        quantity_on_plate: Number(qty) || 1,
+      })
+      for (const req of item.filament_requirements) {
+        await addRoutingStepFilament(item.id, routingId, step.id, {
+          filament_spec_id: req.filament_spec_id,
+          grams: req.grams,
+        })
+      }
+      return step
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['items'] }); setAddingStep(null); setNewStepForm({ desc: '', printerTypeId: '', qty: '1' }) },
+  })
+
+  const updateStepMutation = useMutation({
+    mutationFn: ({ routingId, stepId, desc, printerTypeId, qty }: { routingId: number; stepId: number; desc: string; printerTypeId: string; qty: string }) =>
+      updateRoutingStep(item.id, routingId, stepId, {
+        description: desc,
+        printer_type_id: printerTypeId ? Number(printerTypeId) : null,
+        quantity_on_plate: Number(qty) || 1,
+      }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['items'] }); setEditingStep(null) },
+  })
+
+  const deleteStepMutation = useMutation({
+    mutationFn: ({ routingId, stepId }: { routingId: number; stepId: number }) =>
+      deleteRoutingStep(item.id, routingId, stepId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['items'] }),
+  })
+
+  const addStepFilMutation = useMutation({
+    mutationFn: ({ routingId, stepId, specId, grams }: { routingId: number; stepId: number; specId: string; grams: string }) =>
+      addRoutingStepFilament(item.id, routingId, stepId, { filament_spec_id: Number(specId), grams: Number(grams) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['items'] }); setAddingStepFil(null); setNewStepFilForm({ specId: '', grams: '' }) },
+  })
+
+  const updateStepFilMutation = useMutation({
+    mutationFn: ({ routingId, stepId, filId, specId, grams }: { routingId: number; stepId: number; filId: number; specId: string; grams: string }) =>
+      updateRoutingStepFilament(item.id, routingId, stepId, filId, { filament_spec_id: Number(specId), grams: Number(grams) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['items'] }); setEditingStepFil(null) },
+  })
+
+  const deleteStepFilMutation = useMutation({
+    mutationFn: ({ routingId, stepId, filId }: { routingId: number; stepId: number; filId: number }) =>
+      deleteRoutingStepFilament(item.id, routingId, stepId, filId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['items'] }),
+  })
+
+  async function handleAddStep(routingId: number) {
+    const { desc, printerTypeId, qty } = newStepForm
+    createStepMutation.mutate({ routingId, desc, printerTypeId, qty })
+  }
+
+  async function ensureRoutingThenAddStep() {
+    if (item.routings.length > 0) {
+      setAddingStep({ routingId: item.routings[0].id })
+    } else {
+      const routing = await createRouting(item.id, {})
+      await qc.invalidateQueries({ queryKey: ['items'] })
+      setAddingStep({ routingId: routing.id })
+    }
+  }
+
+  function renderRoutingSteps(routing: Routing) {
+    return (
+      <div className="space-y-2 mt-2">
+        {routing.steps.map((step, idx) => {
+          const isEditingThis = editingStep?.stepId === step.id
+          const isAddingFilHere = addingStepFil?.stepId === step.id
+          const printerType = printerTypes.find(pt => pt.id === step.printer_type_id)
+          return (
+            <div key={step.id} className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2.5 space-y-1.5">
+              {isEditingThis && editingStep ? (
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400 shrink-0">Step {idx + 1}</span>
+                    <input
+                      autoFocus
+                      className="flex-1 border rounded px-2 py-1 text-xs dark:bg-gray-700 dark:border-gray-600"
+                      placeholder="Description"
+                      value={editingStep.desc}
+                      onChange={e => setEditingStep(s => s && { ...s, desc: e.target.value })}
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <select
+                      className="flex-1 border rounded px-2 py-1 text-xs dark:bg-gray-700 dark:border-gray-600"
+                      value={editingStep.printerTypeId}
+                      onChange={e => setEditingStep(s => s && { ...s, printerTypeId: e.target.value })}
+                    >
+                      <option value="">— any printer type —</option>
+                      {printerTypes.map(pt => <option key={pt.id} value={pt.id}>{pt.name}</option>)}
+                    </select>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="text-xs text-gray-500">×</span>
+                      <input
+                        type="number" min="1"
+                        className="w-14 border rounded px-1.5 py-1 text-xs text-right dark:bg-gray-700 dark:border-gray-600"
+                        value={editingStep.qty}
+                        onChange={e => setEditingStep(s => s && { ...s, qty: e.target.value })}
+                      />
+                      <span className="text-xs text-gray-500">per plate</span>
+                    </div>
+                    <button onClick={() => updateStepMutation.mutate({ routingId: routing.id, stepId: step.id, desc: editingStep.desc, printerTypeId: editingStep.printerTypeId, qty: editingStep.qty })} disabled={updateStepMutation.isPending} className="text-green-500 hover:text-green-600 disabled:opacity-40"><Check size={13} /></button>
+                    <button onClick={() => setEditingStep(null)} className="text-gray-400 hover:text-gray-600"><X size={13} /></button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-xs text-gray-400 shrink-0">Step {idx + 1}</span>
+                    <span className="text-sm font-medium truncate">{step.description || <span className="text-gray-400 italic">No description</span>}</span>
+                    {printerType && <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0 bg-gray-200 dark:bg-gray-600 px-1.5 py-0.5 rounded">{printerType.name}</span>}
+                    {step.quantity_on_plate > 1 && <span className="text-xs text-gray-400 shrink-0">×{step.quantity_on_plate}/plate</span>}
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button onClick={() => setEditingStep({ routingId: routing.id, stepId: step.id, desc: step.description, printerTypeId: String(step.printer_type_id ?? ''), qty: String(step.quantity_on_plate) })} className="text-gray-400 hover:text-brand-600"><Pencil size={12} /></button>
+                    <button onClick={() => { if (confirm('Delete this step?')) deleteStepMutation.mutate({ routingId: routing.id, stepId: step.id }) }} className="text-red-400 hover:text-red-600"><Trash2 size={12} /></button>
+                  </div>
+                </div>
+              )}
+              {/* Step filaments */}
+              <div className="pl-10 space-y-1">
+                {step.filaments.map(fil => {
+                  const isEditingFil = editingStepFil?.filId === fil.id
+                  return (
+                    <div key={fil.id} className="flex items-center gap-2 text-xs">
+                      {isEditingFil && editingStepFil ? (
+                        <>
+                          <FilamentDot hex={fil.filament_spec.color_hex} />
+                          <select className="flex-1 border rounded px-1.5 py-0.5 text-xs dark:bg-gray-700 dark:border-gray-600" value={editingStepFil.specId} onChange={e => setEditingStepFil(s => s && { ...s, specId: e.target.value })}>
+                            <option value="">— select —</option>
+                            {filaments.map(f => <option key={f.id} value={f.id}>{f.material} — {f.color_name}{f.brand ? ` (${f.brand})` : ''}</option>)}
+                          </select>
+                          <input type="number" min="0.1" step="0.1" className="w-16 border rounded px-1.5 py-0.5 text-xs text-right dark:bg-gray-700 dark:border-gray-600" value={editingStepFil.grams} onChange={e => setEditingStepFil(s => s && { ...s, grams: e.target.value })} />
+                          <span className="text-gray-500">g</span>
+                          <button onClick={() => updateStepFilMutation.mutate({ routingId: routing.id, stepId: step.id, filId: fil.id, specId: editingStepFil.specId, grams: editingStepFil.grams })} disabled={!editingStepFil.specId || updateStepFilMutation.isPending} className="text-green-500 hover:text-green-600 disabled:opacity-40"><Check size={11} /></button>
+                          <button onClick={() => setEditingStepFil(null)} className="text-gray-400 hover:text-gray-600"><X size={11} /></button>
+                        </>
+                      ) : (
+                        <>
+                          <FilamentDot hex={fil.filament_spec.color_hex} />
+                          <span className="flex-1 text-gray-600 dark:text-gray-300">{fil.filament_spec.material} — {fil.filament_spec.color_name}</span>
+                          <span className="font-medium text-gray-700 dark:text-gray-200">{fil.grams}g/plate</span>
+                          <button onClick={() => setEditingStepFil({ routingId: routing.id, stepId: step.id, filId: fil.id, specId: String(fil.filament_spec_id), grams: String(fil.grams) })} className="text-gray-400 hover:text-brand-600"><Pencil size={11} /></button>
+                          <button onClick={() => deleteStepFilMutation.mutate({ routingId: routing.id, stepId: step.id, filId: fil.id })} className="text-red-400 hover:text-red-600"><Trash2 size={11} /></button>
+                        </>
+                      )}
+                    </div>
+                  )
+                })}
+                {isAddingFilHere && addingStepFil ? (
+                  <div className="flex items-center gap-1.5">
+                    <select className="flex-1 border rounded px-1.5 py-0.5 text-xs dark:bg-gray-700 dark:border-gray-600" value={newStepFilForm.specId} onChange={e => setNewStepFilForm(f => ({ ...f, specId: e.target.value }))}>
+                      <option value="">— select filament —</option>
+                      {filaments.map(f => <option key={f.id} value={f.id}>{f.material} — {f.color_name}{f.brand ? ` (${f.brand})` : ''}</option>)}
+                    </select>
+                    <input type="number" min="0.1" step="0.1" placeholder="g" className="w-16 border rounded px-1.5 py-0.5 text-xs text-right dark:bg-gray-700 dark:border-gray-600" value={newStepFilForm.grams} onChange={e => setNewStepFilForm(f => ({ ...f, grams: e.target.value }))} />
+                    <span className="text-gray-500 text-xs">g</span>
+                    <button disabled={!newStepFilForm.specId || !newStepFilForm.grams || addStepFilMutation.isPending} onClick={() => addStepFilMutation.mutate({ routingId: routing.id, stepId: step.id, ...newStepFilForm })} className="text-green-500 hover:text-green-600 disabled:opacity-40"><Check size={11} /></button>
+                    <button onClick={() => setAddingStepFil(null)} className="text-gray-400 hover:text-gray-600"><X size={11} /></button>
+                  </div>
+                ) : (
+                  <button onClick={() => { setAddingStepFil({ routingId: routing.id, stepId: step.id }); setNewStepFilForm({ specId: '', grams: '' }) }} className="text-xs text-brand-600 hover:underline flex items-center gap-0.5"><Plus size={10} /> Add filament</button>
+                )}
+              </div>
+            </div>
+          )
+        })}
+        {/* Add step row */}
+        {addingStep?.routingId === routing.id ? (
+          <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2.5 space-y-1.5">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-400 shrink-0">New step</span>
+              <input autoFocus className="flex-1 border rounded px-2 py-1 text-xs dark:bg-gray-700 dark:border-gray-600" placeholder="Description" value={newStepForm.desc} onChange={e => setNewStepForm(f => ({ ...f, desc: e.target.value }))} />
+            </div>
+            <div className="flex items-center gap-2">
+              <select className="flex-1 border rounded px-2 py-1 text-xs dark:bg-gray-700 dark:border-gray-600" value={newStepForm.printerTypeId} onChange={e => setNewStepForm(f => ({ ...f, printerTypeId: e.target.value }))}>
+                <option value="">— any printer type —</option>
+                {printerTypes.map(pt => <option key={pt.id} value={pt.id}>{pt.name}</option>)}
+              </select>
+              <div className="flex items-center gap-1 shrink-0">
+                <span className="text-xs text-gray-500">×</span>
+                <input type="number" min="1" className="w-14 border rounded px-1.5 py-1 text-xs text-right dark:bg-gray-700 dark:border-gray-600" value={newStepForm.qty} onChange={e => setNewStepForm(f => ({ ...f, qty: e.target.value }))} />
+                <span className="text-xs text-gray-500">per plate</span>
+              </div>
+              <button onClick={() => handleAddStep(routing.id)} disabled={createStepMutation.isPending} className="text-green-500 hover:text-green-600 disabled:opacity-40"><Check size={13} /></button>
+              <button onClick={() => setAddingStep(null)} className="text-gray-400 hover:text-gray-600"><X size={13} /></button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => { setAddingStep({ routingId: routing.id }); setNewStepForm({ desc: '', printerTypeId: '', qty: '1' }) }} className="text-sm text-brand-600 hover:underline flex items-center gap-1 mt-1"><Plus size={13} /> Add step</button>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="border-t dark:border-gray-700 px-4 py-3 space-y-4">
+      {item.notes && <p className="text-sm text-gray-500 dark:text-gray-400 italic">{item.notes}</p>}
+
+      {/* Tags */}
+      <div className="flex flex-wrap items-center gap-2">
+        {item.tags.map(tag => (
+          <TagPill key={tag.id} tag={tag} onRemove={() => removeTagMutation.mutate(tag.id)} />
+        ))}
+        {allTags.filter(t => !item.tags.some(it => it.id === t.id)).length > 0 && (
+          <select
+            className="text-xs border rounded-full px-2 py-0.5 text-gray-500 dark:text-gray-400 dark:bg-gray-800 dark:border-gray-600 cursor-pointer"
+            value=""
+            onChange={e => { if (e.target.value) addTagMutation.mutate(Number(e.target.value)) }}
+          >
+            <option value="">+ Add tag</option>
+            {allTags.filter(t => !item.tags.some(it => it.id === t.id)).map(t => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+        )}
+        {allTags.length === 0 && item.tags.length === 0 && (
+          <span className="text-xs text-gray-400 italic">No tags yet — create some with the tag manager above.</span>
+        )}
+      </div>
+
+
+      {/* Images */}
+      <div>
+        <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2">
+          Images <span className="normal-case font-normal text-gray-300 dark:text-gray-600 ml-1">— or paste from clipboard</span>
+        </p>
+        {pasteError && (
+          <p className="text-xs text-red-500 mb-2">{pasteError}</p>
+        )}
+        <div className="flex flex-wrap gap-2 items-end">
+          {item.images.map((img, idx) => (
+            <div key={img.id} className="relative group">
+              <img
+                src={`/api/items/${item.id}/images/${img.id}?v=${new Date(img.created_at).getTime()}`}
+                alt=""
+                onClick={() => setLightboxIndex(idx)}
+                className="w-24 h-24 object-cover rounded-lg border border-gray-200 dark:border-gray-600 cursor-zoom-in"
+              />
+              <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <a
+                  href={`/api/items/${item.id}/images/${img.id}`}
+                  download={item.name}
+                  onClick={e => e.stopPropagation()}
+                  className="bg-black/60 text-white rounded-full p-0.5"
+                  title="Download"
+                >
+                  <Download size={10} />
+                </a>
+                <button
+                  onClick={() => setCropTarget({ imageId: img.id, url: `/api/items/${item.id}/images/${img.id}?v=${new Date(img.created_at).getTime()}` })}
+                  className="bg-black/60 text-white rounded-full p-0.5"
+                  title="Crop"
+                >
+                  <CropIcon size={10} />
+                </button>
+                <button
+                  onClick={() => deleteImageMutation.mutate(img.id)}
+                  className="bg-black/60 text-white rounded-full p-0.5"
+                  title="Delete"
+                >
+                  <X size={10} />
+                </button>
+              </div>
+            </div>
+          ))}
+          <button
+            onClick={() => imageInputRef.current?.click()}
+            disabled={uploadingImage}
+            className="w-24 h-24 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600 flex flex-col items-center justify-center gap-1 text-gray-400 hover:text-brand-600 hover:border-brand-400 transition-colors disabled:opacity-50"
+          >
+            {uploadingImage
+              ? <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+              : <><Upload size={16} /><span className="text-xs">Add</span></>
+            }
+          </button>
+          <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+        </div>
+      </div>
+
+      {cropTarget && (
+        <CropModal
+          itemId={item.id}
+          imageId={cropTarget.imageId}
+          imageUrl={cropTarget.url}
+          onClose={() => setCropTarget(null)}
+          onDone={() => setCropTarget(null)}
+        />
+      )}
+
+      {lightboxIndex !== null && item.images[lightboxIndex] && (() => {
+        const img = item.images[lightboxIndex]
+        const url = `/api/items/${item.id}/images/${img.id}?v=${new Date(img.created_at).getTime()}`
+        return (
+          <div
+            className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center"
+            onClick={() => setLightboxIndex(null)}
+          >
+            <img
+              src={url}
+              alt=""
+              onClick={e => e.stopPropagation()}
+              className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
+            />
+
+            <button
+              onClick={() => setLightboxIndex(null)}
+              className="absolute top-4 right-4 text-white/70 hover:text-white bg-black/40 rounded-full p-1.5"
+            >
+              <X size={20} />
+            </button>
+
+            {lightboxIndex > 0 && (
+              <button
+                onClick={e => { e.stopPropagation(); setLightboxIndex(lightboxIndex - 1) }}
+                className="absolute left-4 top-1/2 -translate-y-1/2 text-white/70 hover:text-white bg-black/40 rounded-full p-2"
+              >
+                <ChevronRight size={24} className="rotate-180" />
+              </button>
+            )}
+
+            {lightboxIndex < item.images.length - 1 && (
+              <button
+                onClick={e => { e.stopPropagation(); setLightboxIndex(lightboxIndex + 1) }}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-white/70 hover:text-white bg-black/40 rounded-full p-2"
+              >
+                <ChevronRight size={24} />
+              </button>
+            )}
+
+            <div
+              className="absolute bottom-4 flex items-center gap-3"
+              onClick={e => e.stopPropagation()}
+            >
+              <a
+                href={`/api/items/${item.id}/images/${img.id}`}
+                download={item.name}
+                className="flex items-center gap-1.5 text-sm text-white/80 hover:text-white bg-black/50 px-3 py-1.5 rounded-full"
+              >
+                <Download size={14} /> Download
+              </a>
+              <button
+                onClick={() => { setCropTarget({ imageId: img.id, url }); setLightboxIndex(null) }}
+                className="flex items-center gap-1.5 text-sm text-white/80 hover:text-white bg-black/50 px-3 py-1.5 rounded-full"
+              >
+                <CropIcon size={14} /> Crop
+              </button>
+              <button
+                onClick={() => { deleteImageMutation.mutate(img.id); setLightboxIndex(null) }}
+                className="flex items-center gap-1.5 text-sm text-white/80 hover:text-red-400 bg-black/50 px-3 py-1.5 rounded-full"
+              >
+                <X size={14} /> Delete
+              </button>
+              {item.images.length > 1 && (
+                <span className="text-xs text-white/40">{lightboxIndex + 1} / {item.images.length}</span>
+              )}
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* Filaments */}
+      <div>
+        <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2">Filaments</p>
+        <div className="space-y-1.5">
+          {item.filament_requirements.map((req, index) => {
+            const isEditing = editingReq?.reqId === req.id
+            const isDragOver = overIndex === index && dragIndex !== index
+            return (
+              <div
+                key={req.id}
+                draggable={!isEditing}
+                onDragStart={!isEditing ? () => { dragSrc.current = index; setDragIndex(index); setOverIndex(null) } : undefined}
+                onDragOver={e => { e.preventDefault(); if (!isEditing) setOverIndex(index) }}
+                onDrop={() => handleDrop(index)}
+                onDragEnd={clearDrag}
+                className={`rounded transition-colors ${isDragOver ? 'bg-brand-50 dark:bg-brand-900/20 ring-1 ring-inset ring-brand-400' : ''} ${dragIndex === index ? 'opacity-40' : ''}`}
+              >
+                {isEditing && editingReq ? (
+                  <div className="flex items-center gap-2 py-1">
+                    <span className="text-xs text-gray-400 w-5 shrink-0 select-none text-right">{index + 1}.</span>
+                    <select
+                      autoFocus
+                      className="flex-1 border rounded px-2 py-1 text-xs dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100"
+                      value={editingReq.specId}
+                      onChange={e => setEditingReq({ ...editingReq, specId: e.target.value })}
+                    >
+                      <option value="">— select —</option>
+                      {filaments.map(f => (
+                        <option key={f.id} value={f.id}>
+                          {f.material} — {f.color_name}{f.brand ? ` (${f.brand})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      min="0.1"
+                      step="0.1"
+                      className="w-16 border rounded px-1.5 py-1 text-xs text-right dark:bg-gray-700 dark:border-gray-600"
+                      value={editingReq.grams}
+                      onChange={e => setEditingReq({ ...editingReq, grams: e.target.value })}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') confirmEdit(req.id, editingReq.specId, editingReq.grams)
+                        if (e.key === 'Escape') setEditingReq(null)
+                      }}
+                    />
+                    <span className="text-xs text-gray-500 shrink-0">g</span>
+                    <button
+                      onClick={() => confirmEdit(req.id, editingReq.specId, editingReq.grams)}
+                      disabled={!editingReq.specId || updateReqMutation.isPending}
+                      className="text-green-500 hover:text-green-600 disabled:opacity-40"
+                    >
+                      <Check size={13} />
+                    </button>
+                    <button onClick={() => setEditingReq(null)} className="text-gray-400 hover:text-gray-600">
+                      <X size={13} />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between text-sm py-0.5">
+                    <div className="flex items-center gap-2">
+                      <GripVertical size={12} className="text-gray-300 dark:text-gray-600 cursor-grab shrink-0" />
+                      <span className="text-xs text-gray-400 w-4 shrink-0 select-none text-right">{index + 1}.</span>
+                      <FilamentDot hex={req.filament_spec.color_hex} />
+                      <span>{req.filament_spec.material} — {req.filament_spec.color_name}</span>
+                      {req.filament_spec.brand && <span className="text-gray-400 text-xs">{req.filament_spec.brand}</span>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{req.grams}g</span>
+                      {req.filament_spec.purchase_url && (
+                        <a href={req.filament_spec.purchase_url} target="_blank" rel="noopener noreferrer"
+                          title="Order" className="text-gray-400 hover:text-green-600">
+                          <ShoppingCart size={13} />
+                        </a>
+                      )}
+                      <button
+                        onClick={() => setEditingReq({ reqId: req.id, specId: String(req.filament_spec_id), grams: String(req.grams) })}
+                        className="text-gray-400 hover:text-brand-600"
+                        title="Edit"
+                      >
+                        <Pencil size={12} />
+                      </button>
+                      <button onClick={() => removeReqMutation.mutate(req.id)} className="text-red-400 hover:text-red-600">
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        {reqForm !== null ? (
+          <div className="flex items-end gap-2 pt-2">
+            <div className="flex-1">
+              <select
+                className="w-full border rounded-lg px-2 py-1.5 text-sm dark:bg-gray-700 dark:border-gray-600"
+                value={reqForm.specId}
+                onChange={e => setReqForm(r => r && { ...r, specId: e.target.value })}
+              >
+                <option value="">— select filament —</option>
+                {filaments.map(f => (
+                  <option key={f.id} value={f.id}>
+                    {f.material} — {f.color_name}{f.brand ? ` (${f.brand})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="w-20">
+              <input
+                type="number"
+                min="0.1"
+                step="0.1"
+                placeholder="g"
+                className="w-full border rounded-lg px-2 py-1.5 text-sm dark:bg-gray-700 dark:border-gray-600"
+                value={reqForm.grams}
+                onChange={e => setReqForm(r => r && { ...r, grams: e.target.value })}
+              />
+            </div>
+            <button
+              className="bg-brand-600 text-white px-3 py-1.5 rounded-lg text-sm disabled:opacity-50"
+              disabled={!reqForm.specId || !reqForm.grams || addReqMutation.isPending}
+              onClick={() => addReqMutation.mutate({
+                filament_spec_id: Number(reqForm.specId),
+                grams: Number(reqForm.grams),
+              })}
+            >Save</button>
+            <button className="text-sm text-gray-400 px-1" onClick={() => setReqForm(null)}>Cancel</button>
+          </div>
+        ) : (
+          <button
+            className="mt-2 text-sm text-brand-600 hover:underline flex items-center gap-1"
+            onClick={() => setReqForm({ specId: '', grams: '' })}
+          >
+            <Plus size={13} /> Add filament
+          </button>
+        )}
+      </div>
+
+      {/* Routing */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
+            <Route size={11} /> Production Steps (Routing)
+          </p>
+          <button
+            onClick={() => toggleAdvancedMutation.mutate()}
+            disabled={toggleAdvancedMutation.isPending}
+            className="text-xs text-gray-400 hover:text-brand-600 flex items-center gap-1"
+            title={item.use_advanced_routing ? 'Switch to simple mode (one routing)' : 'Switch to advanced mode (multiple routings)'}
+          >
+            {item.use_advanced_routing ? 'Advanced' : 'Simple'} <ChevronDown size={10} />
+          </button>
+        </div>
+
+        {item.use_advanced_routing ? (
+          /* Advanced mode: multiple named routings */
+          <div className="space-y-4">
+            {item.routings.map(routing => (
+              <div key={routing.id} className="border dark:border-gray-600 rounded-lg overflow-hidden">
+                <div className="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-700/50">
+                  {editingRoutingId === routing.id ? (
+                    <div className="flex items-center gap-2 flex-1 mr-2">
+                      <input
+                        autoFocus
+                        className="flex-1 border rounded px-2 py-0.5 text-sm dark:bg-gray-700 dark:border-gray-600"
+                        value={editingRoutingName}
+                        onChange={e => setEditingRoutingName(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') updateRoutingMutation.mutate({ routingId: routing.id, name: editingRoutingName })
+                          if (e.key === 'Escape') setEditingRoutingId(null)
+                        }}
+                      />
+                      <button onClick={() => updateRoutingMutation.mutate({ routingId: routing.id, name: editingRoutingName })} disabled={updateRoutingMutation.isPending} className="text-green-500 hover:text-green-600 disabled:opacity-40"><Check size={13} /></button>
+                      <button onClick={() => setEditingRoutingId(null)} className="text-gray-400 hover:text-gray-600"><X size={13} /></button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">{routing.name || <span className="text-gray-400 italic">Untitled</span>}</span>
+                      {routing.is_default && <span className="text-xs bg-brand-100 dark:bg-brand-900 text-brand-700 dark:text-brand-300 px-1.5 py-0.5 rounded-full">Default</span>}
+                      <button onClick={() => { setEditingRoutingId(routing.id); setEditingRoutingName(routing.name) }} className="text-gray-400 hover:text-brand-600"><Pencil size={12} /></button>
+                    </div>
+                  )}
+                  <button
+                    onClick={() => { if (confirm(`Delete routing "${routing.name || 'Untitled'}"?`)) deleteRoutingMutation.mutate(routing.id) }}
+                    className="text-red-400 hover:text-red-600 shrink-0"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+                <div className="px-3 py-2">
+                  {renderRoutingSteps(routing)}
+                </div>
+              </div>
+            ))}
+            <button
+              onClick={() => createRoutingMutation.mutate({ name: `Production Step ${item.routings.length + 1}` })}
+              disabled={createRoutingMutation.isPending}
+              className="text-sm text-brand-600 hover:underline flex items-center gap-1"
+            >
+              <Plus size={13} /> Add routing
+            </button>
+          </div>
+        ) : (
+          /* Simple mode: single routing */
+          <div>
+            {item.routings.length === 0 ? (
+              <div>
+                {addingStep ? (
+                  <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2.5 space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-400 shrink-0">Step 1</span>
+                      <input autoFocus className="flex-1 border rounded px-2 py-1 text-xs dark:bg-gray-700 dark:border-gray-600" placeholder="Description" value={newStepForm.desc} onChange={e => setNewStepForm(f => ({ ...f, desc: e.target.value }))} />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <select className="flex-1 border rounded px-2 py-1 text-xs dark:bg-gray-700 dark:border-gray-600" value={newStepForm.printerTypeId} onChange={e => setNewStepForm(f => ({ ...f, printerTypeId: e.target.value }))}>
+                        <option value="">— any printer type —</option>
+                        {printerTypes.map(pt => <option key={pt.id} value={pt.id}>{pt.name}</option>)}
+                      </select>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className="text-xs text-gray-500">×</span>
+                        <input type="number" min="1" className="w-14 border rounded px-1.5 py-1 text-xs text-right dark:bg-gray-700 dark:border-gray-600" value={newStepForm.qty} onChange={e => setNewStepForm(f => ({ ...f, qty: e.target.value }))} />
+                        <span className="text-xs text-gray-500">per plate</span>
+                      </div>
+                      <button onClick={async () => {
+                        const routing = await createRouting(item.id, {})
+                        await qc.invalidateQueries({ queryKey: ['items'] })
+                        createStepMutation.mutate({ routingId: routing.id, desc: newStepForm.desc, printerTypeId: newStepForm.printerTypeId, qty: newStepForm.qty })
+                      }} disabled={createStepMutation.isPending} className="text-green-500 hover:text-green-600 disabled:opacity-40"><Check size={13} /></button>
+                      <button onClick={() => setAddingStep(null)} className="text-gray-400 hover:text-gray-600"><X size={13} /></button>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={() => { setAddingStep({ routingId: -1 }); setNewStepForm({ desc: '', printerTypeId: '', qty: '1' }) }} className="text-sm text-brand-600 hover:underline flex items-center gap-1"><Plus size={13} /> Add step</button>
+                )}
+              </div>
+            ) : (
+              renderRoutingSteps(item.routings[0])
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function TagManager({ onClose }: { onClose: () => void }) {
+  const qc = useQueryClient()
+  const { data: tags = [] } = useQuery({ queryKey: ['tags'], queryFn: getTags })
+  const [form, setForm] = useState({ name: '', color_hex: TAG_COLORS[0] })
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editForm, setEditForm] = useState({ name: '', color_hex: '' })
+
+  const createMutation = useMutation({
+    mutationFn: () => createTag(form),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tags'] }); qc.invalidateQueries({ queryKey: ['items'] }); setForm({ name: '', color_hex: TAG_COLORS[0] }) },
+  })
+  const updateMutation = useMutation({
+    mutationFn: () => updateTag(editingId!, editForm),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tags'] }); qc.invalidateQueries({ queryKey: ['items'] }); setEditingId(null) },
+  })
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => deleteTag(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tags'] }); qc.invalidateQueries({ queryKey: ['items'] }) },
+  })
+
+  return (
+    <Modal title="Manage Tags" onClose={onClose}>
+      <div className="space-y-4">
+        <div className="space-y-2">
+          {tags.length === 0 && <p className="text-sm text-gray-400 italic">No tags yet.</p>}
+          {tags.map(tag => (
+            <div key={tag.id} className="flex items-center gap-2">
+              {editingId === tag.id ? (
+                <>
+                  <div className="flex gap-1 flex-wrap">
+                    {TAG_COLORS.map(c => (
+                      <button key={c} onClick={() => setEditForm(f => ({ ...f, color_hex: c }))}
+                        className={`w-5 h-5 rounded-full border-2 ${editForm.color_hex === c ? 'border-gray-900 dark:border-white' : 'border-transparent'}`}
+                        style={{ backgroundColor: c }} />
+                    ))}
+                  </div>
+                  <input className="flex-1 border rounded px-2 py-1 text-sm dark:bg-gray-700 dark:border-gray-600"
+                    value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
+                    onKeyDown={e => { if (e.key === 'Enter') updateMutation.mutate(); if (e.key === 'Escape') setEditingId(null) }}
+                    autoFocus />
+                  <button onClick={() => updateMutation.mutate()} disabled={!editForm.name} className="text-green-500 hover:text-green-600 disabled:opacity-40"><Check size={14} /></button>
+                  <button onClick={() => setEditingId(null)} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>
+                </>
+              ) : (
+                <>
+                  <TagPill tag={tag} />
+                  <button onClick={() => { setEditingId(tag.id); setEditForm({ name: tag.name, color_hex: tag.color_hex }) }}
+                    className="text-gray-400 hover:text-brand-600 ml-auto"><Pencil size={12} /></button>
+                  <button onClick={() => { if (confirm(`Delete tag "${tag.name}"?`)) deleteMutation.mutate(tag.id) }}
+                    className="text-gray-400 hover:text-red-500"><Trash2 size={13} /></button>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div className="border-t dark:border-gray-700 pt-3 space-y-2">
+          <p className="text-xs font-medium text-gray-500 dark:text-gray-400">New tag</p>
+          <div className="flex gap-1 flex-wrap">
+            {TAG_COLORS.map(c => (
+              <button key={c} onClick={() => setForm(f => ({ ...f, color_hex: c }))}
+                className={`w-5 h-5 rounded-full border-2 ${form.color_hex === c ? 'border-gray-900 dark:border-white' : 'border-transparent'}`}
+                style={{ backgroundColor: c }} />
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <input className="flex-1 border rounded-lg px-3 py-1.5 text-sm dark:bg-gray-700 dark:border-gray-600"
+              placeholder="Tag name"
+              value={form.name}
+              onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+              onKeyDown={e => { if (e.key === 'Enter' && form.name) createMutation.mutate() }}
+            />
+            <button disabled={!form.name || createMutation.isPending}
+              onClick={() => createMutation.mutate()}
+              className="bg-brand-600 text-white px-3 py-1.5 text-sm rounded-lg disabled:opacity-50">
+              Add
+            </button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+export default function Items() {
+  const qc = useQueryClient()
+  const { data: items = [] } = useQuery({ queryKey: ['items'], queryFn: getItems })
+  const { data: filaments = [] } = useQuery({ queryKey: ['filaments'], queryFn: getFilaments })
+  const { data: allTags = [] } = useQuery({ queryKey: ['tags'], queryFn: getTags })
+  const { data: printerTypes = [] } = useQuery({ queryKey: ['printer-types'], queryFn: getPrinterTypes })
+
+  const [expanded, setExpanded] = useState<number | null>(null)
+  const [showForm, setShowForm] = useState(false)
+  const [showTagManager, setShowTagManager] = useState(false)
+  const [filterTagIds, setFilterTagIds] = useState<Set<number>>(new Set())
+  const [editing, setEditing] = useState<Item | null>(null)
+  const [form, setForm] = useState({ name: '', sku: '', description: '', notes: '' })
+
+  function toggleFilterTag(id: number) {
+    setFilterTagIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  const visibleItems = filterTagIds.size === 0
+    ? items
+    : items.filter(m => [...filterTagIds].every(tid => m.tags.some(t => t.id === tid)))
+
+  const saveMutation = useMutation({
+    mutationFn: () => editing
+      ? updateItem(editing.id, { ...form, use_advanced_routing: editing.use_advanced_routing })
+      : createItem(form),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['items'] }); closeForm() },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => deleteItem(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['items'] }),
+  })
+
+  function openCreate() {
+    setEditing(null)
+    setForm({ name: '', sku: '', description: '', notes: '' })
+    setShowForm(true)
+  }
+
+  function openEdit(item: Item) {
+    setEditing(item)
+    setForm({ name: item.name, sku: item.sku, description: item.description, notes: item.notes })
+    setShowForm(true)
+  }
+
+  function closeForm() { setShowForm(false); setEditing(null) }
+
+  return (
+    <div className="p-6 space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Items</h1>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowTagManager(true)}
+            className="flex items-center gap-1.5 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm px-3 py-2 rounded-lg"
+          >
+            <TagIcon size={14} /> Tags
+          </button>
+          <button
+            onClick={openCreate}
+            className="flex items-center gap-1.5 bg-brand-600 hover:bg-brand-700 text-white text-sm px-4 py-2 rounded-lg"
+          >
+            <Plus size={15} /> Add Item
+          </button>
+        </div>
+      </div>
+
+      {/* Tag filter bar */}
+      {allTags.length > 0 && (
+        <div className="flex flex-wrap gap-2 items-center">
+          <span className="text-xs text-gray-400">Filter:</span>
+          {allTags.map(tag => (
+            <button
+              key={tag.id}
+              onClick={() => toggleFilterTag(tag.id)}
+              className={`px-2.5 py-0.5 rounded-full text-xs font-medium border-2 transition-all ${
+                filterTagIds.has(tag.id)
+                  ? 'text-white border-transparent'
+                  : 'bg-transparent border-transparent text-gray-500 dark:text-gray-400 hover:border-gray-300'
+              }`}
+              style={filterTagIds.has(tag.id) ? { backgroundColor: tag.color_hex, borderColor: tag.color_hex } : {}}
+            >
+              {tag.name}
+            </button>
+          ))}
+          {filterTagIds.size > 0 && (
+            <button onClick={() => setFilterTagIds(new Set())} className="text-xs text-gray-400 hover:text-gray-600">Clear</button>
+          )}
+        </div>
+      )}
+
+      {visibleItems.length === 0 && (
+        <p className="text-sm text-gray-400 italic">
+          {items.length === 0 ? 'No items yet. Add your first item.' : 'No items match the selected tags.'}
+        </p>
+      )}
+
+      <div className="space-y-2">
+        {visibleItems.map(item => {
+          const isOpen = expanded === item.id
+          const firstImage = item.images[0]
+          return (
+            <div key={item.id} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+              <div
+                className="flex items-center justify-between px-4 py-3 cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-700/30"
+                onClick={() => setExpanded(isOpen ? null : item.id)}
+              >
+                <div className="flex items-center gap-2">
+                  {isOpen ? <ChevronDown size={15} className="text-gray-400" /> : <ChevronRight size={15} className="text-gray-400" />}
+                  {firstImage ? (
+                    <img
+                      src={`/api/items/${item.id}/images/${firstImage.id}?v=${new Date(firstImage.created_at).getTime()}`}
+                      alt=""
+                      className="w-8 h-8 rounded object-cover border border-gray-200 dark:border-gray-600 shrink-0"
+                    />
+                  ) : (
+                    <div className="w-8 h-8 rounded bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 shrink-0" />
+                  )}
+                  <span className="font-medium">{item.name}</span>
+                  {item.description && <span className="text-sm text-gray-400 hidden sm:inline">— {item.description}</span>}
+                  {item.tags.map(tag => <TagPill key={tag.id} tag={tag} />)}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-400">{item.filament_requirements.length} filament{item.filament_requirements.length !== 1 ? 's' : ''}</span>
+                  <button onClick={e => { e.stopPropagation(); openEdit(item) }} className="text-xs text-brand-600 hover:underline px-2">Edit</button>
+                  <button
+                    onClick={e => { e.stopPropagation(); if (confirm('Delete this item?')) deleteMutation.mutate(item.id) }}
+                    className="text-red-400 hover:text-red-600"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+
+              {isOpen && <ItemDetail item={item} filaments={filaments} allTags={allTags} printerTypes={printerTypes} />}
+            </div>
+          )
+        })}
+      </div>
+
+      {showTagManager && <TagManager onClose={() => setShowTagManager(false)} />}
+
+      {showForm && (
+        <Modal title={editing ? 'Edit Item' : 'New Item'} onClose={closeForm}>
+          <div className="space-y-3">
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Name *</label>
+                <input
+                  className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:border-gray-600"
+                  value={form.name}
+                  onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                />
+              </div>
+              <div className="w-28">
+                <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">SKU</label>
+                <input
+                  className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:border-gray-600"
+                  value={form.sku}
+                  onChange={e => setForm(f => ({ ...f, sku: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Description</label>
+              <input
+                className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:border-gray-600"
+                value={form.description}
+                onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Notes</label>
+              <textarea
+                className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:border-gray-600"
+                rows={2}
+                value={form.notes}
+                onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button onClick={closeForm} className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200">Cancel</button>
+              <button
+                disabled={!form.name || saveMutation.isPending}
+                onClick={() => saveMutation.mutate()}
+                className="bg-brand-600 text-white px-4 py-2 text-sm rounded-lg disabled:opacity-50"
+              >
+                {saveMutation.isPending ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  )
+}

@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from .database import engine, Base
-from .routers import filaments, print_models, orders, spoolman, forecast, settings, printers, tags, customers
+from .routers import filaments, items, orders, spoolman, forecast, settings, printers, tags, customers, slicers, printer_types
 
 Base.metadata.create_all(bind=engine)
 
@@ -81,6 +81,58 @@ with engine.connect() as conn:
             cust_id = conn.execute(text("SELECT id FROM customers WHERE given_name = :name ORDER BY id DESC LIMIT 1"), {"name": name}).scalar()
             conn.execute(text("UPDATE orders SET customer_id = :cid WHERE customer_name = :name"), {"cid": cust_id, "name": name})
 
+    # Rename print_models → items (re-query tables after create_all may have added 'items')
+    existing_tables_current = {row[0] for row in conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))}
+    if "print_models" in existing_tables_current:
+        if "items" not in existing_tables_current:
+            conn.execute(text("ALTER TABLE print_models RENAME TO items"))
+        else:
+            # create_all already made an empty 'items'; migrate data then drop old table
+            pm_count = conn.execute(text("SELECT COUNT(*) FROM print_models")).scalar()
+            if pm_count > 0:
+                conn.execute(text("INSERT INTO items (id, name, description, notes, created_at, sku) SELECT id, name, description, notes, created_at, '' FROM print_models"))
+            conn.execute(text("DROP TABLE print_models"))
+
+    existing_items_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(items)"))}
+    if "sku" not in existing_items_cols:
+        conn.execute(text("ALTER TABLE items ADD COLUMN sku TEXT NOT NULL DEFAULT ''"))
+
+    # Rename print_model_id → item_id in orders
+    existing_orders_cols = {row[1] for row in conn.execute(text("PRAGMA table_info(orders)"))}
+    if "print_model_id" in existing_orders_cols and "item_id" not in existing_orders_cols:
+        conn.execute(text("ALTER TABLE orders RENAME COLUMN print_model_id TO item_id"))
+
+    if "slicers" not in existing_tables:
+        conn.execute(text("""
+            CREATE TABLE slicers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                executable_path TEXT NOT NULL DEFAULT '',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+
+    if "printer_types" not in existing_tables:
+        conn.execute(text("""
+            CREATE TABLE printer_types (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                slicer_id INTEGER REFERENCES slicers(id) ON DELETE SET NULL,
+                slot_count INTEGER NOT NULL DEFAULT 1,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+
+    existing_printers2 = {row[1] for row in conn.execute(text("PRAGMA table_info(printers)"))}
+    if "printer_type_id" not in existing_printers2:
+        conn.execute(text("ALTER TABLE printers ADD COLUMN printer_type_id INTEGER REFERENCES printer_types(id) ON DELETE SET NULL"))
+    if "slot_count_override" not in existing_printers2:
+        conn.execute(text("ALTER TABLE printers ADD COLUMN slot_count_override INTEGER"))
+
+    existing_items_cols2 = {row[1] for row in conn.execute(text("PRAGMA table_info(items)"))}
+    if "use_advanced_routing" not in existing_items_cols2:
+        conn.execute(text("ALTER TABLE items ADD COLUMN use_advanced_routing BOOLEAN NOT NULL DEFAULT 0"))
+
     conn.commit()
 
 app = FastAPI(title="3DMRP", version="1.0.0")
@@ -94,7 +146,7 @@ app.add_middleware(
 )
 
 app.include_router(filaments.router)
-app.include_router(print_models.router)
+app.include_router(items.router)
 app.include_router(orders.router)
 app.include_router(spoolman.router)
 app.include_router(forecast.router)
@@ -102,6 +154,8 @@ app.include_router(settings.router)
 app.include_router(printers.router)
 app.include_router(tags.router)
 app.include_router(customers.router)
+app.include_router(slicers.router)
+app.include_router(printer_types.router)
 
 
 @app.get("/api/health")

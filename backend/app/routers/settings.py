@@ -18,7 +18,7 @@ _SQLITE_MAGIC = b"SQLite format 3\x00"
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
-SETTING_KEYS = {"spoolman_url"}
+SETTING_KEYS = {"spoolman_url", "amazon_domain"}
 
 
 def get_setting(db: Session, key: str) -> str:

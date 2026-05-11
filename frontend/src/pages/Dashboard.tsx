@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { getOrders, getForecast, getPrinters, getPrinterStatus, getModels, getCustomers, getFilaments, PrinterStatus, Printer } from '../api/client'
+import { getOrders, getForecast, getPrinters, getPrinterStatus, getItems, getCustomers, getFilaments, PrinterStatus, Printer } from '../api/client'
 import StatusBadge from '../components/StatusBadge'
 import { AlertTriangle, ClipboardList, Wifi, WifiOff, Printer as PrinterIcon, ShoppingCart, Clock, Box, Users, Layers } from 'lucide-react'
 
@@ -70,7 +70,15 @@ function PrinterCard({ printer }: { printer: Printer }) {
       onClick={() => navigate('/printers', { state: { openPrinterId: printer.id } })}
     >
       <div className="flex items-center gap-3">
-        <PrinterIcon size={14} className="text-gray-400 shrink-0" />
+        {printer.has_image ? (
+          <img
+            src={`/api/printers/${printer.id}/image`}
+            alt={printer.name}
+            className="w-[22px] h-[22px] rounded object-cover shrink-0"
+          />
+        ) : (
+          <PrinterIcon size={14} className="text-gray-400 shrink-0" />
+        )}
         <span className="font-medium text-sm truncate flex-1">{printer.name}</span>
         <div className="flex items-center gap-1.5 shrink-0">
           <span className={`w-2 h-2 rounded-full ${dot}`} />
@@ -118,7 +126,7 @@ export default function Dashboard() {
   const { data: orders } = useQuery({ queryKey: ['orders'], queryFn: () => getOrders() })
   const { data: forecast } = useQuery({ queryKey: ['forecast'], queryFn: () => getForecast(4, 4) })
   const { data: printers = [] } = useQuery({ queryKey: ['printers'], queryFn: getPrinters })
-  const { data: models = [] } = useQuery({ queryKey: ['models'], queryFn: getModels })
+  const { data: items = [] } = useQuery({ queryKey: ['items'], queryFn: getItems })
   const { data: customers = [] } = useQuery({ queryKey: ['customers'], queryFn: getCustomers })
   const { data: filaments = [] } = useQuery({ queryKey: ['filaments'], queryFn: getFilaments })
 
@@ -153,7 +161,7 @@ export default function Dashboard() {
       {/* Stat cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
-          { label: 'Pending',       value: pending.length,  color: 'text-yellow-600', bg: 'bg-yellow-50 dark:bg-yellow-900/20' },
+          { label: 'Orders Pending', value: pending.length,  color: 'text-yellow-600', bg: 'bg-yellow-50 dark:bg-yellow-900/20' },
           { label: 'Printing Now',  value: printing.length, color: 'text-blue-600',   bg: 'bg-blue-50 dark:bg-blue-900/20' },
           { label: 'Overdue',       value: overdue.length,  color: 'text-red-600',    bg: 'bg-red-50 dark:bg-red-900/20' },
           { label: 'Stock Alerts',  value: alerts.length,   color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-900/20' },
@@ -168,7 +176,7 @@ export default function Dashboard() {
       {/* Nav cards */}
       <div className="grid grid-cols-5 gap-3">
         {[
-          { label: 'Models',    value: models.length,        icon: Box,          to: '/models',     color: 'text-indigo-600', bg: 'bg-indigo-50 dark:bg-indigo-900/20' },
+          { label: 'Items',     value: items.length,         icon: Box,          to: '/items',      color: 'text-indigo-600', bg: 'bg-indigo-50 dark:bg-indigo-900/20' },
           { label: 'Orders',    value: orders?.length ?? 0,  icon: ClipboardList,to: '/orders',     color: 'text-blue-600',   bg: 'bg-blue-50 dark:bg-blue-900/20' },
           { label: 'Customers', value: customers.length,     icon: Users,        to: '/customers',  color: 'text-green-600',  bg: 'bg-green-50 dark:bg-green-900/20' },
           { label: 'Printers',  value: printers.length,      icon: PrinterIcon,  to: '/printers',   color: 'text-slate-600',  bg: 'bg-slate-50 dark:bg-slate-900/20' },
@@ -209,13 +217,28 @@ export default function Dashboard() {
           <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 divide-y dark:divide-gray-700">
             {activeOrders.map(order => {
               const due = dueDateLabel(order.date_needed)
+              const c = order.customer
+              const customerLabel = c
+                ? ([c.given_name, c.family_name].filter(Boolean).join(' ') || c.company_name)
+                : order.customer_name
               return (
                 <div key={order.id} className="flex items-center justify-between px-4 py-3 gap-4">
-                  <div className="min-w-0">
-                    <p className="font-medium text-sm truncate">{order.print_model.name}</p>
-                    {order.customer_name && (
-                      <p className="text-xs text-gray-400 truncate">{order.customer_name}</p>
+                  <div className="flex items-center gap-3 min-w-0">
+                    {order.item.images[0] ? (
+                      <img
+                        src={`/api/items/${order.item.id}/images/${order.item.images[0].id}`}
+                        alt=""
+                        className="w-[22px] h-[22px] rounded object-cover shrink-0"
+                      />
+                    ) : (
+                      <ClipboardList size={14} className="text-gray-300 dark:text-gray-600 shrink-0" />
                     )}
+                    <div className="min-w-0 flex items-baseline gap-2">
+                      <p className="font-medium text-sm truncate">{order.item.name}</p>
+                      {customerLabel && (
+                        <span className="text-xs text-gray-400 truncate shrink-0">— {customerLabel}</span>
+                      )}
+                    </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
                     {due && (

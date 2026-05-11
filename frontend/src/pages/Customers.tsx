@@ -140,9 +140,9 @@ function CustomerOrders({ customerId }: { customerId: number }) {
       {orders.map((order: Order) => (
         <div key={order.id} className="flex items-center justify-between text-sm py-1.5 border-b dark:border-gray-700 last:border-0">
           <div className="flex items-center gap-3 min-w-0">
-            {order.print_model.images[0] ? (
+            {order.item.images[0] ? (
               <img
-                src={`/api/models/${order.print_model.id}/images/${order.print_model.images[0].id}`}
+                src={`/api/items/${order.item.id}/images/${order.item.images[0].id}`}
                 className="w-8 h-8 rounded object-cover border border-gray-200 dark:border-gray-600 shrink-0"
                 alt=""
               />
@@ -150,7 +150,7 @@ function CustomerOrders({ customerId }: { customerId: number }) {
               <div className="w-8 h-8 rounded bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 shrink-0" />
             )}
             <div className="min-w-0">
-              <p className="font-medium truncate">{order.print_model.name}</p>
+              <p className="font-medium truncate">{order.item.name}</p>
               <p className="text-xs text-gray-400">{new Date(order.date_ordered).toLocaleDateString()} · ×{order.quantity}</p>
             </div>
           </div>

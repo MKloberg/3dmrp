@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from ..database import get_db
-from ..models import Tag, PrintModel
+from ..models import Tag, Item
 from ..schemas import TagOut, TagCreate
 
 router = APIRouter(prefix="/api/tags", tags=["tags"])
@@ -46,23 +46,23 @@ def delete_tag(tag_id: int, db: Session = Depends(get_db)):
     db.commit()
 
 
-@router.post("/{tag_id}/models/{model_id}", status_code=204)
-def add_tag_to_model(tag_id: int, model_id: int, db: Session = Depends(get_db)):
+@router.post("/{tag_id}/items/{item_id}", status_code=204)
+def add_tag_to_item(tag_id: int, item_id: int, db: Session = Depends(get_db)):
     tag = db.query(Tag).filter(Tag.id == tag_id).first()
     if not tag:
         raise HTTPException(status_code=404, detail="Tag not found")
-    model = db.query(PrintModel).filter(PrintModel.id == model_id).first()
-    if not model:
-        raise HTTPException(status_code=404, detail="Model not found")
-    if tag not in model.tags:
-        model.tags.append(tag)
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if tag not in item.tags:
+        item.tags.append(tag)
         db.commit()
 
 
-@router.delete("/{tag_id}/models/{model_id}", status_code=204)
-def remove_tag_from_model(tag_id: int, model_id: int, db: Session = Depends(get_db)):
+@router.delete("/{tag_id}/items/{item_id}", status_code=204)
+def remove_tag_from_item(tag_id: int, item_id: int, db: Session = Depends(get_db)):
     tag = db.query(Tag).filter(Tag.id == tag_id).first()
-    model = db.query(PrintModel).filter(PrintModel.id == model_id).first()
-    if tag and model and tag in model.tags:
-        model.tags.remove(tag)
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if tag and item and tag in item.tags:
+        item.tags.remove(tag)
         db.commit()

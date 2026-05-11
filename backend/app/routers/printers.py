@@ -9,7 +9,13 @@ import httpx
 
 from ..database import get_db
 from ..models import Printer, PrinterSlot, FilamentSpec
-from ..schemas import PrinterCreate, PrinterOut, PrinterHistoryResponse, MoonrakerJob, PrinterSlotOut, PrinterSlotSet, PrinterSlicerConfig, PrinterStatus, WebcamInfo, FilamentDetectSlot
+from ..schemas import PrinterCreate, PrinterUpdate, PrinterOut, PrinterHistoryResponse, MoonrakerJob, PrinterSlotOut, PrinterSlotSet, PrinterSlicerConfig, PrinterStatus, WebcamInfo, FilamentDetectSlot
+from pydantic import BaseModel
+from typing import Optional
+
+class PrinterTypeAssign(BaseModel):
+    printer_type_id: Optional[int] = None
+    slot_count_override: Optional[int] = None
 
 router = APIRouter(prefix="/api/printers", tags=["printers"])
 
@@ -40,6 +46,20 @@ def list_printers(db: Session = Depends(get_db)):
 def create_printer(data: PrinterCreate, db: Session = Depends(get_db)):
     printer = Printer(**data.model_dump())
     db.add(printer)
+    db.commit()
+    db.refresh(printer)
+    return printer
+
+
+@router.patch("/{printer_id}", response_model=PrinterOut)
+def update_printer(printer_id: int, data: PrinterUpdate, db: Session = Depends(get_db)):
+    printer = db.query(Printer).filter(Printer.id == printer_id).first()
+    if not printer:
+        raise HTTPException(status_code=404, detail="Printer not found")
+    if data.name is not None:
+        printer.name = data.name
+    if data.url is not None:
+        printer.url = data.url
     db.commit()
     db.refresh(printer)
     return printer
@@ -91,6 +111,18 @@ def set_printer_slicer(printer_id: int, data: PrinterSlicerConfig, db: Session =
         raise HTTPException(status_code=404, detail="Printer not found")
     printer.slicer_name = data.slicer_name or None
     printer.slicer_executable = data.slicer_executable or None
+    db.commit()
+    db.refresh(printer)
+    return printer
+
+
+@router.patch("/{printer_id}/type", response_model=PrinterOut)
+def set_printer_type(printer_id: int, data: PrinterTypeAssign, db: Session = Depends(get_db)):
+    printer = db.query(Printer).filter(Printer.id == printer_id).first()
+    if not printer:
+        raise HTTPException(status_code=404, detail="Printer not found")
+    printer.printer_type_id = data.printer_type_id
+    printer.slot_count_override = data.slot_count_override
     db.commit()
     db.refresh(printer)
     return printer

@@ -4,9 +4,10 @@ import {
   getFilaments, createFilament, updateFilament, deleteFilament,
   FilamentSpec, FilamentSpecInput,
   getSpoolmanFilaments, SpoolmanFilament,
+  spoolmanBulkImport, spoolmanSync,
 } from '../api/client'
 import Modal from '../components/Modal'
-import { Plus, Pencil, Trash2, Download, ChevronDown, ChevronRight, ShoppingCart, ExternalLink } from 'lucide-react'
+import { Plus, Pencil, Trash2, Download, ChevronDown, ChevronRight, ShoppingCart, ExternalLink, RefreshCw } from 'lucide-react'
 
 const MATERIALS = ['PLA', 'PETG', 'ABS', 'ASA', 'TPU', 'Nylon', 'Resin', 'Other']
 
@@ -244,6 +245,61 @@ function FilamentForm({
   )
 }
 
+function SpoolmanImportModal({
+  filaments,
+  onClose,
+  onImport,
+  importing,
+}: {
+  filaments: SpoolmanFilament[]
+  onClose: () => void
+  onImport: (ids: number[]) => void
+  importing: boolean
+}) {
+  const [selected, setSelected] = useState<Set<number>>(new Set(filaments.map(f => f.id)))
+  const toggleAll = () =>
+    setSelected(s => s.size === filaments.length ? new Set() : new Set(filaments.map(f => f.id)))
+  const toggle = (id: number) =>
+    setSelected(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+
+  return (
+    <Modal title="Import from Spoolman" onClose={onClose}>
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-gray-500">{filaments.length} filament{filaments.length !== 1 ? 's' : ''} available</span>
+          <button onClick={toggleAll} className="text-xs text-brand-600 hover:underline">
+            {selected.size === filaments.length ? 'Deselect all' : 'Select all'}
+          </button>
+        </div>
+        <div className="max-h-[50vh] overflow-y-auto border rounded-lg divide-y dark:border-gray-700 dark:divide-gray-700">
+          {filaments.map(sf => {
+            const hex = sf.color_hex ? (sf.color_hex.startsWith('#') ? sf.color_hex : `#${sf.color_hex}`) : '#888888'
+            return (
+              <label key={sf.id} className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30">
+                <input type="checkbox" checked={selected.has(sf.id)} onChange={() => toggle(sf.id)} className="rounded border-gray-300" />
+                <div className="w-4 h-4 rounded-full border border-gray-300 shrink-0" style={{ backgroundColor: hex }} />
+                <span className="text-sm font-medium flex-1 truncate">{sf.name}</span>
+                <span className="text-xs text-gray-400 shrink-0">{sf.material}</span>
+                {sf.vendor?.name && <span className="text-xs text-gray-400 shrink-0">{sf.vendor.name}</span>}
+              </label>
+            )
+          })}
+        </div>
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600">Cancel</button>
+          <button
+            disabled={selected.size === 0 || importing}
+            onClick={() => onImport([...selected])}
+            className="bg-brand-600 text-white px-4 py-2 text-sm rounded-lg disabled:opacity-50"
+          >
+            {importing ? 'Importing…' : `Import ${selected.size}`}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 export default function Filaments() {
   const qc = useQueryClient()
   const { data: filaments = [] } = useQuery({ queryKey: ['filaments'], queryFn: getFilaments })
@@ -253,6 +309,8 @@ export default function Filaments() {
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<FilamentSpec | null>(null)
   const [form, setForm] = useState<FilamentSpecInput>(emptyForm())
+  const [showImportModal, setShowImportModal] = useState(false)
+  const [syncMsg, setSyncMsg] = useState<string | null>(null)
   const [showSpoolmanIds, setShowSpoolmanIds] = useState(
     () => localStorage.getItem('showSpoolmanIds') === 'true'
   )
@@ -285,12 +343,31 @@ export default function Filaments() {
     mutationFn: (id: number) => deleteFilament(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['filaments'] }),
   })
+  const importMutation = useMutation({
+    mutationFn: (ids: number[]) => spoolmanBulkImport(ids),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['filaments'] })
+      qc.invalidateQueries({ queryKey: ['spoolman-filaments'] })
+      setShowImportModal(false)
+      setSyncMsg(`Imported ${data.imported} filament${data.imported !== 1 ? 's' : ''} from Spoolman.`)
+      setTimeout(() => setSyncMsg(null), 4000)
+    },
+  })
+  const syncMutation = useMutation({
+    mutationFn: spoolmanSync,
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['filaments'] })
+      setSyncMsg(`Synced ${data.updated} filament${data.updated !== 1 ? 's' : ''} from Spoolman.`)
+      setTimeout(() => setSyncMsg(null), 4000)
+    },
+  })
 
   function openCreate() { setEditing(null); setForm(emptyForm()); setShowForm(true) }
   function openEdit(f: FilamentSpec) { setEditing(f); setForm(specToInput(f)); setShowForm(true) }
   function openImport(sf: SpoolmanFilament) { setEditing(null); setForm(spoolmanToInput(sf)); setShowForm(true) }
   function closeForm() { setShowForm(false); setEditing(null) }
 
+  const linkedToSpoolman = filaments.filter(f => f.spoolman_id).length
   const importedSpoolmanIds = new Set(filaments.map(f => f.spoolman_id).filter(Boolean))
   const localKeys = new Set(
     filaments.map(f => `${f.material.toLowerCase()}::${f.color_name.toLowerCase()}`)
@@ -342,60 +419,38 @@ export default function Filaments() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Filaments</h1>
-        <button onClick={openCreate}
-          className="flex items-center gap-1.5 bg-brand-600 hover:bg-brand-700 text-white text-sm px-4 py-2 rounded-lg">
-          <Plus size={15} /> Add Filament
-        </button>
+        <div className="flex items-center gap-2">
+          {linkedToSpoolman > 0 && (
+            <button
+              onClick={() => syncMutation.mutate()}
+              disabled={syncMutation.isPending}
+              className="flex items-center gap-1.5 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 text-sm px-3 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+            >
+              <RefreshCw size={14} className={syncMutation.isPending ? 'animate-spin' : ''} />
+              {syncMutation.isPending ? 'Syncing…' : `Sync ${linkedToSpoolman}`}
+            </button>
+          )}
+          {spoolmanData?.connected && notImported.length > 0 && (
+            <button
+              onClick={() => setShowImportModal(true)}
+              className="flex items-center gap-1.5 border border-blue-300 text-blue-600 text-sm px-3 py-2 rounded-lg hover:bg-blue-50"
+            >
+              <Download size={14} /> Import from Spoolman ({notImported.length})
+            </button>
+          )}
+          <button onClick={openCreate}
+            className="flex items-center gap-1.5 bg-brand-600 hover:bg-brand-700 text-white text-sm px-4 py-2 rounded-lg">
+            <Plus size={15} /> Add Filament
+          </button>
+        </div>
       </div>
 
-      {/* Spoolman import */}
-      {spoolmanData?.connected && spoolmanFilaments.length > 0 && (
-        <div>
-          <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-1.5">
-            <Download size={12} /> From Spoolman
-            {notImported.length === 0
-              ? <span className="font-normal normal-case text-green-600 ml-1">— all imported</span>
-              : <span className="font-normal normal-case text-gray-400 ml-1">— {notImported.length} not yet imported</span>}
-          </h2>
-          {notImported.length > 0 && (
-            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl divide-y divide-blue-100 dark:divide-blue-800">
-              {notImported.map(sf => (
-                <div key={sf.id} className="flex items-center justify-between px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    {sf.multi_color_hexes ? (
-                      <div
-                        className="w-4 h-4 rounded-full border border-gray-300 shrink-0"
-                        style={{ background: `linear-gradient(to right, ${sf.multi_color_hexes.split(',').map(h => `#${h.trim()}`).join(', ')})` }}
-                        title={sf.multi_color_hexes}
-                      />
-                    ) : (
-                      <div className="w-4 h-4 rounded-full border border-gray-300 shrink-0"
-                        style={{ backgroundColor: normalizeHex(sf.color_hex) }} />
-                    )}
-                    <span className="text-sm font-medium">{sf.name}</span>
-                    <span className="text-xs text-gray-500">{sf.material}</span>
-                    {sf.vendor?.name && <span className="text-xs text-gray-400">{sf.vendor.name}</span>}
-                    <span className="text-xs text-gray-300 dark:text-gray-600 font-mono">#{sf.id}</span>
-                    {sf.weight && <span className="text-xs text-gray-400">{sf.weight}g</span>}
-                    {sf.settings_extruder_temp && (
-                      <span className="text-xs text-gray-400">{sf.settings_extruder_temp}°C / {sf.settings_bed_temp}°C</span>
-                    )}
-                  </div>
-                  <button onClick={() => openImport(sf)}
-                    className="text-xs text-brand-600 hover:text-brand-700 border border-brand-300 px-3 py-1 rounded-lg hover:bg-brand-50">
-                    Import
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+      {syncMsg && (
+        <p className="text-sm text-green-600 dark:text-green-400">{syncMsg}</p>
       )}
 
-      {!spoolmanData?.connected && (
-        <p className="text-xs text-gray-400 italic">
-          {spoolmanData ? 'Spoolman not connected — configure URL in Settings to import filaments.' : ''}
-        </p>
+      {!spoolmanData?.connected && spoolmanData && (
+        <p className="text-xs text-gray-400 italic">Spoolman not connected — configure URL in Settings to import filaments.</p>
       )}
 
       {/* Local catalog */}
@@ -563,6 +618,15 @@ export default function Filaments() {
             isEdit={!!editing}
           />
         </Modal>
+      )}
+
+      {showImportModal && (
+        <SpoolmanImportModal
+          filaments={notImported}
+          onClose={() => setShowImportModal(false)}
+          onImport={(ids) => importMutation.mutate(ids)}
+          importing={importMutation.isPending}
+        />
       )}
     </div>
   )

@@ -1,19 +1,38 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getForecast } from '../api/client'
+import { getForecast, getSettings, ForecastItem } from '../api/client'
 import StatusBadge from '../components/StatusBadge'
-import { Wifi, WifiOff, ShoppingCart } from 'lucide-react'
+import { Wifi, WifiOff, ShoppingCart, ChevronRight } from 'lucide-react'
+
+const ASIN_RE = /^B[0-9A-Z]{9}$/i
+
+function spoolsNeeded(item: ForecastItem): { count: number; spoolWeight: number } {
+  const spoolWeight = item.filament_spec.weight || 1000
+  return { count: Math.ceil(item.shortfall_grams / spoolWeight), spoolWeight }
+}
+
+function openAmazonTabs(items: ForecastItem[], domain: string) {
+  items.forEach(item => {
+    const asin = item.filament_spec.article_number.trim().toUpperCase()
+    window.open(`https://www.${domain}/dp/${asin}`, '_blank')
+  })
+}
 
 export default function Forecast() {
   const [forecastWeeks, setForecastWeeks] = useState(4)
   const [lookbackWeeks, setLookbackWeeks] = useState(4)
+  const [showDetail, setShowDetail] = useState(false)
 
   const { data, isLoading } = useQuery({
     queryKey: ['forecast', forecastWeeks, lookbackWeeks],
     queryFn: () => getForecast(forecastWeeks, lookbackWeeks),
   })
+  const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: getSettings })
+  const amazonDomain = settings?.amazon_domain || 'amazon.com'
 
   const needToBuy = data?.items.filter(i => i.shortfall_grams > 0) ?? []
+  const asinItems = needToBuy.filter(i => ASIN_RE.test((i.filament_spec.article_number || '').trim()))
+  const nonAsinItems = needToBuy.filter(i => !ASIN_RE.test((i.filament_spec.article_number || '').trim()))
 
   return (
     <div className="p-6 space-y-5">
@@ -43,26 +62,103 @@ export default function Forecast() {
       {/* Purchase list */}
       {needToBuy.length > 0 && (
         <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-4">
-          <h2 className="text-sm font-semibold text-amber-800 dark:text-amber-200 flex items-center gap-1.5 mb-3">
-            <ShoppingCart size={14} /> Purchase List ({forecastWeeks}-week window)
-          </h2>
-          <div className="space-y-1.5">
-            {needToBuy.map(item => (
-              <div key={item.filament_spec.id} className="flex items-center gap-3 text-sm">
-                <div
-                  className="w-3 h-3 rounded-full border border-gray-300 dark:border-gray-600 shrink-0"
-                  style={{ backgroundColor: item.filament_spec.color_hex }}
-                />
-                <span className="font-medium">
-                  {item.filament_spec.material} — {item.filament_spec.color_name}
-                  {item.filament_spec.brand ? ` (${item.filament_spec.brand})` : ''}
-                </span>
-                <span className="text-amber-700 dark:text-amber-300 font-semibold">
-                  Buy ~{Math.ceil(item.shortfall_grams / 1000 * 10) / 10} kg
-                  <span className="font-normal text-amber-600 dark:text-amber-400 ml-1">({item.shortfall_grams}g shortfall)</span>
-                </span>
-              </div>
-            ))}
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-amber-800 dark:text-amber-200 flex items-center gap-1.5">
+              <ShoppingCart size={14} /> Purchase List ({forecastWeeks}-week window)
+            </h2>
+            <div className="flex items-center gap-3">
+              {/* Detail toggle */}
+              <label className="flex items-center gap-1.5 cursor-pointer select-none text-xs text-amber-700 dark:text-amber-300">
+                <span>Order detail</span>
+                <button
+                  role="switch"
+                  aria-checked={showDetail}
+                  onClick={() => setShowDetail(v => !v)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${showDetail ? 'bg-amber-600' : 'bg-amber-200 dark:bg-amber-800'}`}
+                >
+                  <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${showDetail ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                </button>
+              </label>
+              {asinItems.length > 0 && (
+                <button
+                  onClick={() => openAmazonTabs(asinItems, amazonDomain)}
+                  className="flex items-center gap-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium px-3 py-1.5 rounded-lg"
+                >
+                  <ShoppingCart size={12} />
+                  Open {asinItems.length} item{asinItems.length !== 1 ? 's' : ''} on Amazon
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="space-y-2">
+            {needToBuy.map(item => {
+              const { count, spoolWeight } = spoolsNeeded(item)
+              return (
+                <div key={item.filament_spec.id}>
+                  <div className="flex items-center gap-3 text-sm flex-wrap">
+                    <div
+                      className="w-3 h-3 rounded-full border border-gray-300 dark:border-gray-600 shrink-0"
+                      style={{ backgroundColor: item.filament_spec.color_hex }}
+                    />
+                    <span className="font-medium">
+                      {item.filament_spec.material} — {item.filament_spec.color_name}
+                      {item.filament_spec.brand ? ` (${item.filament_spec.brand})` : ''}
+                    </span>
+                    <span className="text-amber-700 dark:text-amber-300 font-semibold">
+                      {count} spool{count !== 1 ? 's' : ''}
+                      <span className="font-normal text-amber-600 dark:text-amber-400 text-xs ml-1">
+                        ({spoolWeight}g ea · {item.shortfall_grams}g shortfall)
+                      </span>
+                    </span>
+                    {item.filament_spec.purchase_url && (
+                      <span className="inline-flex items-center gap-1.5 shrink-0">
+                        <span className="bg-amber-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                          Qty: {count}
+                        </span>
+                        <a
+                          href={item.filament_spec.purchase_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold px-2 py-0.5 rounded-full"
+                        >
+                          <ShoppingCart size={11} /> Buy
+                        </a>
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Order detail rows */}
+                  {showDetail && item.contributing_orders.length > 0 && (
+                    <div className="mt-1.5 ml-6 space-y-1">
+                      {item.contributing_orders.map(o => (
+                        <div key={o.order_id} className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-400">
+                          <ChevronRight size={11} className="shrink-0 text-amber-400" />
+                          <span className="font-medium">{o.model_name}</span>
+                          {o.customer_name && (
+                            <span className="text-amber-600 dark:text-amber-500">— {o.customer_name}</span>
+                          )}
+                          <span className="text-amber-500 dark:text-amber-500">
+                            × {o.quantity} &nbsp;·&nbsp; {o.grams_needed}g needed
+                          </span>
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide ${
+                            o.status === 'printing'
+                              ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                              : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+                          }`}>
+                            {o.status}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          {nonAsinItems.length > 0 && asinItems.length > 0 && (
+            <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+              {nonAsinItems.length} item{nonAsinItems.length !== 1 ? 's' : ''} without an Amazon ASIN must be ordered manually.
+            </p>
+          )}
           </div>
         </div>
       )}
@@ -107,9 +203,15 @@ export default function Forecast() {
                     {data.spoolman_connected ? `${item.spoolman_stock_grams}g` : <span className="text-gray-300 dark:text-gray-600">—</span>}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    {item.shortfall_grams > 0
-                      ? <span className="text-red-600 font-semibold">{item.shortfall_grams}g</span>
-                      : <span className="text-green-600">—</span>}
+                    {item.shortfall_grams > 0 ? (() => {
+                      const { count, spoolWeight } = spoolsNeeded(item)
+                      return (
+                        <span className="text-red-600 font-semibold">
+                          {count} spool{count !== 1 ? 's' : ''}
+                          <span className="font-normal text-xs text-red-400 ml-1">({spoolWeight}g ea)</span>
+                        </span>
+                      )
+                    })() : <span className="text-green-600">—</span>}
                   </td>
                   <td className="px-4 py-3 text-center">
                     {data.spoolman_connected

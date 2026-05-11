@@ -74,7 +74,7 @@ def get_customer_orders(customer_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Customer not found")
     orders = (
         db.query(Order)
-        .options(joinedload(Order.print_model))
+        .options(joinedload(Order.item))
         .filter(Order.customer_id == customer_id)
         .order_by(Order.date_ordered.desc())
         .all()

@@ -94,13 +94,82 @@ class ImageCropBox(BaseModel):
     height: float
 
 
-class PrintModelBase(BaseModel):
+class RoutingStepFilamentCreate(BaseModel):
+    filament_spec_id: int
+    grams: float
+
+
+class RoutingStepFilamentUpdate(BaseModel):
+    grams: float
+    filament_spec_id: int
+
+
+class RoutingStepFilamentOut(RoutingStepFilamentCreate):
+    id: int
+    filament_spec: FilamentSpecOut
+
+    model_config = {"from_attributes": True}
+
+
+class RoutingStepCreate(BaseModel):
+    description: str = ""
+    printer_type_id: Optional[int] = None
+    quantity_on_plate: int = 1
+
+
+class RoutingStepUpdate(BaseModel):
+    description: Optional[str] = None
+    printer_type_id: Optional[int] = None
+    quantity_on_plate: Optional[int] = None
+
+
+class RoutingStepReorderItem(BaseModel):
+    id: int
+    sort_order: int
+
+
+class RoutingStepOut(BaseModel):
+    id: int
+    routing_id: int
+    sort_order: int
+    description: str
+    printer_type_id: Optional[int] = None
+    quantity_on_plate: int
+    filaments: List[RoutingStepFilamentOut] = []
+
+    model_config = {"from_attributes": True}
+
+
+class RoutingCreate(BaseModel):
+    name: str = ""
+    is_default: bool = False
+
+
+class RoutingUpdate(BaseModel):
+    name: Optional[str] = None
+    is_default: Optional[bool] = None
+
+
+class RoutingOut(BaseModel):
+    id: int
+    item_id: int
     name: str
+    is_default: bool
+    sort_order: int
+    steps: List[RoutingStepOut] = []
+
+    model_config = {"from_attributes": True}
+
+
+class ItemBase(BaseModel):
+    name: str
+    sku: str = ""
     description: str = ""
     notes: str = ""
+    use_advanced_routing: bool = False
 
 
-class PrintModelCreate(PrintModelBase):
+class ItemCreate(ItemBase):
     pass
 
 
@@ -116,13 +185,14 @@ class SlicerFileSet(BaseModel):
     file_path: str
 
 
-class PrintModelOut(PrintModelBase):
+class ItemOut(ItemBase):
     id: int
     created_at: datetime
     filament_requirements: List[ModelFilamentOut] = []
     images: List[ModelImageOut] = []
     slicer_files: List[SlicerFileOut] = []
     tags: List[TagOut] = []
+    routings: List[RoutingOut] = []
 
     model_config = {"from_attributes": True}
 
@@ -161,7 +231,7 @@ class CustomerOut(CustomerBase):
 
 
 class OrderBase(BaseModel):
-    print_model_id: int
+    item_id: int
     quantity: int = 1
     customer_name: str = ""
     customer_notes: str = ""
@@ -169,8 +239,8 @@ class OrderBase(BaseModel):
 
 
 class OrderCreate(BaseModel):
-    print_model_id: Optional[int] = None
-    model_name: Optional[str] = None
+    item_id: Optional[int] = None
+    item_name: Optional[str] = None
     customer_id: Optional[int] = None
     quantity: int = 1
     customer_name: str = ""
@@ -192,8 +262,53 @@ class OrderOut(OrderBase):
     customer_id: Optional[int] = None
     date_ordered: datetime
     status: OrderStatus
-    print_model: PrintModelOut
+    item: ItemOut
     customer: Optional[CustomerOut] = None
+
+    model_config = {"from_attributes": True}
+
+
+class SlicerBase(BaseModel):
+    name: str
+    executable_path: str = ""
+
+
+class SlicerCreate(SlicerBase):
+    pass
+
+
+class SlicerUpdate(BaseModel):
+    name: Optional[str] = None
+    executable_path: Optional[str] = None
+
+
+class SlicerOut(SlicerBase):
+    id: int
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PrinterTypeBase(BaseModel):
+    name: str
+    slicer_id: Optional[int] = None
+    slot_count: int = 1
+
+
+class PrinterTypeCreate(PrinterTypeBase):
+    pass
+
+
+class PrinterTypeUpdate(BaseModel):
+    name: Optional[str] = None
+    slicer_id: Optional[int] = None
+    slot_count: Optional[int] = None
+
+
+class PrinterTypeOut(PrinterTypeBase):
+    id: int
+    slicer: Optional[SlicerOut] = None
+    created_at: datetime
 
     model_config = {"from_attributes": True}
 
@@ -201,10 +316,17 @@ class OrderOut(OrderBase):
 class PrinterBase(BaseModel):
     name: str
     url: str
+    printer_type_id: Optional[int] = None
+    slot_count_override: Optional[int] = None
 
 
 class PrinterCreate(PrinterBase):
     pass
+
+
+class PrinterUpdate(BaseModel):
+    name: Optional[str] = None
+    url: Optional[str] = None
 
 
 class PrinterSlotOut(BaseModel):
@@ -231,6 +353,8 @@ class PrinterOut(PrinterBase):
     has_image: bool = False
     slicer_name: Optional[str] = None
     slicer_executable: Optional[str] = None
+    printer_type: Optional[PrinterTypeOut] = None
+    effective_slot_count: int = 1
     slots: List[PrinterSlotOut] = []
 
     model_config = {"from_attributes": True}
@@ -283,6 +407,15 @@ class FilamentDetectSlot(BaseModel):
     suggested_filament_spec_id: Optional[int] = None
 
 
+class ContributingOrder(BaseModel):
+    order_id: int
+    model_name: str
+    customer_name: str
+    quantity: int
+    grams_needed: float
+    status: str  # "pending" or "printing"
+
+
 class ForecastItem(BaseModel):
     filament_spec: FilamentSpecOut
     demand_grams_per_week: float
@@ -291,6 +424,7 @@ class ForecastItem(BaseModel):
     spoolman_stock_grams: float
     shortfall_grams: float
     status: str  # "ok", "low", "critical"
+    contributing_orders: List[ContributingOrder] = []
 
 
 class ForecastResponse(BaseModel):

@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Enum, Text, UniqueConstraint, Table
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Enum, Text, UniqueConstraint, Table, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import JSON
 import enum
@@ -10,7 +10,7 @@ from .database import Base
 model_tags = Table(
     "model_tags",
     Base.metadata,
-    Column("model_id", Integer, ForeignKey("print_models.id", ondelete="CASCADE"), primary_key=True),
+    Column("model_id", Integer, ForeignKey("items.id", ondelete="CASCADE"), primary_key=True),
     Column("tag_id", Integer, ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True),
 )
 
@@ -22,7 +22,7 @@ class Tag(Base):
     name = Column(String, nullable=False, unique=True)
     color_hex = Column(String, nullable=False, default="#6366f1")
 
-    models = relationship("PrintModel", secondary="model_tags", back_populates="tags")
+    items = relationship("Item", secondary="model_tags", back_populates="tags")
 
 
 class Setting(Base):
@@ -66,32 +66,36 @@ class FilamentSpec(Base):
     model_filaments = relationship("ModelFilament", back_populates="filament_spec", cascade="all, delete-orphan")
 
 
-class PrintModel(Base):
-    __tablename__ = "print_models"
+class Item(Base):
+    __tablename__ = "items"
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False, index=True)
+    sku = Column(String, default="")
     description = Column(String, default="")
     notes = Column(String, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    filament_requirements = relationship("ModelFilament", back_populates="print_model", cascade="all, delete-orphan", order_by="ModelFilament.sort_order")
-    images = relationship("ModelImage", back_populates="print_model", cascade="all, delete-orphan", order_by="ModelImage.created_at")
-    slicer_files = relationship("ModelSlicerFile", back_populates="print_model", cascade="all, delete-orphan")
-    orders = relationship("Order", back_populates="print_model")
-    tags = relationship("Tag", secondary="model_tags", back_populates="models", order_by="Tag.name")
+    use_advanced_routing = Column(Boolean, nullable=False, default=False)
+
+    filament_requirements = relationship("ModelFilament", back_populates="item", cascade="all, delete-orphan", order_by="ModelFilament.sort_order")
+    images = relationship("ModelImage", back_populates="item", cascade="all, delete-orphan", order_by="ModelImage.created_at")
+    slicer_files = relationship("ModelSlicerFile", back_populates="item", cascade="all, delete-orphan")
+    orders = relationship("Order", back_populates="item")
+    tags = relationship("Tag", secondary="model_tags", back_populates="items", order_by="Tag.name")
+    routings = relationship("Routing", back_populates="item", cascade="all, delete-orphan", order_by="Routing.sort_order")
 
 
 class ModelFilament(Base):
     __tablename__ = "model_filaments"
 
     id = Column(Integer, primary_key=True, index=True)
-    print_model_id = Column(Integer, ForeignKey("print_models.id"), nullable=False)
+    print_model_id = Column(Integer, ForeignKey("items.id"), nullable=False)
     filament_spec_id = Column(Integer, ForeignKey("filament_specs.id"), nullable=False)
     grams = Column(Float, nullable=False)
     sort_order = Column(Integer, nullable=False, default=0)
 
-    print_model = relationship("PrintModel", back_populates="filament_requirements")
+    item = relationship("Item", back_populates="filament_requirements")
     filament_spec = relationship("FilamentSpec", back_populates="model_filaments")
 
 
@@ -99,25 +103,49 @@ class ModelImage(Base):
     __tablename__ = "model_images"
 
     id = Column(Integer, primary_key=True, index=True)
-    print_model_id = Column(Integer, ForeignKey("print_models.id", ondelete="CASCADE"), nullable=False)
+    print_model_id = Column(Integer, ForeignKey("items.id", ondelete="CASCADE"), nullable=False)
     image_path = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    print_model = relationship("PrintModel", back_populates="images")
+    item = relationship("Item", back_populates="images")
 
 
 class ModelSlicerFile(Base):
     __tablename__ = "model_slicer_files"
 
     id = Column(Integer, primary_key=True, index=True)
-    print_model_id = Column(Integer, ForeignKey("print_models.id", ondelete="CASCADE"), nullable=False)
+    print_model_id = Column(Integer, ForeignKey("items.id", ondelete="CASCADE"), nullable=False)
     printer_id = Column(Integer, ForeignKey("printers.id", ondelete="CASCADE"), nullable=False)
     file_path = Column(String, nullable=False)
 
-    print_model = relationship("PrintModel", back_populates="slicer_files")
+    item = relationship("Item", back_populates="slicer_files")
     printer = relationship("Printer")
 
     __table_args__ = (UniqueConstraint("print_model_id", "printer_id", name="uq_model_printer_slicer"),)
+
+
+class Slicer(Base):
+    __tablename__ = "slicers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, unique=True)
+    executable_path = Column(String, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    printer_types = relationship("PrinterType", back_populates="slicer")
+
+
+class PrinterType(Base):
+    __tablename__ = "printer_types"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, unique=True)
+    slicer_id = Column(Integer, ForeignKey("slicers.id", ondelete="SET NULL"), nullable=True)
+    slot_count = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    slicer = relationship("Slicer", back_populates="printer_types")
+    printers = relationship("Printer", back_populates="printer_type")
 
 
 class Printer(Base):
@@ -129,8 +157,11 @@ class Printer(Base):
     image_path = Column(String, nullable=True)
     slicer_name = Column(String, nullable=True)
     slicer_executable = Column(String, nullable=True)
+    printer_type_id = Column(Integer, ForeignKey("printer_types.id", ondelete="SET NULL"), nullable=True)
+    slot_count_override = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    printer_type = relationship("PrinterType", back_populates="printers")
     slots = relationship(
         "PrinterSlot", back_populates="printer",
         cascade="all, delete-orphan",
@@ -140,6 +171,14 @@ class Printer(Base):
     @property
     def has_image(self) -> bool:
         return self.image_path is not None
+
+    @property
+    def effective_slot_count(self) -> int:
+        if self.slot_count_override is not None:
+            return self.slot_count_override
+        if self.printer_type is not None:
+            return self.printer_type.slot_count
+        return len(self.slots) or 1
 
 
 class PrinterSlot(Base):
@@ -189,7 +228,7 @@ class Order(Base):
     __tablename__ = "orders"
 
     id = Column(Integer, primary_key=True, index=True)
-    print_model_id = Column(Integer, ForeignKey("print_models.id"), nullable=False)
+    item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
     customer_id = Column(Integer, ForeignKey("customers.id", ondelete="SET NULL"), nullable=True)
     quantity = Column(Integer, nullable=False, default=1)
     customer_name = Column(String, default="")
@@ -198,5 +237,46 @@ class Order(Base):
     date_needed = Column(DateTime, nullable=True)
     status = Column(Enum(OrderStatus), default=OrderStatus.pending)
 
-    print_model = relationship("PrintModel", back_populates="orders")
+    item = relationship("Item", back_populates="orders")
     customer = relationship("Customer", back_populates="orders")
+
+
+class Routing(Base):
+    __tablename__ = "routings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    item_id = Column(Integer, ForeignKey("items.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String, nullable=False, default="")
+    is_default = Column(Boolean, nullable=False, default=False)
+    sort_order = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    item = relationship("Item", back_populates="routings")
+    steps = relationship("RoutingStep", back_populates="routing", cascade="all, delete-orphan", order_by="RoutingStep.sort_order")
+
+
+class RoutingStep(Base):
+    __tablename__ = "routing_steps"
+
+    id = Column(Integer, primary_key=True, index=True)
+    routing_id = Column(Integer, ForeignKey("routings.id", ondelete="CASCADE"), nullable=False)
+    sort_order = Column(Integer, nullable=False, default=0)
+    description = Column(String, nullable=False, default="")
+    printer_type_id = Column(Integer, ForeignKey("printer_types.id", ondelete="SET NULL"), nullable=True)
+    quantity_on_plate = Column(Integer, nullable=False, default=1)
+
+    routing = relationship("Routing", back_populates="steps")
+    printer_type = relationship("PrinterType")
+    filaments = relationship("RoutingStepFilament", back_populates="step", cascade="all, delete-orphan", order_by="RoutingStepFilament.id")
+
+
+class RoutingStepFilament(Base):
+    __tablename__ = "routing_step_filaments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    routing_step_id = Column(Integer, ForeignKey("routing_steps.id", ondelete="CASCADE"), nullable=False)
+    filament_spec_id = Column(Integer, ForeignKey("filament_specs.id", ondelete="CASCADE"), nullable=False)
+    grams = Column(Float, nullable=False)
+
+    step = relationship("RoutingStep", back_populates="filaments")
+    filament_spec = relationship("FilamentSpec")
