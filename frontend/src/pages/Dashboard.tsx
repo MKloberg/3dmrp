@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { getOrders, getForecast, getPrinters, getPrinterStatus, getItems, getCustomers, getFilaments, PrinterStatus, Printer } from '../api/client'
 import StatusBadge from '../components/StatusBadge'
-import { AlertTriangle, ClipboardList, Wifi, WifiOff, Printer as PrinterIcon, ShoppingCart, Clock, Box, Users, Layers } from 'lucide-react'
+import { AlertTriangle, ClipboardList, Wifi, WifiOff, Printer as PrinterIcon, ShoppingCart, Clock, Box, Users, Disc2, LayoutDashboard } from 'lucide-react'
 
 // ---- helpers ----
 
@@ -148,7 +148,7 @@ export default function Dashboard() {
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Dashboard</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-3"><LayoutDashboard size={26} className="text-brand-600" />Dashboard</h1>
         <div className="flex items-center gap-2 text-sm">
           {forecast?.spoolman_connected ? (
             <><Wifi size={14} className="text-green-500" /><span className="text-green-600">Spoolman connected</span></>
@@ -180,7 +180,7 @@ export default function Dashboard() {
           { label: 'Orders',    value: orders?.length ?? 0,  icon: ClipboardList,to: '/orders',     color: 'text-blue-600',   bg: 'bg-blue-50 dark:bg-blue-900/20' },
           { label: 'Customers', value: customers.length,     icon: Users,        to: '/customers',  color: 'text-green-600',  bg: 'bg-green-50 dark:bg-green-900/20' },
           { label: 'Printers',  value: printers.length,      icon: PrinterIcon,  to: '/printers',   color: 'text-slate-600',  bg: 'bg-slate-50 dark:bg-slate-900/20' },
-          { label: 'Filaments', value: filaments.length,     icon: Layers,       to: '/filaments',  color: 'text-teal-600',   bg: 'bg-teal-50 dark:bg-teal-900/20' },
+          { label: 'Filaments', value: filaments.length,     icon: Disc2,       to: '/filaments',  color: 'text-teal-600',   bg: 'bg-teal-50 dark:bg-teal-900/20' },
         ].map(({ label, value, icon: Icon, to, color, bg }) => (
           <button
             key={label}

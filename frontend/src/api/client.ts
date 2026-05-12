@@ -75,6 +75,8 @@ export interface RoutingStep {
   description: string
   printer_type_id: number | null
   quantity_on_plate: number
+  parts_per_item: number
+  estimated_print_time: number | null
   filaments: RoutingStepFilament[]
 }
 
@@ -85,6 +87,14 @@ export interface Routing {
   is_default: boolean
   sort_order: number
   steps: RoutingStep[]
+}
+
+export interface PostProcessingCost {
+  id: number
+  item_id: number
+  label: string
+  cost_per_item: number
+  sort_order: number
 }
 
 export interface Item {
@@ -101,6 +111,7 @@ export interface Item {
   slicer_files: SlicerFile[]
   tags: Tag[]
   routings: Routing[]
+  post_processing_costs: PostProcessingCost[]
 }
 
 export interface Order {
@@ -173,6 +184,13 @@ export const reorderFilaments = (itemId: number, items: { id: number; sort_order
 export const removeFilamentReq = (itemId: number, reqId: number) =>
   req<void>(`/items/${itemId}/filaments/${reqId}`, { method: 'DELETE' })
 
+export const createPostProcessingCost = (itemId: number, data: { label: string; cost_per_item: number }) =>
+  req<PostProcessingCost>(`/items/${itemId}/post-processing`, { method: 'POST', body: JSON.stringify(data) })
+export const updatePostProcessingCost = (itemId: number, costId: number, data: { label?: string; cost_per_item?: number }) =>
+  req<PostProcessingCost>(`/items/${itemId}/post-processing/${costId}`, { method: 'PATCH', body: JSON.stringify(data) })
+export const deletePostProcessingCost = (itemId: number, costId: number) =>
+  req<void>(`/items/${itemId}/post-processing/${costId}`, { method: 'DELETE' })
+
 export const uploadItemImage = async (itemId: number, file: File): Promise<ModelImage> => {
   const form = new FormData()
   form.append('file', file)
@@ -207,9 +225,9 @@ export const updateRouting = (itemId: number, routingId: number, data: { name?: 
 export const deleteRouting = (itemId: number, routingId: number) =>
   req<void>(`/items/${itemId}/routings/${routingId}`, { method: 'DELETE' })
 
-export const createRoutingStep = (itemId: number, routingId: number, data: { description?: string; printer_type_id?: number | null; quantity_on_plate?: number }) =>
+export const createRoutingStep = (itemId: number, routingId: number, data: { description?: string; printer_type_id?: number | null; quantity_on_plate?: number; parts_per_item?: number; estimated_print_time?: number | null }) =>
   req<RoutingStep>(`/items/${itemId}/routings/${routingId}/steps`, { method: 'POST', body: JSON.stringify(data) })
-export const updateRoutingStep = (itemId: number, routingId: number, stepId: number, data: { description?: string; printer_type_id?: number | null; quantity_on_plate?: number }) =>
+export const updateRoutingStep = (itemId: number, routingId: number, stepId: number, data: { description?: string; printer_type_id?: number | null; quantity_on_plate?: number; parts_per_item?: number; estimated_print_time?: number | null }) =>
   req<RoutingStep>(`/items/${itemId}/routings/${routingId}/steps/${stepId}`, { method: 'PATCH', body: JSON.stringify(data) })
 export const deleteRoutingStep = (itemId: number, routingId: number, stepId: number) =>
   req<void>(`/items/${itemId}/routings/${routingId}/steps/${stepId}`, { method: 'DELETE' })
@@ -394,13 +412,15 @@ export interface PrinterType {
   slicer_id: number | null
   slicer: Slicer | null
   slot_count: number
+  hourly_rate: number | null
+  power_watts: number | null
   created_at: string
 }
 
 export const getPrinterTypes = () => req<PrinterType[]>('/printer-types')
-export const createPrinterType = (data: { name: string; slicer_id: number | null; slot_count: number }) =>
+export const createPrinterType = (data: { name: string; slicer_id: number | null; slot_count: number; hourly_rate?: number | null; power_watts?: number | null }) =>
   req<PrinterType>('/printer-types', { method: 'POST', body: JSON.stringify(data) })
-export const updatePrinterType = (id: number, data: { name?: string; slicer_id?: number | null; slot_count?: number }) =>
+export const updatePrinterType = (id: number, data: { name?: string; slicer_id?: number | null; slot_count?: number; hourly_rate?: number | null; power_watts?: number | null }) =>
   req<PrinterType>(`/printer-types/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
 export const deletePrinterType = (id: number) =>
   req<void>(`/printer-types/${id}`, { method: 'DELETE' })

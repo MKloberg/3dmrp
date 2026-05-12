@@ -10,7 +10,7 @@ import {
   Printer, MoonrakerJob, FilamentSpec, PrinterStatus, WebcamInfo, FilamentDetectSlot, PrinterType,
 } from '../api/client'
 import Modal from '../components/Modal'
-import { Plus, Trash2, Printer as PrinterIcon, ChevronDown, ChevronRight, Upload, X, Cpu, Video, RefreshCw, Pencil, Check } from 'lucide-react'
+import { Plus, Trash2, Printer as PrinterIcon, ChevronDown, ChevronRight, Upload, X, Cpu, Video, RefreshCw, Pencil, Check, ExternalLink } from 'lucide-react'
 
 function formatDuration(seconds: number | null): string {
   if (seconds == null) return '—'
@@ -933,6 +933,16 @@ function PrinterCard({
         </div>
         {!editing && (
           <div className="flex items-center gap-2 shrink-0">
+            <a
+              href={printer.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={e => e.stopPropagation()}
+              className="text-gray-400 hover:text-brand-600"
+              title="Open Fluidd"
+            >
+              <ExternalLink size={14} />
+            </a>
             <button onClick={startEdit} className="text-gray-400 hover:text-gray-600">
               <Pencil size={14} />
             </button>
@@ -990,7 +1000,7 @@ export default function Printers() {
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Printers</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-3"><PrinterIcon size={26} className="text-brand-600" />Printers</h1>
         <button onClick={() => setShowForm(true)}
           className="flex items-center gap-1.5 bg-brand-600 hover:bg-brand-700 text-white text-sm px-4 py-2 rounded-lg">
           <Plus size={15} /> Add Printer

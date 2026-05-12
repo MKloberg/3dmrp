@@ -1,22 +1,22 @@
 import { Link } from 'react-router-dom'
-import { Settings as SettingsIcon, Scissors, Cpu, Database, ChevronRight } from 'lucide-react'
+import { Settings as SettingsIcon, SlidersHorizontal, Layers, Printer, Database, ChevronRight } from 'lucide-react'
 
 const cards = [
   {
     to: '/settings/general',
-    icon: SettingsIcon,
+    icon: SlidersHorizontal,
     title: 'General',
     description: 'Appearance, Spoolman, Square, and purchasing preferences.',
   },
   {
     to: '/settings/slicers',
-    icon: Scissors,
+    icon: Layers,
     title: 'Slicers',
     description: 'Manage slicer software and executable paths.',
   },
   {
     to: '/settings/printer-types',
-    icon: Cpu,
+    icon: Printer,
     title: 'Printer Types',
     description: 'Define printer type categories and default slot counts.',
   },
@@ -31,7 +31,7 @@ const cards = [
 export default function Settings() {
   return (
     <div className="p-6 max-w-2xl space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Settings</h1>
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-3"><SettingsIcon size={26} className="text-brand-600" />Settings</h1>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {cards.map(({ to, icon: Icon, title, description }) => (
           <Link

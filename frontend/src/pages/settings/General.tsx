@@ -22,10 +22,22 @@ export default function General() {
   const [amazonDomain, setAmazonDomain] = useState('amazon.com')
   const [amazonSaved, setAmazonSaved] = useState(false)
 
+  const [machineRate, setMachineRate] = useState('2.50')
+  const [machineRateSaved, setMachineRateSaved] = useState(false)
+
+  const [electricityCost, setElectricityCost] = useState('0.1765')
+  const [electricityCostSaved, setElectricityCostSaved] = useState(false)
+
+  const [markupMultiplier, setMarkupMultiplier] = useState('1.2')
+  const [markupSaved, setMarkupSaved] = useState(false)
+
   useEffect(() => {
     if (settings?.spoolman_url !== undefined) setSpoolmanUrl(settings.spoolman_url)
     if (settings?.square_api_token !== undefined) setSquareToken(settings.square_api_token)
     if (settings?.amazon_domain) setAmazonDomain(settings.amazon_domain)
+    if (settings?.machine_hourly_rate !== undefined) setMachineRate(settings.machine_hourly_rate)
+    if (settings?.electricity_cost_kwh !== undefined) setElectricityCost(settings.electricity_cost_kwh)
+    if (settings?.markup_multiplier !== undefined) setMarkupMultiplier(settings.markup_multiplier)
   }, [settings])
 
   const saveMutation = useMutation({
@@ -41,6 +53,21 @@ export default function General() {
   const saveAmazonMutation = useMutation({
     mutationFn: () => setSetting('amazon_domain', amazonDomain),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['settings'] }); setAmazonSaved(true); setTimeout(() => setAmazonSaved(false), 2000) },
+  })
+
+  const saveMachineRateMutation = useMutation({
+    mutationFn: () => setSetting('machine_hourly_rate', machineRate.trim()),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['settings'] }); setMachineRateSaved(true); setTimeout(() => setMachineRateSaved(false), 2000) },
+  })
+
+  const saveElectricityCostMutation = useMutation({
+    mutationFn: () => setSetting('electricity_cost_kwh', electricityCost.trim()),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['settings'] }); setElectricityCostSaved(true); setTimeout(() => setElectricityCostSaved(false), 2000) },
+  })
+
+  const saveMarkupMutation = useMutation({
+    mutationFn: () => setSetting('markup_multiplier', markupMultiplier.trim()),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['settings'] }); setMarkupSaved(true); setTimeout(() => setMarkupSaved(false), 2000) },
   })
 
   async function handleTest() {
@@ -211,6 +238,91 @@ export default function General() {
             className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 text-sm rounded-lg disabled:opacity-50"
           >
             {amazonSaved ? 'Saved!' : saveAmazonMutation.isPending ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </section>
+      {/* Machine Hourly Rate */}
+      <section className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4">
+        <div>
+          <h2 className="font-semibold text-gray-800 dark:text-gray-100">Machine Cost</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+            Default cost per hour for machine time, used in cost accounting. Can be overridden per printer type.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-gray-500 dark:text-gray-400">$</span>
+          <input
+            type="number" min="0" step="0.01"
+            className="w-32 border rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300"
+            value={machineRate}
+            onChange={e => setMachineRate(e.target.value)}
+          />
+          <span className="text-sm text-gray-500 dark:text-gray-400">per hour</span>
+        </div>
+        <div className="flex items-center gap-3 pt-1">
+          <button
+            onClick={() => saveMachineRateMutation.mutate()}
+            disabled={saveMachineRateMutation.isPending}
+            className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 text-sm rounded-lg disabled:opacity-50"
+          >
+            {machineRateSaved ? 'Saved!' : saveMachineRateMutation.isPending ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </section>
+
+      {/* Electricity Cost */}
+      <section className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4">
+        <div>
+          <h2 className="font-semibold text-gray-800 dark:text-gray-100">Electricity Cost in Your Area</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+            Used to calculate energy cost in cost accounting. The U.S. national average is $0.1765/kWh.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-gray-500 dark:text-gray-400">$</span>
+          <input
+            type="number" min="0" step="0.0001"
+            className="w-32 border rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300"
+            value={electricityCost}
+            onChange={e => setElectricityCost(e.target.value)}
+          />
+          <span className="text-sm text-gray-500 dark:text-gray-400">per kWh</span>
+        </div>
+        <div className="flex items-center gap-3 pt-1">
+          <button
+            onClick={() => saveElectricityCostMutation.mutate()}
+            disabled={saveElectricityCostMutation.isPending}
+            className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 text-sm rounded-lg disabled:opacity-50"
+          >
+            {electricityCostSaved ? 'Saved!' : saveElectricityCostMutation.isPending ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </section>
+
+      {/* Markup Multiplier */}
+      <section className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4">
+        <div>
+          <h2 className="font-semibold text-gray-800 dark:text-gray-100">MSRP Markup Multiplier</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+            Applied to the total cost per item to calculate the Suggested MSRP. A value of 1.2 means 20% above cost. Used across all items.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <input
+            type="number" min="0" step="0.1"
+            className="w-32 border rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300"
+            value={markupMultiplier}
+            onChange={e => setMarkupMultiplier(e.target.value)}
+          />
+          <span className="text-sm text-gray-500 dark:text-gray-400">× total cost</span>
+        </div>
+        <div className="flex items-center gap-3 pt-1">
+          <button
+            onClick={() => saveMarkupMutation.mutate()}
+            disabled={saveMarkupMutation.isPending}
+            className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 text-sm rounded-lg disabled:opacity-50"
+          >
+            {markupSaved ? 'Saved!' : saveMarkupMutation.isPending ? 'Saving…' : 'Save'}
           </button>
         </div>
       </section>

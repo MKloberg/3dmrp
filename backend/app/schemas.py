@@ -115,12 +115,16 @@ class RoutingStepCreate(BaseModel):
     description: str = ""
     printer_type_id: Optional[int] = None
     quantity_on_plate: int = 1
+    parts_per_item: int = 1
+    estimated_print_time: Optional[int] = None
 
 
 class RoutingStepUpdate(BaseModel):
     description: Optional[str] = None
     printer_type_id: Optional[int] = None
     quantity_on_plate: Optional[int] = None
+    parts_per_item: Optional[int] = None
+    estimated_print_time: Optional[int] = None
 
 
 class RoutingStepReorderItem(BaseModel):
@@ -135,6 +139,8 @@ class RoutingStepOut(BaseModel):
     description: str
     printer_type_id: Optional[int] = None
     quantity_on_plate: int
+    parts_per_item: int = 1
+    estimated_print_time: Optional[int] = None
     filaments: List[RoutingStepFilamentOut] = []
 
     model_config = {"from_attributes": True}
@@ -157,6 +163,24 @@ class RoutingOut(BaseModel):
     is_default: bool
     sort_order: int
     steps: List[RoutingStepOut] = []
+
+    model_config = {"from_attributes": True}
+
+
+class PostProcessingCostCreate(BaseModel):
+    label: str
+    cost_per_item: float = 0.0
+
+
+class PostProcessingCostUpdate(BaseModel):
+    label: Optional[str] = None
+    cost_per_item: Optional[float] = None
+
+
+class PostProcessingCostOut(PostProcessingCostCreate):
+    id: int
+    item_id: int
+    sort_order: int = 0
 
     model_config = {"from_attributes": True}
 
@@ -194,6 +218,7 @@ class ItemOut(ItemBase):
     slicer_files: List[SlicerFileOut] = []
     tags: List[TagOut] = []
     routings: List[RoutingOut] = []
+    post_processing_costs: List[PostProcessingCostOut] = []
 
     model_config = {"from_attributes": True}
 
@@ -294,6 +319,8 @@ class PrinterTypeBase(BaseModel):
     name: str
     slicer_id: Optional[int] = None
     slot_count: int = 1
+    hourly_rate: Optional[float] = None
+    power_watts: Optional[float] = None
 
 
 class PrinterTypeCreate(PrinterTypeBase):
@@ -304,6 +331,8 @@ class PrinterTypeUpdate(BaseModel):
     name: Optional[str] = None
     slicer_id: Optional[int] = None
     slot_count: Optional[int] = None
+    hourly_rate: Optional[float] = None
+    power_watts: Optional[float] = None
 
 
 class PrinterTypeOut(PrinterTypeBase):

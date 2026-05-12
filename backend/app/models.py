@@ -85,6 +85,7 @@ class Item(Base):
     orders = relationship("Order", back_populates="item")
     tags = relationship("Tag", secondary="model_tags", back_populates="items", order_by="Tag.name")
     routings = relationship("Routing", back_populates="item", cascade="all, delete-orphan", order_by="Routing.sort_order")
+    post_processing_costs = relationship("PostProcessingCost", back_populates="item", cascade="all, delete-orphan", order_by="PostProcessingCost.sort_order")
 
 
 class ModelFilament(Base):
@@ -143,6 +144,8 @@ class PrinterType(Base):
     name = Column(String, nullable=False, unique=True)
     slicer_id = Column(Integer, ForeignKey("slicers.id", ondelete="SET NULL"), nullable=True)
     slot_count = Column(Integer, nullable=False, default=1)
+    hourly_rate = Column(Float, nullable=True)
+    power_watts = Column(Float, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     slicer = relationship("Slicer", back_populates="printer_types")
@@ -265,6 +268,8 @@ class RoutingStep(Base):
     description = Column(String, nullable=False, default="")
     printer_type_id = Column(Integer, ForeignKey("printer_types.id", ondelete="SET NULL"), nullable=True)
     quantity_on_plate = Column(Integer, nullable=False, default=1)
+    parts_per_item = Column(Integer, nullable=False, default=1)
+    estimated_print_time = Column(Integer, nullable=True)  # seconds
 
     routing = relationship("Routing", back_populates="steps")
     printer_type = relationship("PrinterType")
@@ -281,3 +286,15 @@ class RoutingStepFilament(Base):
 
     step = relationship("RoutingStep", back_populates="filaments")
     filament_spec = relationship("FilamentSpec")
+
+
+class PostProcessingCost(Base):
+    __tablename__ = "post_processing_costs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    item_id = Column(Integer, ForeignKey("items.id", ondelete="CASCADE"), nullable=False)
+    label = Column(String, nullable=False)
+    cost_per_item = Column(Float, nullable=False, default=0.0)
+    sort_order = Column(Integer, nullable=False, default=0)
+
+    item = relationship("Item", back_populates="post_processing_costs")

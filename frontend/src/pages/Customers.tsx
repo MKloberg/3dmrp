@@ -7,7 +7,7 @@ import {
 } from '../api/client'
 import Modal from '../components/Modal'
 import StatusBadge from '../components/StatusBadge'
-import { Plus, Trash2, Pencil, ChevronDown, ChevronRight, RefreshCw, Download } from 'lucide-react'
+import { Plus, Trash2, Pencil, ChevronDown, ChevronRight, RefreshCw, Download, Users } from 'lucide-react'
 
 const CATEGORIES = ['Retail', 'Wholesale', 'VIP', 'One-time', 'Trade']
 
@@ -331,7 +331,7 @@ export default function Customers() {
   return (
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Customers</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-3"><Users size={26} className="text-brand-600" />Customers</h1>
         <div className="flex items-center gap-2">
           {linkedToSquare > 0 && (
             <button

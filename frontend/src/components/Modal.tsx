@@ -2,7 +2,7 @@ import { X } from 'lucide-react'
 import { ReactNode } from 'react'
 
 interface Props {
-  title: string
+  title: ReactNode
   onClose: () => void
   children: ReactNode
   wide?: boolean

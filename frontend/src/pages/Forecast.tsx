@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getForecast, getSettings, ForecastItem } from '../api/client'
 import StatusBadge from '../components/StatusBadge'
-import { Wifi, WifiOff, ShoppingCart, ChevronRight } from 'lucide-react'
+import { Wifi, WifiOff, ShoppingCart, ChevronRight, TrendingUp } from 'lucide-react'
 
 const ASIN_RE = /^B[0-9A-Z]{9}$/i
 
@@ -37,7 +37,7 @@ export default function Forecast() {
   return (
     <div className="p-6 space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Filament Forecast</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-3"><TrendingUp size={26} className="text-brand-600" />Filament Forecast</h1>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2 text-sm">
             {data?.spoolman_connected ? (

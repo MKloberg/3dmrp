@@ -2,12 +2,68 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getSlicers, createSlicer, updateSlicer, deleteSlicer, getSettings, setSetting, getGcodeRepoStatus, scaffoldGcodeRepo, Slicer } from '../api/client'
-import { Plus, Trash2, Pencil, Check, X, ChevronLeft, FolderOpen, FolderPlus, Scissors } from 'lucide-react'
+import { Plus, Trash2, Pencil, Check, X, ChevronLeft, FolderOpen, FolderPlus, Layers } from 'lucide-react'
+
+const KNOWN_SLICERS = [
+  { name: 'PrusaSlicer',    path: 'C:\\Program Files\\Prusa3D\\PrusaSlicer\\prusa-slicer.exe' },
+  { name: 'Bambu Studio',   path: 'C:\\Program Files\\Bambu Studio\\bambu-studio.exe' },
+  { name: 'OrcaSlicer',     path: 'C:\\Program Files\\OrcaSlicer\\orca-slicer.exe' },
+  { name: 'SuperSlicer',    path: 'C:\\Program Files\\SuperSlicer\\superslicer.exe' },
+  { name: 'UltiMaker Cura', path: 'C:\\Program Files\\UltiMaker Cura\\UltiMaker-Cura.exe' },
+  { name: 'ideaMaker',      path: 'C:\\Program Files\\Raise3D\\ideaMaker\\ideaMaker.exe' },
+]
+
+function defaultExePath(name: string): string {
+  return KNOWN_SLICERS.find(s => s.name.toLowerCase() === name.toLowerCase().trim())?.path ?? ''
+}
+
+function SlicerNameInput({ value, placeholder, autoFocus, onKeyDown, onChange }: {
+  value: string
+  placeholder?: string
+  autoFocus?: boolean
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void
+  onChange: (name: string, path: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const suggestions = value.trim()
+    ? KNOWN_SLICERS.filter(s => s.name.toLowerCase().includes(value.toLowerCase()))
+    : []
+
+  return (
+    <div className="relative">
+      <input
+        className="border rounded px-2 py-1 text-sm w-44 dark:bg-gray-700 dark:border-gray-600"
+        value={value}
+        placeholder={placeholder}
+        autoFocus={autoFocus}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onChange={e => { onChange(e.target.value, ''); setOpen(true) }}
+        onKeyDown={onKeyDown}
+      />
+      {open && suggestions.length > 0 && (
+        <div className="absolute z-50 top-full left-0 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg overflow-hidden w-48">
+          {suggestions.map(s => (
+            <button
+              key={s.name}
+              type="button"
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => { onChange(s.name, s.path); setOpen(false) }}
+              className="w-full text-left px-3 py-2 text-sm hover:bg-brand-50 dark:hover:bg-brand-900/20 hover:text-brand-600 dark:hover:text-brand-400"
+            >
+              {s.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 function SlicerRow({ slicer, onDelete }: { slicer: Slicer; onDelete: (id: number) => void }) {
   const qc = useQueryClient()
   const [editing, setEditing] = useState(false)
-  const [form, setForm] = useState({ name: slicer.name, executable_path: slicer.executable_path })
+  const [form, setForm] = useState({ name: slicer.name, executable_path: slicer.executable_path || defaultExePath(slicer.name) })
 
   const updateMutation = useMutation({
     mutationFn: () => updateSlicer(slicer.id, form),
@@ -17,11 +73,10 @@ function SlicerRow({ slicer, onDelete }: { slicer: Slicer; onDelete: (id: number
   if (editing) {
     return (
       <div className="flex items-center gap-2 px-4 py-2.5 border-b dark:border-gray-700 last:border-0">
-        <input
-          className="border rounded px-2 py-1 text-sm w-44 dark:bg-gray-700 dark:border-gray-600"
+        <SlicerNameInput
           value={form.name}
-          onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
           placeholder="Name"
+          onChange={(name, path) => setForm(f => ({ ...f, name, executable_path: path || f.executable_path || defaultExePath(name) }))}
         />
         <input
           className="flex-1 border rounded px-2 py-1 text-sm font-mono dark:bg-gray-700 dark:border-gray-600"
@@ -116,31 +171,30 @@ export default function Slicers() {
         <Link to="/settings" className="flex items-center gap-1 text-sm text-gray-400 hover:text-brand-600 mb-3">
           <ChevronLeft size={14} /> Settings
         </Link>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Slicers</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-3"><Layers size={26} className="text-brand-600" />Slicers</h1>
       </div>
 
       {/* Slicer Program Locations */}
       <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
         <div className="flex items-center justify-between px-4 pt-4 pb-2">
           <div className="flex items-center gap-2">
-            <Scissors size={15} className="text-gray-400" />
+            <Layers size={15} className="text-gray-400" />
             <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">Slicer Program Locations</p>
           </div>
           <button
             onClick={() => setShowForm(v => !v)}
-            className="flex items-center gap-1.5 bg-brand-600 hover:bg-brand-700 text-white text-sm px-3 py-1.5 rounded-lg"
+            className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg transition-opacity ${showForm ? 'opacity-0 pointer-events-none' : 'bg-brand-600 hover:bg-brand-700 text-white'}`}
           >
             <Plus size={14} /> Add Slicer
           </button>
         </div>
         {showForm && (
           <div className="flex items-center gap-2 px-4 py-2.5 border-t dark:border-gray-700">
-            <input
-              className="border rounded px-2 py-1 text-sm w-44 dark:bg-gray-700 dark:border-gray-600"
+            <SlicerNameInput
               placeholder="Name *"
               value={form.name}
               autoFocus
-              onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+              onChange={(name, path) => setForm(f => ({ ...f, name, executable_path: path || f.executable_path || defaultExePath(name) }))}
               onKeyDown={e => e.key === 'Enter' && form.name && createMutation.mutate()}
             />
             <input

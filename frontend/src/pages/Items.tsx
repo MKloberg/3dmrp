@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import ReactCrop, { Crop, PixelCrop } from 'react-image-crop'
 import 'react-image-crop/dist/ReactCrop.css'
@@ -12,12 +13,13 @@ import {
   createRoutingStep, updateRoutingStep, deleteRoutingStep,
   addRoutingStepFilament, updateRoutingStepFilament, deleteRoutingStepFilament,
   getGcodeFiles, getGcodeFileMetadata, sendGcodeToPrinter, checkGcodeItemFolders, renameGcodeItemFolders,
-  getPrinterStatus,
+  getPrinterStatus, getSettings,
+  createPostProcessingCost, updatePostProcessingCost, deletePostProcessingCost,
   Item, FilamentSpec, Tag, PrinterType, Printer, Routing, RoutingStepFilament,
 } from '../api/client'
 import Modal from '../components/Modal'
 import ConfirmModal from '../components/ConfirmModal'
-import { Plus, Trash2, ChevronDown, ChevronRight, Pencil, Check, X, Upload, ShoppingCart, GripVertical, Tag as TagIcon, Crop as CropIcon, Download, Route, Send, RefreshCw } from 'lucide-react'
+import { Plus, Trash2, ChevronDown, ChevronRight, Pencil, Check, X, Upload, ShoppingCart, GripVertical, Tag as TagIcon, Crop as CropIcon, Download, Route, Send, RefreshCw, Clock, Box, Share2, DollarSign, ClipboardList as BomIcon } from 'lucide-react'
 
 function CropModal({
   itemId,
@@ -139,15 +141,18 @@ const STATE_COLORS: Record<string, string> = {
   standby:  'bg-gray-400',
 }
 
-function WeightMismatchModal({ stepFilaments, filamentWeights, onUpdate, onSkip }: {
+function GcodeMismatchModal({ stepFilaments, filamentWeights, stepPrintTime, gcodePrintTime, onUpdate, onSkip, onUpdateDone }: {
   stepFilaments: RoutingStepFilament[]
   filamentWeights: number[]
-  onUpdate: (updates: { filId: number; grams: number }[]) => Promise<void>
+  stepPrintTime: number | null
+  gcodePrintTime: number | null
+  onUpdate: (data: { weights: { filId: number; grams: number }[]; printTime?: number }) => Promise<void>
   onSkip: () => void
+  onUpdateDone?: () => void
 }) {
   const [updating, setUpdating] = useState(false)
 
-  const diffs = stepFilaments
+  const weightDiffs = stepFilaments
     .map((sf, idx) => ({
       filId: sf.id,
       filament: sf.filament_spec,
@@ -157,51 +162,72 @@ function WeightMismatchModal({ stepFilaments, filamentWeights, onUpdate, onSkip 
     }))
     .filter(d => d.gcodeGrams != null && Math.abs(d.specGrams - d.gcodeGrams) > 0.05)
 
+  const timeDiffers = gcodePrintTime != null &&
+    (stepPrintTime == null || Math.abs(stepPrintTime - gcodePrintTime) > 60)
+
   async function handleUpdate() {
     setUpdating(true)
     try {
-      await onUpdate(diffs.map(d => ({ filId: d.filId, grams: d.gcodeGrams })))
+      await onUpdate({
+        weights: weightDiffs.map(d => ({ filId: d.filId, grams: d.gcodeGrams })),
+        printTime: timeDiffers ? gcodePrintTime! : undefined,
+      })
     } catch (_) {
       // proceed even if update fails
     } finally {
       setUpdating(false)
     }
-    onSkip()
+    ;(onUpdateDone ?? onSkip)()
   }
 
   return (
-    <Modal title="Filament Weight Difference" onClose={onSkip}>
+    <Modal title="Update from G-Code" onClose={onSkip}>
       <div className="space-y-4">
         <p className="text-sm text-gray-600 dark:text-gray-300">
-          The weight(s) in the item specification differ from the estimated weights in the G-Code file. Would you like to update the item specification to match?
+          Differences found between the item specification and the G-Code file. Would you like to update the specification to match?
         </p>
-        <table className="w-full text-sm border-collapse">
-          <thead>
-            <tr className="border-b dark:border-gray-600">
-              <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 pr-3 w-10">Slot</th>
-              <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 pr-3">Filament</th>
-              <th className="text-right text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 pr-3 whitespace-nowrap">Item Spec (g)</th>
-              <th className="text-right text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 whitespace-nowrap">G-Code (g)</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y dark:divide-gray-700">
-            {diffs.map(d => (
-              <tr key={d.filId}>
-                <td className="py-2 pr-3 text-xs text-gray-400 tabular-nums">#{d.slot}</td>
-                <td className="py-2 pr-3">
-                  <div className="flex items-center gap-2">
-                    <FilamentDot hex={d.filament.color_hex} />
-                    <span className="text-xs text-gray-700 dark:text-gray-200">
-                      {d.filament.brand ? `${d.filament.brand} ` : ''}{d.filament.material} {d.filament.color_name}
-                    </span>
-                  </div>
-                </td>
-                <td className="py-2 pr-3 text-right text-xs tabular-nums text-gray-400">{d.specGrams.toFixed(1)}</td>
-                <td className="py-2 text-right text-xs tabular-nums font-semibold text-gray-800 dark:text-gray-100">{d.gcodeGrams.toFixed(1)}</td>
+
+        {weightDiffs.length > 0 && (
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr className="border-b dark:border-gray-600">
+                <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 pr-3 w-10">Slot</th>
+                <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 pr-3">Filament</th>
+                <th className="text-right text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 pr-3 whitespace-nowrap">Spec (g)</th>
+                <th className="text-right text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 whitespace-nowrap">G-Code (g)</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y dark:divide-gray-700">
+              {weightDiffs.map(d => (
+                <tr key={d.filId}>
+                  <td className="py-2 pr-3 text-xs text-gray-400 tabular-nums">#{d.slot}</td>
+                  <td className="py-2 pr-3">
+                    <div className="flex items-center gap-2">
+                      <FilamentDot hex={d.filament.color_hex} />
+                      <span className="text-xs text-gray-700 dark:text-gray-200">
+                        {d.filament.brand ? `${d.filament.brand} ` : ''}{d.filament.material} {d.filament.color_name}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="py-2 pr-3 text-right text-xs tabular-nums text-gray-400">{d.specGrams.toFixed(1)}</td>
+                  <td className="py-2 text-right text-xs tabular-nums font-semibold text-gray-800 dark:text-gray-100">{d.gcodeGrams.toFixed(1)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        {timeDiffers && (
+          <div className="flex items-center justify-between text-sm border-t dark:border-gray-700 pt-3">
+            <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Estimated Print Time</span>
+            <div className="flex items-center gap-4">
+              <span className="text-xs text-gray-400">{stepPrintTime != null ? formatPrintTime(stepPrintTime) : '—'}</span>
+              <span className="text-xs text-gray-300 dark:text-gray-600">→</span>
+              <span className="text-xs font-semibold text-gray-800 dark:text-gray-100">{formatPrintTime(gcodePrintTime!)}</span>
+            </div>
+          </div>
+        )}
+
         <div className="flex justify-end gap-2 pt-1">
           <button onClick={onSkip}
             className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200">
@@ -217,10 +243,13 @@ function WeightMismatchModal({ stepFilaments, filamentWeights, onUpdate, onSkip 
   )
 }
 
-function FilamentCheckModal({ printer, stepFilaments, filamentWeights, onConfirm, onCancel }: {
+function FilamentCheckModal({ printer, stepFilaments, filamentWeights, analyzeOnly, gcodeMatchesSpec, printTime, onConfirm, onCancel }: {
   printer: Printer
   stepFilaments: FilamentSpec[]
   filamentWeights: number[]
+  analyzeOnly?: boolean
+  gcodeMatchesSpec?: boolean
+  printTime?: number | null
   onConfirm: () => void
   onCancel: () => void
 }) {
@@ -261,7 +290,7 @@ function FilamentCheckModal({ printer, stepFilaments, filamentWeights, onConfirm
   }
 
   return (
-    <Modal title="Filament Check" onClose={onCancel}>
+    <Modal title="Filament and Print Time Check" onClose={onCancel}>
       <div className="space-y-4">
 
         {/* Printer header */}
@@ -357,25 +386,48 @@ function FilamentCheckModal({ printer, stepFilaments, filamentWeights, onConfirm
           </tbody>
         </table>
 
+        {printTime != null && (
+          <div className="flex items-center justify-between text-sm border-t dark:border-gray-700 pt-3">
+            <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Estimated Print Time for this Plate</span>
+            <span className="text-xs font-semibold text-gray-800 dark:text-gray-100">{formatPrintTime(printTime)}</span>
+          </div>
+        )}
+
+        {analyzeOnly && gcodeMatchesSpec && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+            <span className="text-green-600 dark:text-green-400 text-sm font-medium">✓ Item filament weights and print time match the G-Code file.</span>
+          </div>
+        )}
+
         <div className="flex justify-end gap-2 pt-1">
-          <button onClick={onCancel}
-            className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200">
-            Cancel
-          </button>
-          <button onClick={onConfirm}
-            className="px-4 py-2 text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-lg">
-            Start Print
-          </button>
+          {analyzeOnly ? (
+            <button onClick={onCancel}
+              className="px-4 py-2 text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-lg">
+              Close
+            </button>
+          ) : (
+            <>
+              <button onClick={onCancel}
+                className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200">
+                Cancel
+              </button>
+              <button onClick={onConfirm}
+                className="px-4 py-2 text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-lg">
+                Start Print
+              </button>
+            </>
+          )}
         </div>
       </div>
     </Modal>
   )
 }
 
-function PrinterStatusRow({ printer, sending, onSend }: {
+function PrinterStatusRow({ printer, sending, onSend, onAnalyze }: {
   printer: Printer
   sending: boolean
   onSend: (printerId: number, startPrint: boolean) => void
+  onAnalyze: (printerId: number) => void
 }) {
   const { data: status } = useQuery({
     queryKey: ['printer-status', printer.id],
@@ -421,6 +473,12 @@ function PrinterStatusRow({ printer, sending, onSend }: {
       </div>
       <div className="flex items-center gap-1 shrink-0">
         <button
+          onClick={() => onAnalyze(printer.id)}
+          className="flex items-center gap-1 text-xs border border-gray-300 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 px-2 py-0.5 rounded"
+        >
+          Analyze
+        </button>
+        <button
           disabled={sending}
           onClick={() => onSend(printer.id, false)}
           className="flex items-center gap-1 text-xs border border-brand-300 dark:border-brand-700 text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/20 px-2 py-0.5 rounded disabled:opacity-50"
@@ -439,17 +497,18 @@ function PrinterStatusRow({ printer, sending, onSend }: {
   )
 }
 
-function GcodePanel({ itemName, slicerName, printerTypeName, printerTypeId, stepId, printers, stepFilaments, onUpdateFilamentWeights }: {
+function GcodePanel({ itemName, slicerName, printerTypeName, printerTypeId, stepId, stepPrintTime, printers, stepFilaments, onUpdateFromGcode }: {
   itemName: string
   slicerName: string
   printerTypeName: string
   printerTypeId: number
   stepId: number
+  stepPrintTime: number | null
   printers: Printer[]
   stepFilaments: RoutingStepFilament[]
-  onUpdateFilamentWeights: (updates: { filId: number; grams: number }[]) => Promise<void>
+  onUpdateFromGcode: (data: { weights: { filId: number; grams: number }[]; printTime?: number }) => Promise<void>
 }) {
-  const storageKey = `gcode-sel:${slicerName}:${printerTypeName}:${itemName}:${stepId}`
+  const storageKey = `gcode-sel:${stepId}`
 
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['gcode-files', itemName, slicerName, printerTypeName],
@@ -478,8 +537,8 @@ function GcodePanel({ itemName, slicerName, printerTypeName, printerTypeId, step
   const [sent, setSent] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
   const [progress, setProgress] = useState(0)
-  const [filamentWarning, setFilamentWarning] = useState<{ printer: Printer } | null>(null)
-  const [pendingSend, setPendingSend] = useState<{ printerId: number; startPrint: boolean } | null>(null)
+  const [filamentWarning, setFilamentWarning] = useState<{ printer: Printer; analyze: boolean; gcodeMatchesSpec: boolean } | null>(null)
+  const [pendingSend, setPendingSend] = useState<{ printerId: number; startPrint: boolean; analyze: boolean; gcodeMatchesSpec: boolean } | null>(null)
   const [showWeightMismatch, setShowWeightMismatch] = useState(false)
 
   useEffect(() => {
@@ -525,37 +584,48 @@ function GcodePanel({ itemName, slicerName, printerTypeName, printerTypeId, step
     }
   }
 
-  function continueAfterWeightCheck(printerId: number, startPrint: boolean) {
-    if (startPrint && stepFilaments.length > 0) {
-      const printer = matchingPrinters.find(p => p.id === printerId)
-      const loadedIds = new Set(printer?.slots.map(s => s.filament_spec_id).filter(Boolean) ?? [])
+  function continueAfterWeightCheck(printerId: number, startPrint: boolean, analyze: boolean, gcodeMatchesSpec: boolean) {
+    const printer = matchingPrinters.find(p => p.id === printerId)
+    if (analyze) {
+      if (printer) setFilamentWarning({ printer, analyze: true, gcodeMatchesSpec })
+      return
+    }
+    if (startPrint && stepFilaments.length > 0 && printer) {
+      const loadedIds = new Set(printer.slots.map(s => s.filament_spec_id).filter(Boolean) ?? [])
       const missing = stepFilaments.filter(f => !loadedIds.has(f.filament_spec.id))
-      if (missing.length > 0 && printer) {
-        setFilamentWarning({ printer })
+      if (missing.length > 0) {
+        setFilamentWarning({ printer, analyze: false, gcodeMatchesSpec })
         return
       }
     }
     doSend(printerId, startPrint)
   }
 
-  function handleSend(printerId: number, startPrint: boolean) {
+  function checkAndQueue(printerId: number, startPrint: boolean, analyze: boolean) {
     const weights = metadata?.filament_weights ?? []
-    const hasDiffs = weights.length > 0 && stepFilaments.some((sf, idx) => {
+    const gcodePrintTime = metadata?.estimated_time ?? null
+    const hasWeightDiffs = weights.length > 0 && stepFilaments.some((sf, idx) => {
       const g = weights[idx]
       return g != null && Math.abs(sf.grams - g) > 0.05
     })
-    if (hasDiffs) {
-      setPendingSend({ printerId, startPrint })
+    const hasTimeDiff = gcodePrintTime != null &&
+      (stepPrintTime == null || Math.abs(stepPrintTime - gcodePrintTime) > 60)
+    const gcodeMatchesSpec = !hasWeightDiffs && !hasTimeDiff
+    if (!gcodeMatchesSpec) {
+      setPendingSend({ printerId, startPrint, analyze, gcodeMatchesSpec: false })
       setShowWeightMismatch(true)
       return
     }
-    continueAfterWeightCheck(printerId, startPrint)
+    continueAfterWeightCheck(printerId, startPrint, analyze, true)
   }
+
+  const handleSend = (printerId: number, startPrint: boolean) => checkAndQueue(printerId, startPrint, false)
+  const handleAnalyze = (printerId: number) => checkAndQueue(printerId, false, true)
 
   function resolveWeightMismatch() {
     setShowWeightMismatch(false)
     if (pendingSend) {
-      continueAfterWeightCheck(pendingSend.printerId, pendingSend.startPrint)
+      continueAfterWeightCheck(pendingSend.printerId, pendingSend.startPrint, pendingSend.analyze, pendingSend.gcodeMatchesSpec)
       setPendingSend(null)
     }
   }
@@ -621,14 +691,23 @@ function GcodePanel({ itemName, slicerName, printerTypeName, printerTypeId, step
       {matchingPrinters.length === 0 ? (
         <p className="text-xs text-gray-400 italic">No printers of this type</p>
       ) : matchingPrinters.map(printer => (
-        <PrinterStatusRow key={printer.id} printer={printer} sending={sending} onSend={handleSend} />
+        <PrinterStatusRow key={printer.id} printer={printer} sending={sending} onSend={handleSend} onAnalyze={handleAnalyze} />
       ))}
       {showWeightMismatch && (
-        <WeightMismatchModal
+        <GcodeMismatchModal
           stepFilaments={stepFilaments}
           filamentWeights={metadata?.filament_weights ?? []}
-          onUpdate={onUpdateFilamentWeights}
+          stepPrintTime={stepPrintTime}
+          gcodePrintTime={metadata?.estimated_time ?? null}
+          onUpdate={onUpdateFromGcode}
           onSkip={resolveWeightMismatch}
+          onUpdateDone={() => {
+            setShowWeightMismatch(false)
+            if (pendingSend) {
+              continueAfterWeightCheck(pendingSend.printerId, pendingSend.startPrint, pendingSend.analyze, true)
+              setPendingSend(null)
+            }
+          }}
         />
       )}
       {filamentWarning && (
@@ -636,6 +715,9 @@ function GcodePanel({ itemName, slicerName, printerTypeName, printerTypeId, step
           printer={filamentWarning.printer}
           stepFilaments={stepFilaments.map(f => f.filament_spec)}
           filamentWeights={metadata?.filament_weights ?? []}
+          analyzeOnly={filamentWarning.analyze}
+          gcodeMatchesSpec={filamentWarning.gcodeMatchesSpec}
+          printTime={stepPrintTime}
           onConfirm={() => { const p = filamentWarning.printer; setFilamentWarning(null); doSend(p.id, true) }}
           onCancel={() => setFilamentWarning(null)}
         />
@@ -800,14 +882,42 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
     if (!isNaN(g) && g > 0 && specId) updateReqMutation.mutate({ reqId, grams: g, filament_spec_id: Number(specId) })
   }
 
+  // --- Cost / BOM modals ---
+  const [showCostModal, setShowCostModal] = useState(false)
+  const [showBomModal, setShowBomModal] = useState(false)
+  const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: getSettings })
+  const globalHourlyRate = parseFloat(settings?.machine_hourly_rate ?? '2.50') || 2.50
+  const electricityRate = parseFloat(settings?.electricity_cost_kwh ?? '0.1765') || 0.1765
+  const globalMarkup = parseFloat(settings?.markup_multiplier ?? '1.2') || 1.2
+
+  // --- Post-processing costs ---
+  const [ppNewLabel, setPpNewLabel] = useState('')
+  const [ppNewCost, setPpNewCost] = useState('')
+  const [ppEditId, setPpEditId] = useState<number | null>(null)
+  const [ppEditLabel, setPpEditLabel] = useState('')
+  const [ppEditCost, setPpEditCost] = useState('')
+
+  const ppCreateMutation = useMutation({
+    mutationFn: () => createPostProcessingCost(item.id, { label: ppNewLabel.trim(), cost_per_item: parseFloat(ppNewCost) || 0 }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['items'] }); setPpNewLabel(''); setPpNewCost('') },
+  })
+  const ppUpdateMutation = useMutation({
+    mutationFn: (id: number) => updatePostProcessingCost(item.id, id, { label: ppEditLabel.trim(), cost_per_item: parseFloat(ppEditCost) || 0 }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['items'] }); setPpEditId(null) },
+  })
+  const ppDeleteMutation = useMutation({
+    mutationFn: (id: number) => deletePostProcessingCost(item.id, id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['items'] }),
+  })
+
   // --- Routing state ---
   const [editingRoutingId, setEditingRoutingId] = useState<number | null>(null)
   const [editingRoutingName, setEditingRoutingName] = useState('')
   const [editingStep, setEditingStep] = useState<{
-    routingId: number; stepId: number; desc: string; printerTypeId: string; qty: string
+    routingId: number; stepId: number; desc: string; printerTypeId: string; qty: string; partsPerItem: string; printTimeHrs: string; printTimeMins: string
   } | null>(null)
   const [addingStep, setAddingStep] = useState<{ routingId: number } | null>(null)
-  const [newStepForm, setNewStepForm] = useState({ desc: '', printerTypeId: '', qty: '1' })
+  const [newStepForm, setNewStepForm] = useState({ desc: '', printerTypeId: '', qty: '1', partsPerItem: '1', printTimeHrs: '', printTimeMins: '' })
   const [editingStepFil, setEditingStepFil] = useState<{
     routingId: number; stepId: number; filId: number; specId: string; grams: string
   } | null>(null)
@@ -839,11 +949,14 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
   })
 
   const createStepMutation = useMutation({
-    mutationFn: async ({ routingId, desc, printerTypeId, qty }: { routingId: number; desc: string; printerTypeId: string; qty: string }) => {
+    mutationFn: async ({ routingId, desc, printerTypeId, qty, partsPerItem, printTimeHrs, printTimeMins }: { routingId: number; desc: string; printerTypeId: string; qty: string; partsPerItem: string; printTimeHrs: string; printTimeMins: string }) => {
+      const printTimeSecs = (printTimeHrs || printTimeMins) ? (Number(printTimeHrs || 0) * 3600 + Number(printTimeMins || 0) * 60) : undefined
       const step = await createRoutingStep(item.id, routingId, {
         description: desc,
         printer_type_id: printerTypeId ? Number(printerTypeId) : null,
         quantity_on_plate: Number(qty) || 1,
+        parts_per_item: Number(partsPerItem) || 1,
+        estimated_print_time: printTimeSecs || undefined,
       })
       for (const req of item.filament_requirements) {
         await addRoutingStepFilament(item.id, routingId, step.id, {
@@ -853,16 +966,20 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
       }
       return step
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['items'] }); setAddingStep(null); setNewStepForm({ desc: '', printerTypeId: '', qty: '1' }) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['items'] }); setAddingStep(null); setNewStepForm({ desc: '', printerTypeId: '', qty: '1', partsPerItem: '1', printTimeHrs: '', printTimeMins: '' }) },
   })
 
   const updateStepMutation = useMutation({
-    mutationFn: ({ routingId, stepId, desc, printerTypeId, qty }: { routingId: number; stepId: number; desc: string; printerTypeId: string; qty: string }) =>
-      updateRoutingStep(item.id, routingId, stepId, {
+    mutationFn: ({ routingId, stepId, desc, printerTypeId, qty, partsPerItem, printTimeHrs, printTimeMins }: { routingId: number; stepId: number; desc: string; printerTypeId: string; qty: string; partsPerItem: string; printTimeHrs: string; printTimeMins: string }) => {
+      const printTimeSecs = (printTimeHrs || printTimeMins) ? (Number(printTimeHrs || 0) * 3600 + Number(printTimeMins || 0) * 60) : null
+      return updateRoutingStep(item.id, routingId, stepId, {
         description: desc,
         printer_type_id: printerTypeId ? Number(printerTypeId) : null,
         quantity_on_plate: Number(qty) || 1,
-      }),
+        parts_per_item: Number(partsPerItem) || 1,
+        estimated_print_time: printTimeSecs,
+      })
+    },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['items'] }); setEditingStep(null) },
   })
 
@@ -891,8 +1008,8 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
   })
 
   async function handleAddStep(routingId: number) {
-    const { desc, printerTypeId, qty } = newStepForm
-    createStepMutation.mutate({ routingId, desc, printerTypeId, qty })
+    const { desc, printerTypeId, qty, partsPerItem, printTimeHrs, printTimeMins } = newStepForm
+    createStepMutation.mutate({ routingId, desc, printerTypeId, qty, partsPerItem, printTimeHrs, printTimeMins })
   }
 
   async function ensureRoutingThenAddStep() {
@@ -945,20 +1062,49 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                       />
                       <span className="text-xs text-gray-500">per plate</span>
                     </div>
-                    <button onClick={() => updateStepMutation.mutate({ routingId: routing.id, stepId: step.id, desc: editingStep.desc, printerTypeId: editingStep.printerTypeId, qty: editingStep.qty })} disabled={updateStepMutation.isPending} className="text-green-500 hover:text-green-600 disabled:opacity-40"><Check size={13} /></button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1 shrink-0">
+                      <input
+                        type="number" min="1"
+                        className="w-14 border rounded px-1.5 py-1 text-xs text-right dark:bg-gray-700 dark:border-gray-600"
+                        value={editingStep.partsPerItem}
+                        onChange={e => setEditingStep(s => s && { ...s, partsPerItem: e.target.value })}
+                      />
+                      <span className="text-xs text-gray-500">Parts per Item (BOM)</span>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <input
+                        type="number" min="0" placeholder="0"
+                        className="w-12 border rounded px-1.5 py-1 text-xs text-right dark:bg-gray-700 dark:border-gray-600"
+                        value={editingStep.printTimeHrs}
+                        onChange={e => setEditingStep(s => s && { ...s, printTimeHrs: e.target.value })}
+                      />
+                      <span className="text-xs text-gray-500">h</span>
+                      <input
+                        type="number" min="0" max="59" placeholder="0"
+                        className="w-12 border rounded px-1.5 py-1 text-xs text-right dark:bg-gray-700 dark:border-gray-600"
+                        value={editingStep.printTimeMins}
+                        onChange={e => setEditingStep(s => s && { ...s, printTimeMins: e.target.value })}
+                      />
+                      <span className="text-xs text-gray-500">min per plate</span>
+                    </div>
+                    <button onClick={() => updateStepMutation.mutate({ routingId: routing.id, stepId: step.id, desc: editingStep.desc, printerTypeId: editingStep.printerTypeId, qty: editingStep.qty, partsPerItem: editingStep.partsPerItem, printTimeHrs: editingStep.printTimeHrs, printTimeMins: editingStep.printTimeMins })} disabled={updateStepMutation.isPending} className="text-green-500 hover:text-green-600 disabled:opacity-40"><Check size={13} /></button>
                     <button onClick={() => setEditingStep(null)} className="text-gray-400 hover:text-gray-600"><X size={13} /></button>
                   </div>
                 </div>
               ) : (
                 <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
+                  <div className="flex items-center gap-3 min-w-0">
                     <span className="text-xs text-gray-400 shrink-0">Step {idx + 1}</span>
                     <span className="text-sm font-medium truncate">{step.description || <span className="text-gray-400 italic">No description</span>}</span>
                     {printerType && <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0 bg-gray-200 dark:bg-gray-600 px-1.5 py-0.5 rounded">{printerType.name}</span>}
-                    {step.quantity_on_plate > 1 && <span className="text-xs text-gray-400 shrink-0">×{step.quantity_on_plate}/plate</span>}
+                    <span className="flex items-center gap-1 text-xs text-gray-400 shrink-0"><Box size={10} />×{step.quantity_on_plate} per Plate</span>
+                    <span className="flex items-center gap-1 text-xs text-gray-400 shrink-0"><Share2 size={10} />{step.parts_per_item} {step.parts_per_item === 1 ? 'Part' : 'Parts'} per Item (BOM)</span>
+                    {step.estimated_print_time != null && <span className="flex items-center gap-1 text-xs text-gray-400 shrink-0"><Clock size={10} />{formatPrintTime(step.estimated_print_time)}</span>}
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
-                    <button onClick={() => setEditingStep({ routingId: routing.id, stepId: step.id, desc: step.description, printerTypeId: String(step.printer_type_id ?? ''), qty: String(step.quantity_on_plate) })} className="text-gray-400 hover:text-brand-600"><Pencil size={12} /></button>
+                    <button onClick={() => setEditingStep({ routingId: routing.id, stepId: step.id, desc: step.description, printerTypeId: String(step.printer_type_id ?? ''), qty: String(step.quantity_on_plate), partsPerItem: String(step.parts_per_item ?? 1), printTimeHrs: step.estimated_print_time != null ? String(Math.floor(step.estimated_print_time / 3600)) : '', printTimeMins: step.estimated_print_time != null ? String(Math.floor((step.estimated_print_time % 3600) / 60)) : '' })} className="text-gray-400 hover:text-brand-600"><Pencil size={12} /></button>
                     <button onClick={() => { if (confirm('Delete this step?')) deleteStepMutation.mutate({ routingId: routing.id, stepId: step.id }) }} className="text-red-400 hover:text-red-600"><Trash2 size={12} /></button>
                   </div>
                 </div>
@@ -1002,24 +1148,30 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                       printerTypeName={printerType.name}
                       printerTypeId={printerType.id}
                       stepId={step.id}
+                      stepPrintTime={step.estimated_print_time}
                       printers={printers}
                       stepFilaments={step.filaments}
-                      onUpdateFilamentWeights={async (updates) => {
-                        await Promise.all(updates.map(u => {
-                          const sf = step.filaments.find(f => f.id === u.filId)
-                          if (!sf) return Promise.resolve()
-                          return updateRoutingStepFilament(item.id, routing.id, step.id, u.filId, {
-                            filament_spec_id: sf.filament_spec_id,
-                            grams: u.grams,
-                          })
-                        }))
-                        await Promise.all(updates.map(u => {
-                          const sf = step.filaments.find(f => f.id === u.filId)
-                          if (!sf) return Promise.resolve()
-                          const req = item.filament_requirements.find(r => r.filament_spec_id === sf.filament_spec_id)
-                          if (!req) return Promise.resolve()
-                          return updateFilamentReq(item.id, req.id, { grams: u.grams, filament_spec_id: sf.filament_spec_id })
-                        }))
+                      onUpdateFromGcode={async ({ weights, printTime }) => {
+                        if (weights.length > 0) {
+                          await Promise.all(weights.map(u => {
+                            const sf = step.filaments.find(f => f.id === u.filId)
+                            if (!sf) return Promise.resolve()
+                            return updateRoutingStepFilament(item.id, routing.id, step.id, u.filId, {
+                              filament_spec_id: sf.filament_spec_id,
+                              grams: u.grams,
+                            })
+                          }))
+                          await Promise.all(weights.map(u => {
+                            const sf = step.filaments.find(f => f.id === u.filId)
+                            if (!sf) return Promise.resolve()
+                            const req = item.filament_requirements.find(r => r.filament_spec_id === sf.filament_spec_id)
+                            if (!req) return Promise.resolve()
+                            return updateFilamentReq(item.id, req.id, { grams: u.grams, filament_spec_id: sf.filament_spec_id })
+                          }))
+                        }
+                        if (printTime != null) {
+                          await updateRoutingStep(item.id, routing.id, step.id, { estimated_print_time: printTime })
+                        }
                         await qc.invalidateQueries({ queryKey: ['items'] })
                       }}
                     />
@@ -1060,12 +1212,24 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                 <input type="number" min="1" className="w-14 border rounded px-1.5 py-1 text-xs text-right dark:bg-gray-700 dark:border-gray-600" value={newStepForm.qty} onChange={e => setNewStepForm(f => ({ ...f, qty: e.target.value }))} />
                 <span className="text-xs text-gray-500">per plate</span>
               </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 shrink-0">
+                <input type="number" min="1" className="w-14 border rounded px-1.5 py-1 text-xs text-right dark:bg-gray-700 dark:border-gray-600" value={newStepForm.partsPerItem} onChange={e => setNewStepForm(f => ({ ...f, partsPerItem: e.target.value }))} />
+                <span className="text-xs text-gray-500">Parts per Item (BOM)</span>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <input type="number" min="0" placeholder="0" className="w-12 border rounded px-1.5 py-1 text-xs text-right dark:bg-gray-700 dark:border-gray-600" value={newStepForm.printTimeHrs} onChange={e => setNewStepForm(f => ({ ...f, printTimeHrs: e.target.value }))} />
+                <span className="text-xs text-gray-500">h</span>
+                <input type="number" min="0" max="59" placeholder="0" className="w-12 border rounded px-1.5 py-1 text-xs text-right dark:bg-gray-700 dark:border-gray-600" value={newStepForm.printTimeMins} onChange={e => setNewStepForm(f => ({ ...f, printTimeMins: e.target.value }))} />
+                <span className="text-xs text-gray-500">min per plate</span>
+              </div>
               <button onClick={() => handleAddStep(routing.id)} disabled={createStepMutation.isPending} className="text-green-500 hover:text-green-600 disabled:opacity-40"><Check size={13} /></button>
               <button onClick={() => setAddingStep(null)} className="text-gray-400 hover:text-gray-600"><X size={13} /></button>
             </div>
           </div>
         ) : (
-          <button onClick={() => { setAddingStep({ routingId: routing.id }); setNewStepForm({ desc: '', printerTypeId: '', qty: '1' }) }} className="text-sm text-brand-600 hover:underline flex items-center gap-1 mt-1"><Plus size={13} /> Add step</button>
+          <button onClick={() => { setAddingStep({ routingId: routing.id }); setNewStepForm({ desc: '', printerTypeId: '', qty: '1', partsPerItem: '1', printTimeHrs: '', printTimeMins: '' }) }} className="text-sm text-brand-600 hover:underline flex items-center gap-1 mt-1"><Plus size={13} /> Add step</button>
         )}
       </div>
     )
@@ -1376,6 +1540,22 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
         )}
       </div>
 
+      {/* Cost / BOM feature panel */}
+      <div className="flex gap-2">
+        <button
+          onClick={() => setShowCostModal(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-gradient-to-r from-brand-500 to-brand-700 text-white hover:opacity-90 transition-opacity shadow-sm"
+        >
+          <DollarSign size={12} /> Cost Accounting
+        </button>
+        <button
+          onClick={() => setShowBomModal(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-gradient-to-r from-violet-500 to-indigo-600 text-white hover:opacity-90 transition-opacity shadow-sm"
+        >
+          <BomIcon size={12} /> BOM
+        </button>
+      </div>
+
       {/* Routing */}
       <div>
         <div className="flex items-center justify-between mb-2">
@@ -1464,13 +1644,13 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                       <button onClick={async () => {
                         const routing = await createRouting(item.id, {})
                         await qc.invalidateQueries({ queryKey: ['items'] })
-                        createStepMutation.mutate({ routingId: routing.id, desc: newStepForm.desc, printerTypeId: newStepForm.printerTypeId, qty: newStepForm.qty })
+                        createStepMutation.mutate({ routingId: routing.id, desc: newStepForm.desc, printerTypeId: newStepForm.printerTypeId, qty: newStepForm.qty, partsPerItem: newStepForm.partsPerItem, printTimeHrs: newStepForm.printTimeHrs, printTimeMins: newStepForm.printTimeMins })
                       }} disabled={createStepMutation.isPending} className="text-green-500 hover:text-green-600 disabled:opacity-40"><Check size={13} /></button>
                       <button onClick={() => setAddingStep(null)} className="text-gray-400 hover:text-gray-600"><X size={13} /></button>
                     </div>
                   </div>
                 ) : (
-                  <button onClick={() => { setAddingStep({ routingId: -1 }); setNewStepForm({ desc: '', printerTypeId: '', qty: '1' }) }} className="text-sm text-brand-600 hover:underline flex items-center gap-1"><Plus size={13} /> Add step</button>
+                  <button onClick={() => { setAddingStep({ routingId: -1 }); setNewStepForm({ desc: '', printerTypeId: '', qty: '1', partsPerItem: '1', printTimeHrs: '', printTimeMins: '' }) }} className="text-sm text-brand-600 hover:underline flex items-center gap-1"><Plus size={13} /> Add step</button>
                 )}
               </div>
             ) : (
@@ -1479,6 +1659,300 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
           </div>
         )}
       </div>
+
+      {/* Cost Accounting Modal */}
+      {showCostModal && (
+        <Modal title={<>Cost Accounting / <span className="text-green-600 dark:text-green-400">MSRP</span></>} onClose={() => setShowCostModal(false)} wide>
+          <div className="space-y-4">
+            {(() => {
+              const allSteps = item.routings.flatMap(r => r.steps)
+              if (allSteps.length === 0) {
+                const filamentTotal = item.filament_requirements.reduce((acc, req) => {
+                  const spec = req.filament_spec
+                  const cpg = spec.price != null && spec.weight != null && spec.weight > 0 ? spec.price / spec.weight : null
+                  return acc + (cpg != null ? req.grams * cpg : 0)
+                }, 0)
+                return (
+                  <div>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">No production steps defined. Showing filament costs only.</p>
+                    <div className="flex justify-between text-sm border-t dark:border-gray-700 pt-3">
+                      <span className="text-gray-600 dark:text-gray-400">Filament cost</span>
+                      <span className="font-semibold text-brand-600">{filamentTotal > 0 ? `$${filamentTotal.toFixed(2)}` : '—'}</span>
+                    </div>
+                  </div>
+                )
+              }
+
+              let grandTotal = 0
+              return (
+                <div className="space-y-4">
+                  {item.routings.map(routing => (
+                    <div key={routing.id}>
+                      {item.use_advanced_routing && (
+                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">{routing.name || 'Routing'}</p>
+                      )}
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b dark:border-gray-700 text-xs text-gray-400">
+                            <th className="text-left pb-1 font-medium">Production Steps</th>
+                            <th className="text-right pb-1 font-medium">Plates/Item</th>
+                            <th className="text-right pb-1 font-medium">Filament</th>
+                            <th className="text-right pb-1 font-medium">Machine</th>
+                            <th className="text-right pb-1 font-medium">Energy</th>
+                            <th className="text-right pb-1 font-medium">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y dark:divide-gray-700">
+                          {routing.steps.map((step, stepIdx) => {
+                            const printerType = printerTypes.find(pt => pt.id === step.printer_type_id)
+                            const hourlyRate = printerType?.hourly_rate ?? globalHourlyRate
+                            const platesPerItem = Math.ceil(step.parts_per_item / step.quantity_on_plate)
+                            const machineCost = step.estimated_print_time != null
+                              ? (step.estimated_print_time / 3600) * hourlyRate * platesPerItem
+                              : null
+                            const powerWatts = printerType?.power_watts ?? 150
+                            const energyCost = step.estimated_print_time != null
+                              ? (powerWatts / 1000) * (step.estimated_print_time / 3600) * electricityRate * platesPerItem
+                              : null
+                            const filamentCost = step.filaments.reduce((acc, f) => {
+                              const spec = f.filament_spec
+                              const cpg = spec.price != null && spec.weight != null && spec.weight > 0 ? spec.price / spec.weight : null
+                              return acc + (cpg != null ? f.grams * cpg * platesPerItem : 0)
+                            }, 0)
+                            const stepTotal = (machineCost ?? 0) + (energyCost ?? 0) + filamentCost
+                            grandTotal += stepTotal
+                            return (
+                              <tr key={step.id}>
+                                <td className="py-1.5 pr-2">
+                                  <span className="font-medium"><span className="text-gray-400 mr-1">{stepIdx + 1}.</span>{step.description || `Step ${step.sort_order + 1}`}</span>
+                                  {printerType && <span className="text-xs text-gray-400 ml-1.5">({printerType.name}{printerType.hourly_rate != null ? ` · $${printerType.hourly_rate}/hr` : ''})</span>}
+                                </td>
+                                <td className="text-right py-1.5 text-gray-500">{platesPerItem}×</td>
+                                <td className="text-right py-1.5">{filamentCost > 0 ? `$${filamentCost.toFixed(2)}` : <span className="text-gray-400">—</span>}</td>
+                                <td className="text-right py-1.5">{machineCost != null ? `$${machineCost.toFixed(2)}` : <span className="text-gray-400">—</span>}</td>
+                                <td className="text-right py-1.5">{energyCost != null ? `$${energyCost.toFixed(2)}` : <span className="text-gray-400">—</span>}</td>
+                                <td className="text-right py-1.5 font-semibold">{stepTotal > 0 ? `$${stepTotal.toFixed(2)}` : <span className="text-gray-400">—</span>}</td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ))}
+                  {/* Post Processing */}
+                  <div className="border-t dark:border-gray-700 pt-3 space-y-1">
+                    <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Post Processing</p>
+                    {item.post_processing_costs.map(pp => (
+                      <div key={pp.id} className="flex items-center gap-2 group">
+                        {ppEditId === pp.id ? (
+                          <>
+                            <input className="flex-1 border rounded px-2 py-1 text-sm dark:bg-gray-700 dark:border-gray-600" value={ppEditLabel} onChange={e => setPpEditLabel(e.target.value)} autoFocus />
+                            <input className="w-24 border rounded px-2 py-1 text-sm text-right font-mono dark:bg-gray-700 dark:border-gray-600" value={ppEditCost} onChange={e => setPpEditCost(e.target.value)} placeholder="0.00" />
+                            <button onClick={() => ppUpdateMutation.mutate(pp.id)} disabled={!ppEditLabel.trim() || ppUpdateMutation.isPending} className="text-green-600 hover:text-green-700 disabled:opacity-40"><Check size={14} /></button>
+                            <button onClick={() => setPpEditId(null)} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>
+                          </>
+                        ) : (
+                          <>
+                            <span className="flex-1 text-sm">{pp.label}</span>
+                            <span className="text-sm font-mono">${pp.cost_per_item.toFixed(2)}</span>
+                            <button onClick={() => { setPpEditId(pp.id); setPpEditLabel(pp.label); setPpEditCost(String(pp.cost_per_item)) }} className="text-gray-300 hover:text-gray-500 opacity-0 group-hover:opacity-100"><Pencil size={12} /></button>
+                            <button onClick={() => ppDeleteMutation.mutate(pp.id)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100"><Trash2 size={12} /></button>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                    {/* Add row */}
+                    <div className="flex items-center gap-2 pt-1">
+                      <input className="flex-1 border rounded px-2 py-1 text-sm dark:bg-gray-700 dark:border-gray-600" placeholder="Add Post Processing Item" value={ppNewLabel} onChange={e => setPpNewLabel(e.target.value)} onKeyDown={e => e.key === 'Enter' && ppNewLabel.trim() && ppCreateMutation.mutate()} />
+                      <input className="w-24 border rounded px-2 py-1 text-sm text-right font-mono dark:bg-gray-700 dark:border-gray-600" placeholder="$/item" value={ppNewCost} onChange={e => setPpNewCost(e.target.value)} onKeyDown={e => e.key === 'Enter' && ppNewLabel.trim() && ppCreateMutation.mutate()} />
+                      <button onClick={() => ppCreateMutation.mutate()} disabled={!ppNewLabel.trim() || ppCreateMutation.isPending} className="text-green-600 hover:text-green-700 disabled:opacity-40"><Plus size={14} /></button>
+                    </div>
+                  </div>
+
+                  {(() => {
+                    const totalCost = grandTotal + item.post_processing_costs.reduce((s, p) => s + p.cost_per_item, 0)
+                    const msrp = totalCost * globalMarkup
+                    return (
+                      <>
+                        <div className="border-t dark:border-gray-700 pt-3 flex justify-between items-center">
+                          <span className="font-semibold">Total Cost per Item</span>
+                          <span className="font-bold text-lg text-brand-600">${totalCost.toFixed(2)}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3 py-2 border-b dark:border-gray-700">
+                          <span className="text-sm text-gray-500 dark:text-gray-400">
+                            Markup multiplier <span className="font-mono text-gray-700 dark:text-gray-300">{globalMarkup.toFixed(2)}×</span>
+                            <Link to="/settings/general" className="ml-2 text-xs text-brand-500 hover:text-brand-700">edit in settings</Link>
+                          </span>
+                          <span className="text-xs text-gray-400">{totalCost > 0 ? `$${totalCost.toFixed(2)} × ${globalMarkup.toFixed(2)}` : '—'}</span>
+                        </div>
+                        <div className="flex items-center justify-between py-2">
+                          <span className="font-semibold text-green-700 dark:text-green-400">Suggested MSRP</span>
+                          <span className="font-bold text-2xl text-green-600 dark:text-green-400">${msrp.toFixed(2)}</span>
+                        </div>
+                      </>
+                    )
+                  })()}
+                  <div className="rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 px-3 py-2.5 space-y-2.5">
+                    <p className="text-xs font-semibold text-green-700 dark:text-green-400">How this was calculated</p>
+                    <p className="text-xs text-green-800 dark:text-green-300 leading-relaxed">
+                      Each production step contributes three costs: <span className="font-medium">filament</span> (grams used × cost per gram, derived from spool price and weight),{' '}
+                      <span className="font-medium">machine time</span> (print hours × hourly rate), and{' '}
+                      <span className="font-medium">energy</span> (print hours × printer wattage × electricity rate).
+                      The <em>Plates/Item</em> column shows how many print runs are needed — if a plate holds 2 parts but 3 are required per item, that's 2 plates — and all costs scale accordingly.
+                    </p>
+                    {item.post_processing_costs.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold text-green-700 dark:text-green-400 mb-1">Post Processing</p>
+                        <p className="text-xs text-green-800 dark:text-green-300 mb-1.5 leading-relaxed">
+                          These are fixed costs added per finished item to account for manual work done after printing, such as sanding, painting, or assembly. Each entry is a flat $/item amount that is always included regardless of print settings.
+                        </p>
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="border-b border-green-200 dark:border-green-700 text-green-600 dark:text-green-500">
+                              <th className="text-left pb-1 font-medium">Item</th>
+                              <th className="text-right pb-1 font-medium">Cost/Item</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {item.post_processing_costs.map(pp => (
+                              <tr key={pp.id} className="border-b border-green-100 dark:border-green-800/50 last:border-0">
+                                <td className="py-1 text-green-800 dark:text-green-300">{pp.label}</td>
+                                <td className="py-1 text-right font-mono text-green-800 dark:text-green-300">${pp.cost_per_item.toFixed(2)}</td>
+                              </tr>
+                            ))}
+                            <tr>
+                              <td className="pt-1.5 font-semibold text-green-700 dark:text-green-400">Total post processing</td>
+                              <td className="pt-1.5 text-right font-mono font-semibold text-green-700 dark:text-green-400">${item.post_processing_costs.reduce((s, p) => s + p.cost_per_item, 0).toFixed(2)}</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    <p className="text-xs text-green-600 dark:text-green-500">
+                      Using: ${globalHourlyRate.toFixed(2)}/hr machine rate · ${electricityRate.toFixed(4)}/kWh electricity · 150 W default power
+                      {printerTypes.some(pt => pt.hourly_rate != null || pt.power_watts != null) ? ' · some printer types use custom values' : ''}
+                    </p>
+                  </div>
+                </div>
+              )
+            })()}
+          </div>
+        </Modal>
+      )}
+
+      {/* Bill of Materials Modal */}
+      {showBomModal && (
+        <Modal title="Bill of Materials" onClose={() => setShowBomModal(false)}>
+          <div className="space-y-4">
+            {(() => {
+              const allSteps = item.routings.flatMap(r => r.steps)
+              if (allSteps.length === 0) {
+                if (item.filament_requirements.length === 0) {
+                  return <p className="text-sm text-gray-400 italic">No filament requirements defined.</p>
+                }
+                let totalCost = 0
+                return (
+                  <div>
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b dark:border-gray-700 text-xs text-gray-400">
+                          <th className="text-left pb-1 font-medium">Filament</th>
+                          <th className="text-right pb-1 font-medium">Grams</th>
+                          <th className="text-right pb-1 font-medium">Cost</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y dark:divide-gray-700">
+                        {item.filament_requirements.map(req => {
+                          const spec = req.filament_spec
+                          const cpg = spec.price != null && spec.weight != null && spec.weight > 0 ? spec.price / spec.weight : null
+                          const cost = cpg != null ? req.grams * cpg : null
+                          if (cost != null) totalCost += cost
+                          return (
+                            <tr key={req.id}>
+                              <td className="py-1.5">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: spec.color_hex }} />
+                                  <span>{spec.brand ? `${spec.brand} ` : ''}{spec.material} {spec.color_name}</span>
+                                </div>
+                              </td>
+                              <td className="text-right py-1.5">{req.grams}g</td>
+                              <td className="text-right py-1.5">{cost != null ? `$${cost.toFixed(2)}` : <span className="text-gray-400">—</span>}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                    {totalCost > 0 && (
+                      <div className="border-t dark:border-gray-700 pt-3 flex justify-between mt-2">
+                        <span className="font-semibold text-sm">Total filament cost</span>
+                        <span className="font-bold text-brand-600">${totalCost.toFixed(2)}</span>
+                      </div>
+                    )}
+                  </div>
+                )
+              }
+
+              const bomMap = new Map<number, { spec: FilamentSpec; totalGrams: number }>()
+              for (const step of allSteps) {
+                const platesPerItem = Math.ceil(step.parts_per_item / step.quantity_on_plate)
+                for (const f of step.filaments) {
+                  const existing = bomMap.get(f.filament_spec_id)
+                  if (existing) {
+                    existing.totalGrams += f.grams * platesPerItem
+                  } else {
+                    bomMap.set(f.filament_spec_id, { spec: f.filament_spec, totalGrams: f.grams * platesPerItem })
+                  }
+                }
+              }
+
+              if (bomMap.size === 0) {
+                return <p className="text-sm text-gray-400 italic">No filament usage defined in production steps.</p>
+              }
+
+              let totalCost = 0
+              const entries = Array.from(bomMap.values())
+              return (
+                <div>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b dark:border-gray-700 text-xs text-gray-400">
+                        <th className="text-left pb-1 font-medium">Filament</th>
+                        <th className="text-right pb-1 font-medium">Grams</th>
+                        <th className="text-right pb-1 font-medium">Cost</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y dark:divide-gray-700">
+                      {entries.map(({ spec, totalGrams }) => {
+                        const cpg = spec.price != null && spec.weight != null && spec.weight > 0 ? spec.price / spec.weight : null
+                        const cost = cpg != null ? totalGrams * cpg : null
+                        if (cost != null) totalCost += cost
+                        return (
+                          <tr key={spec.id}>
+                            <td className="py-1.5">
+                              <div className="flex items-center gap-2">
+                                <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: spec.color_hex }} />
+                                <span>{spec.brand ? `${spec.brand} ` : ''}{spec.material} {spec.color_name}</span>
+                              </div>
+                            </td>
+                            <td className="text-right py-1.5">{totalGrams.toFixed(1)}g</td>
+                            <td className="text-right py-1.5">{cost != null ? `$${cost.toFixed(2)}` : <span className="text-gray-400">—</span>}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                  {totalCost > 0 && (
+                    <div className="border-t dark:border-gray-700 pt-3 flex justify-between mt-2">
+                      <span className="font-semibold text-sm">Total filament cost</span>
+                      <span className="font-bold text-brand-600">${totalCost.toFixed(2)}</span>
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
@@ -1636,7 +2110,7 @@ export default function Items() {
   return (
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Items</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-3"><Box size={26} className="text-brand-600" />Items</h1>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowTagManager(true)}

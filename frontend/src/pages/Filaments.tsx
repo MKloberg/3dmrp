@@ -7,7 +7,7 @@ import {
   spoolmanBulkImport, spoolmanSync,
 } from '../api/client'
 import Modal from '../components/Modal'
-import { Plus, Pencil, Trash2, Download, ChevronDown, ChevronRight, ShoppingCart, ExternalLink, RefreshCw } from 'lucide-react'
+import { Plus, Pencil, Trash2, Download, ChevronDown, ChevronRight, ShoppingCart, ExternalLink, RefreshCw, Disc2 } from 'lucide-react'
 
 const MATERIALS = ['PLA', 'PETG', 'ABS', 'ASA', 'TPU', 'Nylon', 'Resin', 'Other']
 
@@ -418,7 +418,7 @@ export default function Filaments() {
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Filaments</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-3"><Disc2 size={26} className="text-brand-600" />Filaments</h1>
         <div className="flex items-center gap-2">
           {linkedToSpoolman > 0 && (
             <button

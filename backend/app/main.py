@@ -129,11 +129,38 @@ with engine.connect() as conn:
     if "slot_count_override" not in existing_printers2:
         conn.execute(text("ALTER TABLE printers ADD COLUMN slot_count_override INTEGER"))
 
+    existing_pt2 = {row[1] for row in conn.execute(text("PRAGMA table_info(printer_types)"))}
+    if "hourly_rate" not in existing_pt2:
+        conn.execute(text("ALTER TABLE printer_types ADD COLUMN hourly_rate REAL"))
+    if "power_watts" not in existing_pt2:
+        conn.execute(text("ALTER TABLE printer_types ADD COLUMN power_watts REAL"))
+    if "power_kwh" not in existing_pt2:
+        conn.execute(text("ALTER TABLE printer_types ADD COLUMN power_kwh REAL"))
+
+    existing_steps = {row[1] for row in conn.execute(text("PRAGMA table_info(routing_steps)"))}
+    if "parts_per_item" not in existing_steps:
+        conn.execute(text("ALTER TABLE routing_steps ADD COLUMN parts_per_item INTEGER NOT NULL DEFAULT 1"))
+    if "estimated_print_time" not in existing_steps:
+        conn.execute(text("ALTER TABLE routing_steps ADD COLUMN estimated_print_time INTEGER"))
+
     existing_items_cols2 = {row[1] for row in conn.execute(text("PRAGMA table_info(items)"))}
     if "use_advanced_routing" not in existing_items_cols2:
         conn.execute(text("ALTER TABLE items ADD COLUMN use_advanced_routing BOOLEAN NOT NULL DEFAULT 0"))
     if "stl_source_url" not in existing_items_cols2:
         conn.execute(text("ALTER TABLE items ADD COLUMN stl_source_url TEXT NOT NULL DEFAULT ''"))
+
+
+    existing_tables2 = {row[0] for row in conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))}
+    if "post_processing_costs" not in existing_tables2:
+        conn.execute(text("""
+            CREATE TABLE post_processing_costs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+                label TEXT NOT NULL,
+                cost_per_item REAL NOT NULL DEFAULT 0.0,
+                sort_order INTEGER NOT NULL DEFAULT 0
+            )
+        """))
 
     conn.commit()
 

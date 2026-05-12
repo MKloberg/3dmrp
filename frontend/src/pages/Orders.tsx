@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getOrders, createOrder, updateOrder, deleteOrder, getItems, updateItem, getCustomers, Order } from '../api/client'
 import Modal from '../components/Modal'
 import StatusBadge from '../components/StatusBadge'
-import { Plus, Trash2, Pencil, User, ExternalLink } from 'lucide-react'
+import { Plus, Trash2, Pencil, User, ExternalLink, ClipboardList } from 'lucide-react'
 
 const STATUSES = ['pending', 'printing', 'complete', 'cancelled'] as const
 type Status = typeof STATUSES[number]
@@ -107,7 +107,7 @@ export default function Orders() {
   return (
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Orders</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-3"><ClipboardList size={26} className="text-brand-600" />Orders</h1>
         <div className="flex items-center gap-3">
           <select
             className="border rounded-lg px-3 py-1.5 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300"

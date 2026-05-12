@@ -4,13 +4,14 @@ import subprocess
 import uuid
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from pydantic import BaseModel
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List
 from PIL import Image as PILImage
 
 from ..database import get_db
-from ..models import Item, ModelFilament, FilamentSpec, ModelImage, ModelSlicerFile, Printer, Routing, RoutingStep, RoutingStepFilament
+from ..models import Item, ModelFilament, FilamentSpec, ModelImage, ModelSlicerFile, Printer, Routing, RoutingStep, RoutingStepFilament, PostProcessingCost
 from ..schemas import (
     ItemCreate, ItemOut,
     ModelFilamentCreate, ModelFilamentUpdate, ModelFilamentOut,
@@ -20,6 +21,7 @@ from ..schemas import (
     RoutingCreate, RoutingUpdate, RoutingOut,
     RoutingStepCreate, RoutingStepUpdate, RoutingStepOut, RoutingStepReorderItem,
     RoutingStepFilamentCreate, RoutingStepFilamentUpdate, RoutingStepFilamentOut,
+    PostProcessingCostCreate, PostProcessingCostUpdate, PostProcessingCostOut,
 )
 
 router = APIRouter(prefix="/api/items", tags=["items"])
@@ -411,4 +413,48 @@ def delete_routing_step_filament(item_id: int, routing_id: int, step_id: int, fi
     if not fil:
         raise HTTPException(status_code=404, detail="Filament not found")
     db.delete(fil)
+    db.commit()
+
+
+# --- Post-processing costs ---
+
+@router.get("/{item_id}/post-processing", response_model=List[PostProcessingCostOut])
+def list_post_processing(item_id: int, db: Session = Depends(get_db)):
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return item.post_processing_costs
+
+
+@router.post("/{item_id}/post-processing", response_model=PostProcessingCostOut, status_code=201)
+def create_post_processing(item_id: int, data: PostProcessingCostCreate, db: Session = Depends(get_db)):
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    count = db.query(PostProcessingCost).filter(PostProcessingCost.item_id == item_id).count()
+    cost = PostProcessingCost(item_id=item_id, sort_order=count, **data.model_dump())
+    db.add(cost)
+    db.commit()
+    db.refresh(cost)
+    return cost
+
+
+@router.patch("/{item_id}/post-processing/{cost_id}", response_model=PostProcessingCostOut)
+def update_post_processing(item_id: int, cost_id: int, data: PostProcessingCostUpdate, db: Session = Depends(get_db)):
+    cost = db.query(PostProcessingCost).filter(PostProcessingCost.id == cost_id, PostProcessingCost.item_id == item_id).first()
+    if not cost:
+        raise HTTPException(status_code=404, detail="Post-processing cost not found")
+    for k, v in data.model_dump(exclude_unset=True).items():
+        setattr(cost, k, v)
+    db.commit()
+    db.refresh(cost)
+    return cost
+
+
+@router.delete("/{item_id}/post-processing/{cost_id}", status_code=204)
+def delete_post_processing(item_id: int, cost_id: int, db: Session = Depends(get_db)):
+    cost = db.query(PostProcessingCost).filter(PostProcessingCost.id == cost_id, PostProcessingCost.item_id == item_id).first()
+    if not cost:
+        raise HTTPException(status_code=404, detail="Post-processing cost not found")
+    db.delete(cost)
     db.commit()

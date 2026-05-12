@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
-  LayoutDashboard, Box, ClipboardList, TrendingUp, Layers, Printer,
-  Settings, Users, FileText, ChevronRight,
+  LayoutDashboard, Box, ClipboardList, TrendingUp, Disc2, Printer,
+  Settings, Users, FileText, ChevronRight, SlidersHorizontal, Layers, Database,
 } from 'lucide-react'
 import clsx from 'clsx'
 
-type Child = { to: string; label: string }
+type Child = { to: string; label: string; icon?: React.ElementType }
 type NavItemDef = {
   to: string
   label: string
@@ -20,7 +20,7 @@ const nav: NavItemDef[] = [
   { to: '/customers', label: 'Customers', icon: Users },
   { to: '/forecast', label: 'Forecast', icon: TrendingUp },
   { to: '/items', label: 'Items', icon: Box },
-  { to: '/filaments', label: 'Filaments', icon: Layers },
+  { to: '/filaments', label: 'Filaments', icon: Disc2 },
   { to: '/printers', label: 'Printers', icon: Printer },
   {
     to: '/reports', label: 'Reports', icon: FileText,
@@ -31,10 +31,10 @@ const nav: NavItemDef[] = [
   {
     to: '/settings', label: 'Settings', icon: Settings,
     children: [
-      { to: '/settings/general', label: 'General' },
-      { to: '/settings/slicers', label: 'Slicers' },
-      { to: '/settings/printer-types', label: 'Printer Types' },
-      { to: '/settings/database', label: 'Database' },
+      { to: '/settings/general', label: 'General', icon: SlidersHorizontal },
+      { to: '/settings/slicers', label: 'Slicers', icon: Layers },
+      { to: '/settings/printer-types', label: 'Printer Types', icon: Printer },
+      { to: '/settings/database', label: 'Database', icon: Database },
     ],
   },
 ]
@@ -110,13 +110,14 @@ function NavTreeItem({ item }: { item: NavItemDef }) {
               to={child.to}
               className={({ isActive }) =>
                 clsx(
-                  'block px-3 py-1.5 rounded-lg text-sm transition-colors',
+                  'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-colors',
                   isActive
                     ? 'text-white font-medium'
                     : 'text-gray-400 hover:text-white hover:bg-gray-800',
                 )
               }
             >
+              {child.icon && <child.icon size={13} />}
               {child.label}
             </NavLink>
           ))}
