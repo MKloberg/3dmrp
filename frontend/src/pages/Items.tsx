@@ -11,9 +11,9 @@ import {
   createRouting, updateRouting, deleteRouting,
   createRoutingStep, updateRoutingStep, deleteRoutingStep,
   addRoutingStepFilament, updateRoutingStepFilament, deleteRoutingStepFilament,
-  getGcodeFiles, sendGcodeToPrinter, checkGcodeItemFolders, renameGcodeItemFolders,
+  getGcodeFiles, getGcodeFileMetadata, sendGcodeToPrinter, checkGcodeItemFolders, renameGcodeItemFolders,
   getPrinterStatus,
-  Item, FilamentSpec, Tag, PrinterType, Printer, Routing,
+  Item, FilamentSpec, Tag, PrinterType, Printer, Routing, RoutingStepFilament,
 } from '../api/client'
 import Modal from '../components/Modal'
 import ConfirmModal from '../components/ConfirmModal'
@@ -122,6 +122,14 @@ function FilamentDot({ hex }: { hex: string }) {
   return <span className="inline-block w-3 h-3 rounded-full border border-gray-300 dark:border-gray-600 shrink-0" style={{ backgroundColor: hex }} />
 }
 
+function formatPrintTime(secs: number): string {
+  const h = Math.floor(secs / 3600)
+  const m = Math.floor((secs % 3600) / 60)
+  if (h > 0) return `~${h}h ${m}m`
+  if (m > 0) return `~${m}m`
+  return `~${secs}s`
+}
+
 const STATE_COLORS: Record<string, string> = {
   printing: 'bg-blue-500',
   paused:   'bg-yellow-400',
@@ -131,9 +139,88 @@ const STATE_COLORS: Record<string, string> = {
   standby:  'bg-gray-400',
 }
 
-function FilamentCheckModal({ printer, stepFilaments, onConfirm, onCancel }: {
+function WeightMismatchModal({ stepFilaments, filamentWeights, onUpdate, onSkip }: {
+  stepFilaments: RoutingStepFilament[]
+  filamentWeights: number[]
+  onUpdate: (updates: { filId: number; grams: number }[]) => Promise<void>
+  onSkip: () => void
+}) {
+  const [updating, setUpdating] = useState(false)
+
+  const diffs = stepFilaments
+    .map((sf, idx) => ({
+      filId: sf.id,
+      filament: sf.filament_spec,
+      specGrams: sf.grams,
+      gcodeGrams: filamentWeights[idx],
+      slot: idx + 1,
+    }))
+    .filter(d => d.gcodeGrams != null && Math.abs(d.specGrams - d.gcodeGrams) > 0.05)
+
+  async function handleUpdate() {
+    setUpdating(true)
+    try {
+      await onUpdate(diffs.map(d => ({ filId: d.filId, grams: d.gcodeGrams })))
+    } catch (_) {
+      // proceed even if update fails
+    } finally {
+      setUpdating(false)
+    }
+    onSkip()
+  }
+
+  return (
+    <Modal title="Filament Weight Difference" onClose={onSkip}>
+      <div className="space-y-4">
+        <p className="text-sm text-gray-600 dark:text-gray-300">
+          The weight(s) in the item specification differ from the estimated weights in the G-Code file. Would you like to update the item specification to match?
+        </p>
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="border-b dark:border-gray-600">
+              <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 pr-3 w-10">Slot</th>
+              <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 pr-3">Filament</th>
+              <th className="text-right text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 pr-3 whitespace-nowrap">Item Spec (g)</th>
+              <th className="text-right text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 whitespace-nowrap">G-Code (g)</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y dark:divide-gray-700">
+            {diffs.map(d => (
+              <tr key={d.filId}>
+                <td className="py-2 pr-3 text-xs text-gray-400 tabular-nums">#{d.slot}</td>
+                <td className="py-2 pr-3">
+                  <div className="flex items-center gap-2">
+                    <FilamentDot hex={d.filament.color_hex} />
+                    <span className="text-xs text-gray-700 dark:text-gray-200">
+                      {d.filament.brand ? `${d.filament.brand} ` : ''}{d.filament.material} {d.filament.color_name}
+                    </span>
+                  </div>
+                </td>
+                <td className="py-2 pr-3 text-right text-xs tabular-nums text-gray-400">{d.specGrams.toFixed(1)}</td>
+                <td className="py-2 text-right text-xs tabular-nums font-semibold text-gray-800 dark:text-gray-100">{d.gcodeGrams.toFixed(1)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onSkip}
+            className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200">
+            No, keep existing
+          </button>
+          <button onClick={handleUpdate} disabled={updating}
+            className="px-4 py-2 text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-lg disabled:opacity-50">
+            {updating ? 'Updating…' : 'Yes, update'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+function FilamentCheckModal({ printer, stepFilaments, filamentWeights, onConfirm, onCancel }: {
   printer: Printer
   stepFilaments: FilamentSpec[]
+  filamentWeights: number[]
   onConfirm: () => void
   onCancel: () => void
 }) {
@@ -222,7 +309,10 @@ function FilamentCheckModal({ printer, stepFilaments, onConfirm, onCancel }: {
                   </button>
                 </div>
               </th>
-              <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2">Required for this Model</th>
+              <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 pr-4">Required for this Model</th>
+              {filamentWeights.length > 0 && (
+                <th className="text-right text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 whitespace-nowrap">G-Code (g)</th>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y dark:divide-gray-700">
@@ -231,6 +321,7 @@ function FilamentCheckModal({ printer, stepFilaments, onConfirm, onCancel }: {
               const slot = livePrinter.slots.find(s => s.slot_number === slotNumber)
               const loaded = slot?.filament_spec
               const matches = slot?.filament_spec_id === req.id
+              const gcodeGrams = filamentWeights[idx]
               return (
                 <tr key={req.id}>
                   <td className="py-2 pr-4 text-xs text-gray-400 tabular-nums">
@@ -247,7 +338,7 @@ function FilamentCheckModal({ printer, stepFilaments, onConfirm, onCancel }: {
                       <span className="text-red-400 italic">Unknown</span>
                     )}
                   </td>
-                  <td className="py-2">
+                  <td className="py-2 pr-4">
                     <div className="flex items-center gap-2">
                       <FilamentDot hex={req.color_hex} />
                       <span className={matches ? 'text-gray-700 dark:text-gray-200' : 'text-red-500 font-medium'}>
@@ -255,6 +346,11 @@ function FilamentCheckModal({ printer, stepFilaments, onConfirm, onCancel }: {
                       </span>
                     </div>
                   </td>
+                  {filamentWeights.length > 0 && (
+                    <td className="py-2 text-right text-xs tabular-nums text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                      {gcodeGrams != null ? gcodeGrams.toFixed(1) : '—'}
+                    </td>
+                  )}
                 </tr>
               )
             })}
@@ -288,8 +384,13 @@ function PrinterStatusRow({ printer, sending, onSend }: {
     refetchInterval: 10_000,
   })
 
+  const lastFilenameRef = useRef<string | null>(null)
+  if (status?.filename) lastFilenameRef.current = status.filename
+
   const stateColor = STATE_COLORS[status?.state ?? 'offline'] ?? 'bg-gray-400'
   const isPrinting = status?.state === 'printing'
+  const isComplete = status?.state === 'complete'
+  const displayFilename = status?.filename || (isComplete ? lastFilenameRef.current : null)
 
   return (
     <div className="flex items-start gap-1.5">
@@ -297,7 +398,9 @@ function PrinterStatusRow({ printer, sending, onSend }: {
         <div className="flex items-center gap-1.5">
           <span className="text-xs text-gray-600 dark:text-gray-300 font-medium truncate">{printer.name}</span>
           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${stateColor}`} />
-          <span className="text-xs text-gray-400 capitalize shrink-0">{status?.state ?? '…'}</span>
+          <span className="text-xs text-gray-400 capitalize shrink-0">
+            {status?.state ?? '…'}{isComplete && displayFilename ? ` — ${displayFilename}` : ''}
+          </span>
         </div>
         {isPrinting && (
           <div className="space-y-0.5">
@@ -336,15 +439,17 @@ function PrinterStatusRow({ printer, sending, onSend }: {
   )
 }
 
-function GcodePanel({ itemName, slicerName, printerTypeName, printerTypeId, printers, stepFilaments }: {
+function GcodePanel({ itemName, slicerName, printerTypeName, printerTypeId, stepId, printers, stepFilaments, onUpdateFilamentWeights }: {
   itemName: string
   slicerName: string
   printerTypeName: string
   printerTypeId: number
+  stepId: number
   printers: Printer[]
-  stepFilaments: FilamentSpec[]
+  stepFilaments: RoutingStepFilament[]
+  onUpdateFilamentWeights: (updates: { filId: number; grams: number }[]) => Promise<void>
 }) {
-  const storageKey = `gcode-sel:${slicerName}:${printerTypeName}:${itemName}`
+  const storageKey = `gcode-sel:${slicerName}:${printerTypeName}:${itemName}:${stepId}`
 
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['gcode-files', itemName, slicerName, printerTypeName],
@@ -353,11 +458,29 @@ function GcodePanel({ itemName, slicerName, printerTypeName, printerTypeId, prin
   })
 
   const [selected, setSelected] = useState<string>(() => localStorage.getItem(storageKey) ?? '')
+
+  const files = data?.files ?? []
+  const activeFile = files.includes(selected) ? selected : (files[0] ?? '')
+  useEffect(() => {
+    if (files.length && activeFile && activeFile !== selected) {
+      setSelected(activeFile)
+      localStorage.setItem(storageKey, activeFile)
+    }
+  }, [activeFile, selected, files.length, storageKey])
+
+  const { data: metadata } = useQuery({
+    queryKey: ['gcode-metadata', itemName, slicerName, printerTypeName, activeFile],
+    queryFn: () => getGcodeFileMetadata(itemName, slicerName, printerTypeName, activeFile),
+    enabled: !!activeFile,
+    staleTime: 60_000,
+  })
   const [sending, setSending] = useState(false)
   const [sent, setSent] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
   const [progress, setProgress] = useState(0)
   const [filamentWarning, setFilamentWarning] = useState<{ printer: Printer } | null>(null)
+  const [pendingSend, setPendingSend] = useState<{ printerId: number; startPrint: boolean } | null>(null)
+  const [showWeightMismatch, setShowWeightMismatch] = useState(false)
 
   useEffect(() => {
     if (!sending) return
@@ -374,9 +497,6 @@ function GcodePanel({ itemName, slicerName, printerTypeName, printerTypeId, prin
   useEffect(() => {
     if (sent) setProgress(100)
   }, [sent])
-
-  const files = data?.files ?? []
-  const activeFile = files.includes(selected) ? selected : (files[0] ?? '')
 
   function selectFile(f: string) {
     setSelected(f)
@@ -405,17 +525,39 @@ function GcodePanel({ itemName, slicerName, printerTypeName, printerTypeId, prin
     }
   }
 
-  function handleSend(printerId: number, startPrint: boolean) {
+  function continueAfterWeightCheck(printerId: number, startPrint: boolean) {
     if (startPrint && stepFilaments.length > 0) {
       const printer = matchingPrinters.find(p => p.id === printerId)
       const loadedIds = new Set(printer?.slots.map(s => s.filament_spec_id).filter(Boolean) ?? [])
-      const missing = stepFilaments.filter(f => !loadedIds.has(f.id))
+      const missing = stepFilaments.filter(f => !loadedIds.has(f.filament_spec.id))
       if (missing.length > 0 && printer) {
         setFilamentWarning({ printer })
         return
       }
     }
     doSend(printerId, startPrint)
+  }
+
+  function handleSend(printerId: number, startPrint: boolean) {
+    const weights = metadata?.filament_weights ?? []
+    const hasDiffs = weights.length > 0 && stepFilaments.some((sf, idx) => {
+      const g = weights[idx]
+      return g != null && Math.abs(sf.grams - g) > 0.05
+    })
+    if (hasDiffs) {
+      setPendingSend({ printerId, startPrint })
+      setShowWeightMismatch(true)
+      return
+    }
+    continueAfterWeightCheck(printerId, startPrint)
+  }
+
+  function resolveWeightMismatch() {
+    setShowWeightMismatch(false)
+    if (pendingSend) {
+      continueAfterWeightCheck(pendingSend.printerId, pendingSend.startPrint)
+      setPendingSend(null)
+    }
   }
 
   const header = (
@@ -448,6 +590,20 @@ function GcodePanel({ itemName, slicerName, printerTypeName, printerTypeId, prin
       >
         {files.map(f => <option key={f} value={f}>{f}</option>)}
       </select>
+      {metadata && !metadata.error && (metadata.filament_weight_total != null || metadata.estimated_time != null) && (
+        <div className="text-xs text-gray-400 flex flex-wrap gap-x-3 gap-y-0.5">
+          {metadata.filament_weight_total != null && (
+            <span>
+              {metadata.filament_weights.length > 1
+                ? metadata.filament_weights.map((w, i) => `#${i + 1}: ${w.toFixed(1)}g`).join(' · ') + ` = ${metadata.filament_weight_total.toFixed(1)}g`
+                : `${metadata.filament_weight_total.toFixed(1)}g`}
+            </span>
+          )}
+          {metadata.estimated_time != null && (
+            <span>{formatPrintTime(metadata.estimated_time)}</span>
+          )}
+        </div>
+      )}
       {(sending || sent || sendError) && (
         <div className="space-y-0.5">
           {(sending || sent) && (
@@ -467,10 +623,19 @@ function GcodePanel({ itemName, slicerName, printerTypeName, printerTypeId, prin
       ) : matchingPrinters.map(printer => (
         <PrinterStatusRow key={printer.id} printer={printer} sending={sending} onSend={handleSend} />
       ))}
+      {showWeightMismatch && (
+        <WeightMismatchModal
+          stepFilaments={stepFilaments}
+          filamentWeights={metadata?.filament_weights ?? []}
+          onUpdate={onUpdateFilamentWeights}
+          onSkip={resolveWeightMismatch}
+        />
+      )}
       {filamentWarning && (
         <FilamentCheckModal
           printer={filamentWarning.printer}
-          stepFilaments={stepFilaments}
+          stepFilaments={stepFilaments.map(f => f.filament_spec)}
+          filamentWeights={metadata?.filament_weights ?? []}
           onConfirm={() => { const p = filamentWarning.printer; setFilamentWarning(null); doSend(p.id, true) }}
           onCancel={() => setFilamentWarning(null)}
         />
@@ -836,8 +1001,27 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                       slicerName={printerType.slicer.name}
                       printerTypeName={printerType.name}
                       printerTypeId={printerType.id}
+                      stepId={step.id}
                       printers={printers}
-                      stepFilaments={step.filaments.map(f => f.filament_spec)}
+                      stepFilaments={step.filaments}
+                      onUpdateFilamentWeights={async (updates) => {
+                        await Promise.all(updates.map(u => {
+                          const sf = step.filaments.find(f => f.id === u.filId)
+                          if (!sf) return Promise.resolve()
+                          return updateRoutingStepFilament(item.id, routing.id, step.id, u.filId, {
+                            filament_spec_id: sf.filament_spec_id,
+                            grams: u.grams,
+                          })
+                        }))
+                        await Promise.all(updates.map(u => {
+                          const sf = step.filaments.find(f => f.id === u.filId)
+                          if (!sf) return Promise.resolve()
+                          const req = item.filament_requirements.find(r => r.filament_spec_id === sf.filament_spec_id)
+                          if (!req) return Promise.resolve()
+                          return updateFilamentReq(item.id, req.id, { grams: u.grams, filament_spec_id: sf.filament_spec_id })
+                        }))
+                        await qc.invalidateQueries({ queryKey: ['items'] })
+                      }}
                     />
                   </div>
                 )}

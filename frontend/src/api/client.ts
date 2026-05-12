@@ -526,6 +526,17 @@ export const sendGcodeToPrinter = (printerId: number, filePath: string, startPri
     method: 'POST',
     body: JSON.stringify({ file_path: filePath, start_print: startPrint }),
   })
+export interface GcodeFileMetadata {
+  filament_weights: number[]
+  filament_weight_total: number | null
+  estimated_time: number | null
+  error: string | null
+}
+export const getGcodeFileMetadata = (
+  itemName: string, slicerName: string, printerTypeName: string, filename: string,
+) => req<GcodeFileMetadata>(
+  `/gcode/file-metadata?item_name=${encodeURIComponent(itemName)}&slicer_name=${encodeURIComponent(slicerName)}&printer_type_name=${encodeURIComponent(printerTypeName)}&filename=${encodeURIComponent(filename)}`,
+)
 export const checkGcodeItemFolders = (itemName: string) =>
   req<{ folders: string[] }>(`/gcode/item-folders?item_name=${encodeURIComponent(itemName)}`)
 export const renameGcodeItemFolders = (oldName: string, newName: string) =>

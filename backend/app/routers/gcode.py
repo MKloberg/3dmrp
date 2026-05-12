@@ -1,4 +1,5 @@
 import os
+import re
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -58,6 +59,97 @@ def scaffold_repo(db: Session = Depends(get_db)):
                 skipped.append(label)
 
     return {"created": created, "skipped": skipped, "error": None}
+
+
+@router.get("/file-metadata")
+def gcode_file_metadata(
+    item_name: str = Query(...),
+    slicer_name: str = Query(...),
+    printer_type_name: str = Query(...),
+    filename: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    root = _repo_root(db)
+    if not root:
+        return {"filament_weights": [], "filament_weight_total": None, "estimated_time": None, "error": "Repository not configured"}
+
+    file_path = os.path.join(root, slicer_name, printer_type_name, item_name, filename)
+    if not os.path.isfile(file_path):
+        return {"filament_weights": [], "filament_weight_total": None, "estimated_time": None, "error": "File not found"}
+
+    filament_weights: list[float] = []
+    filament_weight_total: float | None = None
+    estimated_time: int | None = None
+
+    def _parse_lines(lines: list[str]):
+        nonlocal filament_weights, filament_weight_total, estimated_time
+        for line in lines:
+            line = line.strip()
+            if not line.startswith(";"):
+                continue
+
+            if not filament_weights:
+                m = re.match(r"^;\s*filament used \[g\]\s*=\s*(.+)$", line, re.IGNORECASE)
+                if m:
+                    try:
+                        filament_weights = [float(v.strip()) for v in m.group(1).split(",")]
+                    except ValueError:
+                        pass
+
+            if filament_weight_total is None:
+                m = re.match(r"^;\s*total filament used \[g\]\s*=\s*([\d.]+)", line, re.IGNORECASE)
+                if m:
+                    try:
+                        filament_weight_total = float(m.group(1))
+                    except ValueError:
+                        pass
+
+            if filament_weight_total is None:
+                m = re.match(r"^;\s*total filament weight \[g\]\s*:\s*([\d.]+)", line, re.IGNORECASE)
+                if m:
+                    try:
+                        filament_weight_total = float(m.group(1))
+                    except ValueError:
+                        pass
+
+            if estimated_time is None:
+                m = re.match(r"^;\s*estimated printing time.*=\s*(.+)$", line, re.IGNORECASE)
+                if m:
+                    t = m.group(1).strip()
+                    secs = 0
+                    for pattern, mult in [(r"(\d+)h", 3600), (r"(\d+)m(?!s)", 60), (r"(\d+)s", 1)]:
+                        tm = re.search(pattern, t)
+                        if tm:
+                            secs += int(tm.group(1)) * mult
+                    if secs > 0:
+                        estimated_time = secs
+
+    try:
+        file_size = os.path.getsize(file_path)
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            # Read first 200 lines (PrusaSlicer puts metadata in header)
+            head = [f.readline() for _ in range(200)]
+            _parse_lines(head)
+
+            # If not found yet, also scan last 16 KB (OrcaSlicer puts metadata at end)
+            if filament_weight_total is None and estimated_time is None:
+                seek_pos = max(0, file_size - 65536)
+                f.seek(seek_pos)
+                if seek_pos > 0:
+                    f.readline()  # skip partial line
+                _parse_lines(f.readlines())
+    except OSError:
+        pass
+
+    if filament_weight_total is None and filament_weights:
+        filament_weight_total = round(sum(filament_weights), 3)
+
+    return {
+        "filament_weights": filament_weights,
+        "filament_weight_total": filament_weight_total,
+        "estimated_time": estimated_time,
+        "error": None,
+    }
 
 
 @router.get("/files")
