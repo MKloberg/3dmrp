@@ -11,7 +11,7 @@ from typing import List
 from PIL import Image as PILImage
 
 from ..database import get_db
-from ..models import Item, ModelFilament, FilamentSpec, ModelImage, ModelSlicerFile, Printer, Routing, RoutingStep, RoutingStepFilament, PostProcessingCost
+from ..models import Item, ModelFilament, FilamentSpec, ModelImage, ModelSlicerFile, Printer, PrinterType, Routing, RoutingStep, RoutingStepFilament, PostProcessingCost
 from ..schemas import (
     ItemCreate, ItemOut,
     ModelFilamentCreate, ModelFilamentUpdate, ModelFilamentOut,
@@ -236,55 +236,55 @@ def delete_item_image(item_id: int, image_id: int, db: Session = Depends(get_db)
 
 # --- Slicer files ---
 
-@router.put("/{item_id}/slicer-files/{printer_id}", response_model=SlicerFileOut)
-def set_slicer_file(item_id: int, printer_id: int, data: SlicerFileSet, db: Session = Depends(get_db)):
+@router.put("/{item_id}/slicer-files/{printer_type_id}", response_model=SlicerFileOut)
+def set_slicer_file(item_id: int, printer_type_id: int, data: SlicerFileSet, db: Session = Depends(get_db)):
     if not db.query(Item).filter(Item.id == item_id).first():
         raise HTTPException(status_code=404, detail="Item not found")
-    if not db.query(Printer).filter(Printer.id == printer_id).first():
-        raise HTTPException(status_code=404, detail="Printer not found")
+    if not db.query(PrinterType).filter(PrinterType.id == printer_type_id).first():
+        raise HTTPException(status_code=404, detail="Printer type not found")
     sf = db.query(ModelSlicerFile).filter(
         ModelSlicerFile.print_model_id == item_id,
-        ModelSlicerFile.printer_id == printer_id,
+        ModelSlicerFile.printer_type_id == printer_type_id,
     ).first()
     if sf:
         sf.file_path = data.file_path
     else:
-        sf = ModelSlicerFile(print_model_id=item_id, printer_id=printer_id, file_path=data.file_path)
+        sf = ModelSlicerFile(print_model_id=item_id, printer_type_id=printer_type_id, file_path=data.file_path)
         db.add(sf)
     db.commit()
     db.refresh(sf)
     return sf
 
 
-@router.delete("/{item_id}/slicer-files/{printer_id}", status_code=204)
-def delete_slicer_file(item_id: int, printer_id: int, db: Session = Depends(get_db)):
+@router.delete("/{item_id}/slicer-files/{printer_type_id}", status_code=204)
+def delete_slicer_file(item_id: int, printer_type_id: int, db: Session = Depends(get_db)):
     sf = db.query(ModelSlicerFile).filter(
         ModelSlicerFile.print_model_id == item_id,
-        ModelSlicerFile.printer_id == printer_id,
+        ModelSlicerFile.printer_type_id == printer_type_id,
     ).first()
     if not sf:
-        raise HTTPException(status_code=404, detail="Slicer file not found")
+        raise HTTPException(status_code=404, detail="Model file not found")
     db.delete(sf)
     db.commit()
 
 
-@router.post("/{item_id}/open-slicer/{printer_id}", status_code=204)
-def open_in_slicer(item_id: int, printer_id: int, db: Session = Depends(get_db)):
-    printer = db.query(Printer).filter(Printer.id == printer_id).first()
-    if not printer:
-        raise HTTPException(status_code=404, detail="Printer not found")
-    if not printer.slicer_executable:
-        raise HTTPException(status_code=400, detail="No slicer executable configured for this printer")
+@router.post("/{item_id}/open-slicer/{printer_type_id}", status_code=204)
+def open_in_slicer(item_id: int, printer_type_id: int, db: Session = Depends(get_db)):
+    printer_type = db.query(PrinterType).filter(PrinterType.id == printer_type_id).first()
+    if not printer_type:
+        raise HTTPException(status_code=404, detail="Printer type not found")
+    if not printer_type.slicer or not printer_type.slicer.executable_path:
+        raise HTTPException(status_code=400, detail="No slicer executable configured for this printer type")
     sf = db.query(ModelSlicerFile).filter(
         ModelSlicerFile.print_model_id == item_id,
-        ModelSlicerFile.printer_id == printer_id,
+        ModelSlicerFile.printer_type_id == printer_type_id,
     ).first()
     if not sf:
-        raise HTTPException(status_code=400, detail="No slicer file set for this item and printer")
+        raise HTTPException(status_code=400, detail="No model file set for this item and printer type")
     try:
-        subprocess.Popen([printer.slicer_executable, sf.file_path])
+        subprocess.Popen([printer_type.slicer.executable_path, sf.file_path])
     except FileNotFoundError:
-        raise HTTPException(status_code=400, detail=f"Slicer executable not found: {printer.slicer_executable}")
+        raise HTTPException(status_code=400, detail=f"Slicer executable not found: {printer_type.slicer.executable_path}")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 

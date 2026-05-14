@@ -31,7 +31,7 @@ Store and manage your printable models.
 - Click any thumbnail to open a full-size lightbox with prev/next navigation, download, crop, and delete
 - Define filament requirements (material, color, grams) with drag-and-drop slot ordering
 - Tag items with color-coded categories and filter by tag
-- Associate a slicer project file (`.3mf`) per printer and launch the slicer directly from the browser
+- **Model Files** — associate a model file (`.3mf`, `.stl`, or any format your slicer accepts) per printer type, and launch the slicer directly from the browser with the file pre-loaded
 - **STL Source URL** — store a link to the original STL source (Printables, Thingiverse, etc.); clickable directly from the item list
 
 ![Items](docs/screenshots/items.png)
@@ -314,7 +314,7 @@ Use **Settings → Database** to download a full backup or restore from a previo
 1. Go to **Settings → Slicers** and add your slicer with its executable path (e.g. `C:\Program Files\OrcaSlicer\OrcaSlicer.exe`).
 2. Go to **Settings → Printer Types**, create a type, and assign the slicer to it.
 3. On the Printers page, assign each printer to its type.
-4. On any item, set the path to its `.3mf` file for a given printer. An **Open** button will appear that launches the slicer with the file pre-loaded.
+4. Open any item and expand it. In the **Model Files** section, you'll see one row per printer type that has a slicer configured. Set the path to the model file (`.3mf`, `.stl`, or any format your slicer supports) for each printer type. An **Open** button will appear that launches the correct slicer with the file pre-loaded.
 
 ### G-Code Repository setup
 

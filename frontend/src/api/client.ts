@@ -57,7 +57,7 @@ export interface ModelImage {
 
 export interface SlicerFile {
   id: number
-  printer_id: number
+  printer_type_id: number
   file_path: string
 }
 
@@ -208,12 +208,12 @@ export const deleteItemImage = (itemId: number, imageId: number) =>
 export const cropItemImage = (itemId: number, imageId: number, box: { x: number; y: number; width: number; height: number }) =>
   req<ModelImage>(`/items/${itemId}/images/${imageId}/crop`, { method: 'POST', body: JSON.stringify(box) })
 
-export const setSlicerFile = (itemId: number, printerId: number, filePath: string) =>
-  req<SlicerFile>(`/items/${itemId}/slicer-files/${printerId}`, { method: 'PUT', body: JSON.stringify({ file_path: filePath }) })
-export const deleteSlicerFile = (itemId: number, printerId: number) =>
-  req<void>(`/items/${itemId}/slicer-files/${printerId}`, { method: 'DELETE' })
-export const openInSlicer = (itemId: number, printerId: number) =>
-  req<void>(`/items/${itemId}/open-slicer/${printerId}`, { method: 'POST' })
+export const setSlicerFile = (itemId: number, printerTypeId: number, filePath: string) =>
+  req<SlicerFile>(`/items/${itemId}/slicer-files/${printerTypeId}`, { method: 'PUT', body: JSON.stringify({ file_path: filePath }) })
+export const deleteSlicerFile = (itemId: number, printerTypeId: number) =>
+  req<void>(`/items/${itemId}/slicer-files/${printerTypeId}`, { method: 'DELETE' })
+export const openInSlicer = (itemId: number, printerTypeId: number) =>
+  req<void>(`/items/${itemId}/open-slicer/${printerTypeId}`, { method: 'POST' })
 
 // --- Routings ---
 export const updateItemRouting = (itemId: number, data: { use_advanced_routing: boolean }) =>

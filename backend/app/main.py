@@ -162,6 +162,29 @@ with engine.connect() as conn:
             )
         """))
 
+    # Migrate model_slicer_files from printer_id → printer_type_id
+    existing_msf = {row[1] for row in conn.execute(text("PRAGMA table_info(model_slicer_files)"))}
+    if "printer_type_id" not in existing_msf:
+        conn.execute(text("""
+            CREATE TABLE model_slicer_files_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                print_model_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+                printer_type_id INTEGER NOT NULL REFERENCES printer_types(id) ON DELETE CASCADE,
+                file_path TEXT NOT NULL,
+                UNIQUE (print_model_id, printer_type_id)
+            )
+        """))
+        if "printer_id" in existing_msf:
+            conn.execute(text("""
+                INSERT OR IGNORE INTO model_slicer_files_new (print_model_id, printer_type_id, file_path)
+                SELECT msf.print_model_id, p.printer_type_id, msf.file_path
+                FROM model_slicer_files msf
+                JOIN printers p ON p.id = msf.printer_id
+                WHERE p.printer_type_id IS NOT NULL
+            """))
+        conn.execute(text("DROP TABLE IF EXISTS model_slicer_files"))
+        conn.execute(text("ALTER TABLE model_slicer_files_new RENAME TO model_slicer_files"))
+
     conn.commit()
 
 app = FastAPI(title="3DMRP", version="1.0.0")

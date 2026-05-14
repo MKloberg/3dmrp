@@ -15,13 +15,14 @@ import {
   getGcodeFiles, getGcodeFileMetadata, sendGcodeToPrinter, checkGcodeItemFolders, renameGcodeItemFolders,
   getPrinterStatus, getMailsailSpoolman, getSettings,
   createPostProcessingCost, updatePostProcessingCost, deletePostProcessingCost,
-  Item, FilamentSpec, Tag, PrinterType, Printer, Routing, RoutingStepFilament,
+  setSlicerFile, deleteSlicerFile, openInSlicer,
+  Item, FilamentSpec, Tag, PrinterType, Printer, Routing, RoutingStepFilament, SlicerFile,
 } from '../api/client'
 import Modal from '../components/Modal'
 import ConfirmModal from '../components/ConfirmModal'
 import PrintSpoolWizard from '../components/PrintSpoolWizard'
 import { SpoolIcon } from '../components/SpoolIcon'
-import { Plus, Trash2, ChevronDown, ChevronRight, Pencil, Check, X, Upload, ShoppingCart, GripVertical, Tag as TagIcon, Crop as CropIcon, Download, Route, Send, RefreshCw, Clock, Box, Share2, DollarSign, ClipboardList as BomIcon } from 'lucide-react'
+import { Plus, Trash2, ChevronDown, ChevronRight, Pencil, Check, X, Upload, ShoppingCart, GripVertical, Tag as TagIcon, Crop as CropIcon, Download, Route, Send, RefreshCw, Clock, Box, Share2, DollarSign, ClipboardList as BomIcon, FolderOpen } from 'lucide-react'
 
 function CropModal({
   itemId,
@@ -779,6 +780,94 @@ function GcodePanel({ itemId, itemName, slicerName, printerTypeName, printerType
           onConfirm={() => { const p = printWizard.printer; setPrintWizard(null); doSend(p.id, true) }}
           onCancel={() => setPrintWizard(null)}
         />
+      )}
+    </div>
+  )
+}
+
+function SlicerFileRow({ itemId, printerType, slicerFile, onChanged }: {
+  itemId: number
+  printerType: PrinterType
+  slicerFile: SlicerFile | undefined
+  onChanged: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [path, setPath] = useState(slicerFile?.file_path ?? '')
+  const [opening, setOpening] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  async function handleSave() {
+    if (!path.trim()) return
+    setSaving(true)
+    try {
+      await setSlicerFile(itemId, printerType.id, path.trim())
+      onChanged()
+      setEditing(false)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleDelete() {
+    await deleteSlicerFile(itemId, printerType.id)
+    setPath('')
+    onChanged()
+  }
+
+  async function handleOpen() {
+    setOpening(true)
+    try { await openInSlicer(itemId, printerType.id) } finally { setOpening(false) }
+  }
+
+  return (
+    <div className="flex items-center gap-2 text-sm">
+      <span className="text-xs text-gray-500 dark:text-gray-400 w-36 shrink-0 truncate" title={`${printerType.name}${printerType.slicer ? ` · ${printerType.slicer.name}` : ''}`}>
+        {printerType.name}
+      </span>
+      {editing ? (
+        <>
+          <input
+            autoFocus
+            className="flex-1 border rounded px-2 py-1 text-xs font-mono dark:bg-gray-700 dark:border-gray-600"
+            placeholder="C:\path\to\model.3mf"
+            value={path}
+            onChange={e => setPath(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') setEditing(false) }}
+          />
+          <button onClick={handleSave} disabled={saving || !path.trim()} className="text-green-600 hover:text-green-700 disabled:opacity-40 shrink-0">
+            <Check size={14} />
+          </button>
+          <button onClick={() => setEditing(false)} className="text-gray-400 hover:text-gray-600 shrink-0">
+            <X size={14} />
+          </button>
+        </>
+      ) : slicerFile ? (
+        <>
+          <span className="flex-1 text-xs font-mono text-gray-600 dark:text-gray-300 truncate" title={slicerFile.file_path}>
+            {slicerFile.file_path}
+          </span>
+          <button
+            onClick={handleOpen}
+            disabled={opening}
+            className="shrink-0 flex items-center gap-1 text-xs text-brand-600 hover:text-brand-700 font-medium disabled:opacity-50"
+            title={`Open in ${printerType.slicer?.name ?? 'slicer'}`}
+          >
+            <FolderOpen size={13} /> {opening ? 'Opening…' : 'Open'}
+          </button>
+          <button onClick={() => { setPath(slicerFile.file_path); setEditing(true) }} className="shrink-0 text-gray-400 hover:text-gray-600">
+            <Pencil size={13} />
+          </button>
+          <button onClick={handleDelete} className="shrink-0 text-gray-400 hover:text-red-500">
+            <Trash2 size={13} />
+          </button>
+        </>
+      ) : (
+        <button
+          onClick={() => setEditing(true)}
+          className="text-xs text-gray-400 hover:text-brand-600 flex items-center gap-1"
+        >
+          <Plus size={12} /> Set model file
+        </button>
       )}
     </div>
   )
@@ -1614,6 +1703,29 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
           <BomIcon size={12} /> BOM
         </button>
       </div>
+
+      {/* Model Files */}
+      {printerTypes.filter(pt => pt.slicer).length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide flex items-center gap-1.5 mb-2">
+            <FolderOpen size={11} /> Model Files
+          </p>
+          <div className="space-y-1.5">
+            {printerTypes.filter(pt => pt.slicer).map(pt => {
+              const sf: SlicerFile | undefined = item.slicer_files.find(f => f.printer_type_id === pt.id)
+              return (
+                <SlicerFileRow
+                  key={pt.id}
+                  itemId={item.id}
+                  printerType={pt}
+                  slicerFile={sf}
+                  onChanged={() => qc.invalidateQueries({ queryKey: ['items'] })}
+                />
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Routing */}
       <div>

@@ -117,13 +117,13 @@ class ModelSlicerFile(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     print_model_id = Column(Integer, ForeignKey("items.id", ondelete="CASCADE"), nullable=False)
-    printer_id = Column(Integer, ForeignKey("printers.id", ondelete="CASCADE"), nullable=False)
+    printer_type_id = Column(Integer, ForeignKey("printer_types.id", ondelete="CASCADE"), nullable=False)
     file_path = Column(String, nullable=False)
 
     item = relationship("Item", back_populates="slicer_files")
-    printer = relationship("Printer")
+    printer_type = relationship("PrinterType")
 
-    __table_args__ = (UniqueConstraint("print_model_id", "printer_id", name="uq_model_printer_slicer"),)
+    __table_args__ = (UniqueConstraint("print_model_id", "printer_type_id", name="uq_model_printer_type_slicer"),)
 
 
 class Slicer(Base):

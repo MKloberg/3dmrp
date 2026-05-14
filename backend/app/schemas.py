@@ -200,7 +200,7 @@ class ItemCreate(ItemBase):
 
 class SlicerFileOut(BaseModel):
     id: int
-    printer_id: int
+    printer_type_id: int
     file_path: str
 
     model_config = {"from_attributes": True}
