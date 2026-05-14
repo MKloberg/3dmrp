@@ -47,6 +47,14 @@ def list_printers(db: Session = Depends(get_db)):
     return db.query(Printer).order_by(Printer.name).all()
 
 
+@router.get("/by-name/{name}", response_model=PrinterOut)
+def get_printer_by_name(name: str, db: Session = Depends(get_db)):
+    printer = db.query(Printer).filter(Printer.name == name).first()
+    if not printer:
+        raise HTTPException(status_code=404, detail="Printer not found")
+    return printer
+
+
 @router.post("", response_model=PrinterOut, status_code=201)
 def create_printer(data: PrinterCreate, db: Session = Depends(get_db)):
     printer = Printer(**data.model_dump())
@@ -385,6 +393,36 @@ async def send_gcode(printer_id: int, data: SendGcodeRequest, db: Session = Depe
     return {"ok": True, "filename": filename}
 
 
+@router.get("/{printer_id}/mainsail-spoolman")
+async def get_mainsail_spoolman(printer_id: int, db: Session = Depends(get_db)):
+    printer = db.query(Printer).filter(Printer.id == printer_id).first()
+    if not printer:
+        raise HTTPException(status_code=404, detail="Printer not found")
+
+    url = printer.url.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            # Spoolman integration is enabled via [spoolman] in moonraker.conf —
+            # it shows up as a component in /server/info when active.
+            info_resp = await client.get(f"{url}/server/info")
+            info_resp.raise_for_status()
+            components = info_resp.json().get("result", {}).get("components", [])
+            if "spoolman" not in components:
+                return {"configured": False, "server_url": None}
+
+            # Fetch the actual Spoolman server URL from the spoolman status
+            try:
+                sm_resp = await client.get(f"{url}/server/spoolman/status")
+                sm_resp.raise_for_status()
+                server_url = sm_resp.json().get("result", {}).get("spoolman_url")
+            except Exception:
+                server_url = None
+
+            return {"configured": True, "server_url": server_url}
+    except (httpx.RequestError, httpx.HTTPStatusError):
+        return {"configured": None, "server_url": None}
+
+
 @router.get("/{printer_id}/thumbnail")
 async def get_thumbnail(printer_id: int, path: str, db: Session = Depends(get_db)):
     printer = db.query(Printer).filter(Printer.id == printer_id).first()
@@ -401,3 +439,47 @@ async def get_thumbnail(printer_id: int, path: str, db: Session = Depends(get_db
 
     content_type = resp.headers.get("content-type", "image/png")
     return Response(content=resp.content, media_type=content_type)
+
+
+class SpoolmanSlotsSetRequest(BaseModel):
+    slots: list[dict]
+
+
+@router.get("/{printer_id}/spoolman-slots")
+async def get_spoolman_slots(printer_id: int, count: int = 1, db: Session = Depends(get_db)):
+    printer = db.query(Printer).filter(Printer.id == printer_id).first()
+    if not printer:
+        raise HTTPException(status_code=404, detail="Printer not found")
+    url = printer.url.rstrip("/")
+    results = []
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        for i in range(count):
+            try:
+                resp = await client.get(f"{url}/server/spoolman/spool_id", params={"tool": i})
+                resp.raise_for_status()
+                spool_id = resp.json().get("result", {}).get("spool_id")
+                results.append({"tool_index": i, "spool_id": spool_id})
+            except Exception:
+                results.append({"tool_index": i, "spool_id": None})
+    return results
+
+
+@router.post("/{printer_id}/spoolman-slots")
+async def set_spoolman_slots(printer_id: int, body: SpoolmanSlotsSetRequest, db: Session = Depends(get_db)):
+    printer = db.query(Printer).filter(Printer.id == printer_id).first()
+    if not printer:
+        raise HTTPException(status_code=404, detail="Printer not found")
+    url = printer.url.rstrip("/")
+    errors = []
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        for slot in body.slots:
+            try:
+                payload: dict = {"spool_id": slot.get("spool_id")}
+                tool_idx = slot.get("tool_index")
+                if tool_idx is not None:
+                    payload["tool"] = tool_idx
+                resp = await client.post(f"{url}/server/spoolman/spool_id", json=payload)
+                resp.raise_for_status()
+            except Exception as e:
+                errors.append({"tool_index": slot.get("tool_index"), "error": str(e)})
+    return {"ok": True, "errors": errors}

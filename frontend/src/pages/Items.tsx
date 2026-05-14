@@ -13,12 +13,14 @@ import {
   createRoutingStep, updateRoutingStep, deleteRoutingStep,
   addRoutingStepFilament, updateRoutingStepFilament, deleteRoutingStepFilament,
   getGcodeFiles, getGcodeFileMetadata, sendGcodeToPrinter, checkGcodeItemFolders, renameGcodeItemFolders,
-  getPrinterStatus, getSettings,
+  getPrinterStatus, getMailsailSpoolman, getSettings,
   createPostProcessingCost, updatePostProcessingCost, deletePostProcessingCost,
   Item, FilamentSpec, Tag, PrinterType, Printer, Routing, RoutingStepFilament,
 } from '../api/client'
 import Modal from '../components/Modal'
 import ConfirmModal from '../components/ConfirmModal'
+import PrintSpoolWizard from '../components/PrintSpoolWizard'
+import { SpoolIcon } from '../components/SpoolIcon'
 import { Plus, Trash2, ChevronDown, ChevronRight, Pencil, Check, X, Upload, ShoppingCart, GripVertical, Tag as TagIcon, Crop as CropIcon, Download, Route, Send, RefreshCw, Clock, Box, Share2, DollarSign, ClipboardList as BomIcon } from 'lucide-react'
 
 function CropModal({
@@ -121,7 +123,7 @@ function TagPill({ tag, onRemove }: { tag: Tag; onRemove?: () => void }) {
 }
 
 function FilamentDot({ hex }: { hex: string }) {
-  return <span className="inline-block w-3 h-3 rounded-full border border-gray-300 dark:border-gray-600 shrink-0" style={{ backgroundColor: hex }} />
+  return <SpoolIcon color={hex} size={16} />
 }
 
 function formatPrintTime(secs: number): string {
@@ -260,6 +262,10 @@ function FilamentCheckModal({ printer, stepFilaments, filamentWeights, analyzeOn
     staleTime: 0,
     refetchInterval: 5000,
   })
+  const { data: spoolmanInfo } = useQuery({
+    queryKey: ['mainsail-spoolman', printer.id],
+    queryFn: () => getMailsailSpoolman(printer.id),
+  })
 
   const livePrinters = qc.getQueryData<Printer[]>(['printers']) ?? []
   const livePrinter = livePrinters.find(p => p.id === printer.id) ?? printer
@@ -319,6 +325,22 @@ function FilamentCheckModal({ printer, stepFilaments, filamentWeights, analyzeOn
               )}
               {status?.state === 'printing' && status.progress != null && (
                 <span className="text-xs text-blue-500">{Math.round(status.progress * 100)}%</span>
+              )}
+              {spoolmanInfo?.configured === true && (
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-green-600 dark:text-green-400 leading-none">
+                  Spoolman
+                  <span className="w-4 h-4 rounded-full bg-green-500 flex items-center justify-center shrink-0">
+                    <Check size={10} strokeWidth={3} className="text-white" />
+                  </span>
+                </span>
+              )}
+              {spoolmanInfo?.configured === false && (
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-red-500 dark:text-red-400 leading-none">
+                  Spoolman
+                  <span className="w-4 h-4 rounded-full bg-red-500 flex items-center justify-center shrink-0">
+                    <X size={10} strokeWidth={3} className="text-white" />
+                  </span>
+                </span>
               )}
             </div>
           </div>
@@ -497,7 +519,8 @@ function PrinterStatusRow({ printer, sending, onSend, onAnalyze }: {
   )
 }
 
-function GcodePanel({ itemName, slicerName, printerTypeName, printerTypeId, stepId, stepPrintTime, printers, stepFilaments, onUpdateFromGcode }: {
+function GcodePanel({ itemId, itemName, slicerName, printerTypeName, printerTypeId, stepId, stepPrintTime, printers, stepFilaments, onUpdateFromGcode }: {
+  itemId: number
   itemName: string
   slicerName: string
   printerTypeName: string
@@ -540,6 +563,7 @@ function GcodePanel({ itemName, slicerName, printerTypeName, printerTypeId, step
   const [filamentWarning, setFilamentWarning] = useState<{ printer: Printer; analyze: boolean; gcodeMatchesSpec: boolean } | null>(null)
   const [pendingSend, setPendingSend] = useState<{ printerId: number; startPrint: boolean; analyze: boolean; gcodeMatchesSpec: boolean } | null>(null)
   const [showWeightMismatch, setShowWeightMismatch] = useState(false)
+  const [printWizard, setPrintWizard] = useState<{ printer: Printer } | null>(null)
 
   useEffect(() => {
     if (!sending) return
@@ -590,13 +614,17 @@ function GcodePanel({ itemName, slicerName, printerTypeName, printerTypeId, step
       if (printer) setFilamentWarning({ printer, analyze: true, gcodeMatchesSpec })
       return
     }
-    if (startPrint && stepFilaments.length > 0 && printer) {
-      const loadedIds = new Set(printer.slots.map(s => s.filament_spec_id).filter(Boolean) ?? [])
-      const missing = stepFilaments.filter(f => !loadedIds.has(f.filament_spec.id))
-      if (missing.length > 0) {
-        setFilamentWarning({ printer, analyze: false, gcodeMatchesSpec })
-        return
+    if (startPrint && printer) {
+      if (stepFilaments.length > 0) {
+        const loadedIds = new Set(printer.slots.map(s => s.filament_spec_id).filter(Boolean) ?? [])
+        const missing = stepFilaments.filter(f => !loadedIds.has(f.filament_spec.id))
+        if (missing.length > 0) {
+          setFilamentWarning({ printer, analyze: false, gcodeMatchesSpec })
+          return
+        }
       }
+      setPrintWizard({ printer })
+      return
     }
     doSend(printerId, startPrint)
   }
@@ -718,8 +746,18 @@ function GcodePanel({ itemName, slicerName, printerTypeName, printerTypeId, step
           analyzeOnly={filamentWarning.analyze}
           gcodeMatchesSpec={filamentWarning.gcodeMatchesSpec}
           printTime={stepPrintTime}
-          onConfirm={() => { const p = filamentWarning.printer; setFilamentWarning(null); doSend(p.id, true) }}
+          onConfirm={() => { const p = filamentWarning.printer; setFilamentWarning(null); setPrintWizard({ printer: p }) }}
           onCancel={() => setFilamentWarning(null)}
+        />
+      )}
+      {printWizard && (
+        <PrintSpoolWizard
+          printer={printWizard.printer}
+          itemId={itemId}
+          stepFilaments={stepFilaments.map(f => f.filament_spec)}
+          filamentWeights={metadata?.filament_weights ?? []}
+          onConfirm={() => { const p = printWizard.printer; setPrintWizard(null); doSend(p.id, true) }}
+          onCancel={() => setPrintWizard(null)}
         />
       )}
     </div>
@@ -1143,6 +1181,7 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                 {printerType?.slicer && (
                   <div className="pt-1 border-t border-gray-200 dark:border-gray-600 mt-1">
                     <GcodePanel
+                      itemId={item.id}
                       itemName={item.name}
                       slicerName={printerType.slicer.name}
                       printerTypeName={printerType.name}
@@ -1871,7 +1910,7 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                             <tr key={req.id}>
                               <td className="py-1.5">
                                 <div className="flex items-center gap-2">
-                                  <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: spec.color_hex }} />
+                                  <SpoolIcon color={spec.color_hex ?? '#888888'} size={16} />
                                   <span>{spec.brand ? `${spec.brand} ` : ''}{spec.material} {spec.color_name}</span>
                                 </div>
                               </td>

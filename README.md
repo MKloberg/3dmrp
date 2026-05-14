@@ -85,8 +85,42 @@ Connect to and monitor your Klipper/Moonraker printers.
 - Thumbnail preview shown during import
 - Filament slot tracking with RFID auto-sync — reads `filament_detect` from Moonraker and matches slots to your filament library by material and color
 - Assign a **Printer Type** to each printer with optional slot count override
+- **Print QR Label** — each printer card has a QR button that opens a sticker preview modal. Choose your label size (saved across sessions), then click **Print Sticker** to open a centered preview popup and send to your label printer. A **Copy QR code image to clipboard** link provides a fallback for pasting into Word or another app. Supports common label sizes including 40×25mm, Brother 62mm, and Dymo 57mm.
 
 ![Printers](docs/screenshots/printers.png)
+
+---
+
+### Mobile Filament Loader
+
+A phone-optimized workflow for loading spools at the printer — no typing required.
+
+#### How it works
+
+1. Open the **Mobile** QR code in the sidebar on any desktop browser and scan it with your phone. It links to `https://your-server:7892/mobile`.
+2. On the mobile landing screen, point your phone's camera at the **QR label on a printer** (printed from the Printers page). The app identifies the printer automatically.
+3. For each filament slot, tap **Scan spool** and point the camera at the Spoolman QR label on the spool you're loading. The spool is looked up in Spoolman and shown with color, material, and remaining weight.
+4. Rearrange slots with the up/down arrows if the physical order doesn't match.
+5. Tap **Confirm & Update Printer** to write the slot assignments to Moonraker via the Spoolman plugin.
+
+#### Features
+
+- Live camera viewfinder with real-time QR decode (no button press needed)
+- Parses both plain spool IDs and full Spoolman QR URLs
+- Per-slot color swatch, vendor, material, and remaining weight
+- Re-scan or clear individual slots at any time
+- Works on iPhone (Safari) and Android (Chrome)
+
+#### Accessing from your phone
+
+The sidebar QR widget auto-detects your server's LAN IP and generates the correct mobile URL. Click the QR code to expand a larger version with the full URL printed below it.
+
+HTTPS is required for camera access on real devices (both iOS and Android enforce this). 3DMRP serves HTTPS automatically on port `7892` using a self-signed certificate. The first time you open the mobile URL on a new phone, your browser will show a certificate warning — this is expected and safe to proceed past:
+
+- **iPhone / iPad (Safari):** "This Connection Is Not Private" → tap **Show Details** → **visit this website** → **Visit Website**
+- **Android (Chrome):** "Your connection is not private" → tap **Advanced** → **Proceed to [IP] (unsafe)**
+
+You only need to do this once per device. See **Settings → Mobile Access** to toggle between HTTPS and HTTP or review these instructions again.
 
 ---
 
@@ -144,6 +178,7 @@ Settings are split into focused sub-pages accessible from a landing page.
 ![Settings](docs/screenshots/settings.png)
 
 - **General** — light/dark theme; Spoolman URL with live connection test; Square Personal Access Token; preferred Amazon store for purchase link auto-fill
+- **Mobile Access** — HTTPS/HTTP protocol toggle for the mobile filament loader QR codes, with certificate trust instructions for iOS and Android
 - **Slicers** — add, edit, and remove slicer software entries with executable paths; configure and scaffold the **G-Code Repository**
 - **Printer Types** — define printer categories with default slot counts and slicer assignments
 - **Database** — download a full backup or restore from a previous backup file
@@ -201,14 +236,17 @@ This creates `backend/data/` for the SQLite database and uploaded images, then s
 docker compose up -d
 ```
 
-The app is now available at `http://localhost:7891` (or set `PORT` in a `.env` file to use a different port).
+The app is now available at:
+- **Desktop:** `http://localhost:7891` — plain HTTP, no certificate warning
+- **Mobile / camera features:** `https://your-lan-ip:7892` — HTTPS with a self-signed certificate (see Mobile Filament Loader above for the one-time phone setup)
 
 ### Environment variables
 
 Copy `.env.example` to `.env` and adjust as needed:
 
 ```
-PORT=7891
+PORT=7891        # HTTP port for desktop browser access
+HTTPS_PORT=7892  # HTTPS port for mobile camera access
 ```
 
 The backend reads `DATABASE_URL` and `DATA_DIR` from the environment — these are set automatically by `start.ps1`.

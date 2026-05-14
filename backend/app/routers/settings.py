@@ -1,5 +1,6 @@
 import os
 import shutil
+import socket
 from datetime import datetime
 from typing import Dict
 
@@ -18,7 +19,7 @@ _SQLITE_MAGIC = b"SQLite format 3\x00"
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
-SETTING_KEYS = {"spoolman_url", "amazon_domain", "gcode_repo_path", "square_api_token"}
+SETTING_KEYS = {"spoolman_url", "amazon_domain", "gcode_repo_path", "square_api_token", "mobile_protocol"}
 
 
 def get_setting(db: Session, key: str) -> str:
@@ -27,6 +28,17 @@ def get_setting(db: Session, key: str) -> str:
         return row.value
     # Fall back to env var (uppercase, underscores)
     return os.getenv(key.upper(), "")
+
+
+@router.get("/lan-ip")
+def get_lan_ip() -> Dict[str, str]:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+    except Exception:
+        ip = "127.0.0.1"
+    return {"ip": ip, "https_port": os.getenv("HTTPS_PORT", "7892")}
 
 
 @router.get("")

@@ -4,5 +4,6 @@ services:
     restart: unless-stopped
     ports:
       - "${PORT:-7891}:80"
+      - "${HTTPS_PORT:-7892}:443"
     extra_hosts:
       - "host.docker.internal:host-gateway"

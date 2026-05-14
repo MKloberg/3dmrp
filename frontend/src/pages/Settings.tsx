@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Settings as SettingsIcon, SlidersHorizontal, Layers, Printer, Database, ChevronRight } from 'lucide-react'
+import { Settings as SettingsIcon, SlidersHorizontal, Layers, Printer, Database, Smartphone, ChevronRight } from 'lucide-react'
 
 const cards = [
   {
@@ -25,6 +25,12 @@ const cards = [
     icon: Database,
     title: 'Database',
     description: 'Download a backup or restore from a previous backup file.',
+  },
+  {
+    to: '/settings/mobile',
+    icon: Smartphone,
+    title: 'Mobile Access',
+    description: 'HTTPS/HTTP protocol for the mobile filament loader and certificate setup.',
   },
 ]
 

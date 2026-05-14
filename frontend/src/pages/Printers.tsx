@@ -3,14 +3,16 @@ import { useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getPrinters, createPrinter, updatePrinter, deletePrinter, getPrinterHistory, getPrinterStatus, getPrinterWebcams,
-  getPrinterFilamentDetect,
+  getPrinterFilamentDetect, getMailsailSpoolman,
   getFilaments, createItem, addFilamentReq, copyThumbnailToItem, uploadPrinterImage,
   setPrinterSlot, deletePrinterSlot, setPrinterType,
   getPrinterTypes,
   Printer, MoonrakerJob, FilamentSpec, PrinterStatus, WebcamInfo, FilamentDetectSlot, PrinterType,
 } from '../api/client'
 import Modal from '../components/Modal'
-import { Plus, Trash2, Printer as PrinterIcon, ChevronDown, ChevronRight, Upload, X, Cpu, Video, RefreshCw, Pencil, Check, ExternalLink } from 'lucide-react'
+import { SpoolIcon } from '../components/SpoolIcon'
+import { Plus, Trash2, Printer as PrinterIcon, ChevronDown, ChevronRight, Upload, X, Cpu, Video, RefreshCw, Pencil, Check, ExternalLink, QrCode, Info, Copy } from 'lucide-react'
+import { QRCodeSVG } from 'qrcode.react'
 
 function formatDuration(seconds: number | null): string {
   if (seconds == null) return '—'
@@ -465,10 +467,7 @@ function SyncSlotsModal({
                 <td className="py-2 pr-3">
                   {slot.detected ? (
                     <div className="flex items-center gap-2">
-                      <div
-                        className="w-4 h-4 rounded-full border border-gray-300 dark:border-gray-600 shrink-0"
-                        style={{ backgroundColor: slot.color_hex }}
-                      />
+                      <SpoolIcon color={slot.color_hex ?? '#888888'} size={20} />
                       <div>
                         <p className="text-xs font-medium leading-tight">
                           {slot.material}{slot.sub_type ? ` ${slot.sub_type}` : ''}
@@ -844,6 +843,180 @@ function PrinterHistory({ printer, filaments }: { printer: Printer; filaments: F
   )
 }
 
+const LABEL_SIZES = [
+  { label: '40mm wide × 25mm tall', w: 40, h: 25, qr: 56 },
+  { label: '40mm wide × 30mm tall', w: 40, h: 30, qr: 69 },
+  { label: '50mm wide × 30mm tall', w: 50, h: 30, qr: 69 },
+  { label: '50mm wide × 40mm tall', w: 50, h: 40, qr: 96 },
+  { label: '62mm wide × 29mm tall (Brother)', w: 62, h: 29, qr: 66 },
+  { label: '57mm wide × 32mm tall (Dymo)', w: 57, h: 32, qr: 74 },
+]
+
+function PrinterStickerModal({ printer, onClose }: { printer: Printer; onClose: () => void }) {
+  const qrRef = useRef<HTMLDivElement>(null)
+  const [copied, setCopied] = useState(false)
+  const [sizeIndex, setSizeIndex] = useState(() => {
+    const saved = localStorage.getItem('printerLabelSizeIndex')
+    const n = saved !== null ? Number(saved) : 0
+    return n >= 0 && n < LABEL_SIZES.length ? n : 0
+  })
+
+  function handlePrint() {
+    const svgEl = qrRef.current?.querySelector('svg')
+    if (!svgEl) return
+    const { w, h, qr } = LABEL_SIZES[sizeIndex]
+
+    const scale = 3
+    const cloned = svgEl.cloneNode(true) as SVGElement
+    cloned.setAttribute('width', String(qr * scale))
+    cloned.setAttribute('height', String(qr * scale))
+    const svgBlob = new Blob([new XMLSerializer().serializeToString(cloned)], { type: 'image/svg+xml' })
+    const svgUrl = URL.createObjectURL(svgBlob)
+    const img = new Image()
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = qr * scale
+      canvas.height = qr * scale
+      canvas.getContext('2d')!.drawImage(img, 0, 0)
+      URL.revokeObjectURL(svgUrl)
+      const pngDataUrl = canvas.toDataURL('image/png')
+
+      const html = `<!DOCTYPE html><html><head><title>${printer.name}</title><style>
+        @page { size: ${w}mm ${h}mm; margin: 0; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: sans-serif; background: #f3f4f6; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; gap: 20px; }
+        .preview { background: #fff; border: 1px solid #d1d5db; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; align-items: center; gap: 4px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+        .preview-name { font-size: 13px; font-weight: 700; color: #111; }
+        .preview-size { font-size: 10px; color: #6b7280; margin-top: 4px; }
+        .btn { background: #0284c7; color: #fff; border: none; border-radius: 8px; padding: 10px 28px; font-size: 14px; font-weight: 600; cursor: pointer; }
+        .btn:hover { background: #0369a1; }
+        @media print {
+          html { height: ${h}mm; }
+          html, body { overflow: hidden; }
+          body { background: #fff; height: 100%; padding: 2.5mm 1mm 0 1mm; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 2px; }
+          .btn, .preview-size { display: none; }
+          .preview { border: none; box-shadow: none; padding: 0; border-radius: 0; gap: 1px; }
+          .label { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+          .label-name { font-size: 15px; font-weight: 700; color: #111; text-align: center; max-width: ${w - 4}mm; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.1; }
+        }
+      </style></head><body>
+        <div class="preview">
+          <div class="label" style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+            <img src="${pngDataUrl}" width="${qr}" height="${qr}" />
+            <p class="label-name preview-name">${printer.name}</p>
+          </div>
+          <p class="preview-size">${w} &times; ${h} mm label</p>
+        </div>
+        <button class="btn" onclick="window.print()">Print</button>
+        <script>window.addEventListener('afterprint', function() { window.close(); });<\/script>
+      </body></html>`
+
+      const pw = 480, ph = 520
+      const left = Math.round((window.screen.width - pw) / 2)
+      const top = Math.round((window.screen.height - ph) / 2)
+      const blob = new Blob([html], { type: 'text/html' })
+      const blobUrl = URL.createObjectURL(blob)
+      const win = window.open(blobUrl, '_blank', `width=${pw},height=${ph},left=${left},top=${top}`)
+      if (win) win.addEventListener('load', () => URL.revokeObjectURL(blobUrl))
+    }
+    img.src = svgUrl
+  }
+
+  function handleCopyToClipboard() {
+    const svgEl = qrRef.current?.querySelector('svg')
+    if (!svgEl) return
+    const { qr } = LABEL_SIZES[sizeIndex]
+    const scale = 5
+    const cloned = svgEl.cloneNode(true) as SVGElement
+    cloned.setAttribute('width', String(qr * scale))
+    cloned.setAttribute('height', String(qr * scale))
+    const svgBlob = new Blob([new XMLSerializer().serializeToString(cloned)], { type: 'image/svg+xml' })
+    const svgUrl = URL.createObjectURL(svgBlob)
+    const img = new Image()
+    img.onload = () => {
+      const padding = 16
+      const textHeight = 28
+      const gap = 8
+      const qrPx = qr * scale
+      const canvasW = qrPx + padding * 2
+      const canvasH = qrPx + gap + textHeight + padding * 2
+      const canvas = document.createElement('canvas')
+      canvas.width = canvasW
+      canvas.height = canvasH
+      const ctx = canvas.getContext('2d')!
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, canvasW, canvasH)
+      ctx.drawImage(img, padding, padding, qrPx, qrPx)
+      URL.revokeObjectURL(svgUrl)
+      ctx.fillStyle = '#111111'
+      ctx.font = `bold ${textHeight * 0.75}px sans-serif`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'top'
+      ctx.fillText(printer.name, canvasW / 2, padding + qrPx + gap)
+      canvas.toBlob(async blob => {
+        if (!blob) return
+        try {
+          await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+          setCopied(true)
+          setTimeout(() => setCopied(false), 2000)
+        } catch { /* clipboard API not available */ }
+      }, 'image/png')
+    }
+    img.src = svgUrl
+  }
+
+  return (
+    <Modal title="Printer QR Sticker" onClose={onClose}>
+      <div className="flex flex-col items-center gap-4 py-2">
+        <div ref={qrRef}>
+          <QRCodeSVG
+            value={printer.name}
+            size={100}
+            bgColor="#ffffff"
+            fgColor="#111827"
+            level="M"
+          />
+        </div>
+        <div className="text-center">
+          <p className="font-semibold text-gray-800 dark:text-gray-200">{printer.name}</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+            Print and affix this label to the printer
+          </p>
+        </div>
+        <div className="flex items-center gap-2 w-full">
+          <label className="text-xs text-gray-500 dark:text-gray-400 shrink-0">Label size</label>
+          <select
+            value={sizeIndex}
+            onChange={e => { const i = Number(e.target.value); setSizeIndex(i); localStorage.setItem('printerLabelSizeIndex', String(i)) }}
+            className="flex-1 border rounded-lg px-2 py-1.5 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300"
+          >
+            {LABEL_SIZES.map((s, i) => (
+              <option key={i} value={i}>{s.label}</option>
+            ))}
+          </select>
+        </div>
+        <button
+          onClick={handlePrint}
+          className="flex items-center gap-2 px-4 py-2 text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-lg"
+        >
+          Print Sticker
+        </button>
+        <button
+          onClick={handleCopyToClipboard}
+          className="flex items-center gap-1.5 text-xs text-gray-400 dark:text-gray-500 hover:text-brand-600 dark:hover:text-brand-400 transition-colors"
+        >
+          <Copy size={12} />
+          {copied ? 'Copied!' : 'Copy QR code image to clipboard'}
+        </button>
+        <div className="w-full flex items-start gap-2 rounded-lg bg-green-50 dark:bg-green-950/40 border border-green-200 dark:border-green-800 px-3 py-2.5 text-xs text-green-800 dark:text-green-300 leading-relaxed">
+          <Info size={13} className="shrink-0 mt-0.5" />
+          <span>Print this label and stick it on the printer. When loading filament, scan it with your phone via the <strong>Mobile</strong> QR code in the sidebar — the app will open directly to this printer's slot-loading screen, ready to scan each spool.</span>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 function PrinterCard({
   printer, isOpen, filaments, printerTypes, onToggle, onDelete,
 }: {
@@ -858,6 +1031,14 @@ function PrinterCard({
   const [editing, setEditing] = useState(false)
   const [editForm, setEditForm] = useState({ name: printer.name, url: printer.url })
   const [saving, setSaving] = useState(false)
+  const [showSticker, setShowSticker] = useState(false)
+
+  const { data: spoolmanInfo } = useQuery({
+    queryKey: ['mainsail-spoolman', printer.id],
+    queryFn: () => getMailsailSpoolman(printer.id),
+    staleTime: 60_000,
+    retry: false,
+  })
 
   async function saveEdit(e: React.MouseEvent) {
     e.stopPropagation()
@@ -918,7 +1099,32 @@ function PrinterCard({
           ) : (
             <>
               <div className="flex flex-col min-w-0 shrink-0">
-                <span className="font-medium text-sm leading-tight">{printer.name}</span>
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-sm leading-tight">{printer.name}</span>
+                  {spoolmanInfo && (
+                    spoolmanInfo.configured === true ? (
+                      <span
+                        title={spoolmanInfo.server_url ? `Spoolman: ${spoolmanInfo.server_url}` : 'Spoolman active in Moonraker'}
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-green-600 dark:text-green-400 leading-none"
+                      >
+                        Spoolman
+                        <span className="w-4 h-4 rounded-full bg-green-500 flex items-center justify-center shrink-0">
+                          <Check size={10} strokeWidth={3} className="text-white" />
+                        </span>
+                      </span>
+                    ) : spoolmanInfo.configured === false ? (
+                      <span
+                        title="Spoolman not configured in Moonraker"
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-red-500 dark:text-red-400 leading-none"
+                      >
+                        Spoolman
+                        <span className="w-4 h-4 rounded-full bg-red-500 flex items-center justify-center shrink-0">
+                          <X size={10} strokeWidth={3} className="text-white" />
+                        </span>
+                      </span>
+                    ) : null
+                  )}
+                </div>
                 {printer.printer_type ? (
                   <span className="text-xs text-gray-400 leading-tight">
                     {printer.printer_type.name} · {printer.effective_slot_count} slot{printer.effective_slot_count !== 1 ? 's' : ''}
@@ -943,6 +1149,13 @@ function PrinterCard({
             >
               <ExternalLink size={14} />
             </a>
+            <button
+              onClick={e => { e.stopPropagation(); setShowSticker(true) }}
+              className="text-gray-400 hover:text-brand-600"
+              title="Show printer QR sticker"
+            >
+              <QrCode size={14} />
+            </button>
             <button onClick={startEdit} className="text-gray-400 hover:text-gray-600">
               <Pencil size={14} />
             </button>
@@ -962,6 +1175,9 @@ function PrinterCard({
           <PrinterTypeSection printer={printer} printerTypes={printerTypes} />
           <PrinterHistory printer={printer} filaments={filaments} />
         </>
+      )}
+      {showSticker && (
+        <PrinterStickerModal printer={printer} onClose={() => setShowSticker(false)} />
       )}
     </div>
   )

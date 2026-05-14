@@ -7,7 +7,9 @@ import {
   spoolmanBulkImport, spoolmanSync,
 } from '../api/client'
 import Modal from '../components/Modal'
-import { Plus, Pencil, Trash2, Download, ChevronDown, ChevronRight, ShoppingCart, ExternalLink, RefreshCw, Disc2 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Plus, Pencil, Trash2, Download, ChevronDown, ChevronRight, ShoppingCart, ExternalLink, RefreshCw, Disc2, Info } from 'lucide-react'
+import { SpoolIcon } from '../components/SpoolIcon'
 
 const MATERIALS = ['PLA', 'PETG', 'ABS', 'ASA', 'TPU', 'Nylon', 'Resin', 'Other']
 
@@ -277,7 +279,7 @@ function SpoolmanImportModal({
             return (
               <label key={sf.id} className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30">
                 <input type="checkbox" checked={selected.has(sf.id)} onChange={() => toggle(sf.id)} className="rounded border-gray-300" />
-                <div className="w-4 h-4 rounded-full border border-gray-300 shrink-0" style={{ backgroundColor: hex }} />
+                <span className="w-4 h-4 rounded-full shrink-0 border border-black/10" style={{ backgroundColor: hex }} />
                 <span className="text-sm font-medium flex-1 truncate">{sf.name}</span>
                 <span className="text-xs text-gray-400 shrink-0">{sf.material}</span>
                 {sf.vendor?.name && <span className="text-xs text-gray-400 shrink-0">{sf.vendor.name}</span>}
@@ -301,6 +303,7 @@ function SpoolmanImportModal({
 }
 
 export default function Filaments() {
+  const navigate = useNavigate()
   const qc = useQueryClient()
   const { data: filaments = [] } = useQuery({ queryKey: ['filaments'], queryFn: getFilaments })
   const { data: spoolmanData } = useQuery({ queryKey: ['spoolman-filaments'], queryFn: getSpoolmanFilaments })
@@ -311,22 +314,12 @@ export default function Filaments() {
   const [form, setForm] = useState<FilamentSpecInput>(emptyForm())
   const [showImportModal, setShowImportModal] = useState(false)
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
-  const [showSpoolmanIds, setShowSpoolmanIds] = useState(
-    () => localStorage.getItem('showSpoolmanIds') === 'true'
-  )
   const [filterMaterial, setFilterMaterial] = useState('')
   const [filterBrand, setFilterBrand] = useState('')
   const [filterColor, setFilterColor] = useState('')
   const [filterSpoolman, setFilterSpoolman] = useState<'' | 'linked' | 'unlinked'>('')
-  const [sortBy, setSortBy] = useState<'color_name' | 'brand' | 'material' | 'spoolman_id'>('color_name')
+  const [sortBy, setSortBy] = useState<'color_name' | 'brand' | 'material'>('color_name')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
-
-  function toggleSpoolmanIds() {
-    setShowSpoolmanIds(v => {
-      localStorage.setItem('showSpoolmanIds', String(!v))
-      return !v
-    })
-  }
 
   function clearFilters() {
     setFilterMaterial(''); setFilterBrand(''); setFilterColor(''); setFilterSpoolman('')
@@ -417,9 +410,16 @@ export default function Filaments() {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-3"><Disc2 size={26} className="text-brand-600" />Filaments</h1>
-        <div className="flex items-center gap-2">
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-3"><Disc2 size={26} className="text-brand-600" />Filaments</h1>
+          <div className="flex items-center gap-2">
+          <button
+            onClick={() => navigate('/filaments/spools')}
+            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm px-3 py-2 rounded-lg"
+          >
+            <SpoolIcon size={14} color="white" /> Spool Inventory
+          </button>
           {linkedToSpoolman > 0 && (
             <button
               onClick={() => syncMutation.mutate()}
@@ -442,7 +442,11 @@ export default function Filaments() {
             className="flex items-center gap-1.5 bg-brand-600 hover:bg-brand-700 text-white text-sm px-4 py-2 rounded-lg">
             <Plus size={15} /> Add Filament
           </button>
+          </div>
         </div>
+        <p className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-500">
+          <Info size={11} className="shrink-0" /> These are filament types you stock or purchase — not individual spools. Use Spool Inventory to track what's physically on the shelf.
+        </p>
       </div>
 
       {syncMsg && (
@@ -464,15 +468,6 @@ export default function Filaments() {
                   <span className="font-normal normal-case text-gray-400 ml-1">— {filteredFilaments.length} of {filaments.length}</span>
                 )}
               </h2>
-              <label className="flex items-center gap-2 cursor-pointer select-none">
-                <span className="text-xs text-gray-400">Spoolman IDs</span>
-                <span
-                  onClick={toggleSpoolmanIds}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${showSpoolmanIds ? 'bg-brand-600' : 'bg-gray-300 dark:bg-gray-600'}`}
-                >
-                  <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${showSpoolmanIds ? 'translate-x-5' : 'translate-x-0.5'}`} />
-                </span>
-              </label>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -522,7 +517,7 @@ export default function Filaments() {
                   <option value="color_name">Color</option>
                   <option value="brand">Brand</option>
                   <option value="material">Material</option>
-                  <option value="spoolman_id">Spoolman ID</option>
+
                 </select>
                 <button
                   onClick={() => setSortDir(d => d === 'asc' ? 'desc' : 'asc')}
@@ -560,21 +555,15 @@ export default function Filaments() {
                         {isOpen
                           ? <ChevronDown size={14} className="text-gray-400 shrink-0" />
                           : <ChevronRight size={14} className="text-gray-400 shrink-0" />}
-                        {f.spoolman_id && spoolmanMultiColorMap.has(f.spoolman_id) ? (
-                          <div
-                            className="w-5 h-5 rounded-full border border-gray-300 shrink-0"
-                            style={{ background: `linear-gradient(to right, ${spoolmanMultiColorMap.get(f.spoolman_id)!.split(',').map(h => `#${h.trim()}`).join(', ')})` }}
-                            title={spoolmanMultiColorMap.get(f.spoolman_id)!}
-                          />
-                        ) : (
-                          <div className="w-5 h-5 rounded-full border border-gray-300 shrink-0"
-                            style={{ backgroundColor: f.color_hex }} />
-                        )}
+                        <span
+                          className="w-4 h-4 rounded-full shrink-0 border border-black/10"
+                          style={{ backgroundColor: f.spoolman_id && spoolmanMultiColorMap.has(f.spoolman_id)
+                            ? `#${spoolmanMultiColorMap.get(f.spoolman_id)!.split(',')[0].trim()}`
+                            : (f.color_hex ?? '#888888') }}
+                        />
                         <span className="font-medium text-sm">{f.color_name}</span>
                         {f.brand && <span className="text-xs text-gray-400">{f.brand}</span>}
-                        {showSpoolmanIds && f.spoolman_id && (
-                          <span className="text-xs text-gray-300 dark:text-gray-600 font-mono">#{f.spoolman_id}</span>
-                        )}
+
                         {f.weight && <span className="text-xs text-gray-400">{f.weight}g</span>}
                         {f.settings_extruder_temp && (
                           <span className="text-xs text-gray-400">{f.settings_extruder_temp}°C / {f.settings_bed_temp}°C</span>

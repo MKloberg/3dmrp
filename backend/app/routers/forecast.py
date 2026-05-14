@@ -13,11 +13,29 @@ from .settings import get_setting
 router = APIRouter(prefix="/api/forecast", tags=["forecast"])
 
 
-def _material_color_key(material: str, color_name: str) -> str:
-    return f"{material.lower()}::{color_name.lower()}"
+def _grams_per_item(item) -> Dict[int, float]:
+    """Returns {filament_spec_id: grams_per_item} for one copy of the item.
+
+    For advanced-routing items, calculates per-item grams from routing steps:
+      grams_per_item = step.grams * (parts_per_item / quantity_on_plate)
+    summed across all steps of the first/default routing.
+    Falls back to item.filament_requirements for simple items.
+    """
+    if item.use_advanced_routing and item.routings:
+        routing = next((r for r in item.routings if r.is_default), item.routings[0])
+        grams: Dict[int, float] = defaultdict(float)
+        for step in routing.steps:
+            if not step.quantity_on_plate:
+                continue
+            ratio = step.parts_per_item / step.quantity_on_plate
+            for sf in step.filaments:
+                grams[sf.filament_spec_id] += sf.grams * ratio
+        return dict(grams)
+    return {req.filament_spec_id: req.grams for req in item.filament_requirements}
 
 
-async def _fetch_spoolman_stock(url: str) -> tuple[bool, Dict[str, float]]:
+async def _fetch_spoolman_stock(url: str) -> tuple[bool, Dict[int, float]]:
+    """Returns (connected, {spoolman_filament_id: remaining_grams}), skipping archived spools."""
     if not url:
         return False, {}
     try:
@@ -25,15 +43,15 @@ async def _fetch_spoolman_stock(url: str) -> tuple[bool, Dict[str, float]]:
             resp = await client.get(f"{url.rstrip('/')}/api/v1/spool")
             resp.raise_for_status()
             spools = resp.json()
-        stock: Dict[str, float] = defaultdict(float)
+        stock: Dict[int, float] = defaultdict(float)
         for spool in spools:
+            if spool.get("archived"):
+                continue
             fil = spool.get("filament", {})
-            material = fil.get("material", "")
-            color_name = fil.get("color_name", "")
+            fid = fil.get("id")
             remaining = spool.get("remaining_weight") or 0.0
-            if material and color_name:
-                key = _material_color_key(material, color_name)
-                stock[key] += remaining
+            if fid is not None:
+                stock[fid] += remaining
         return True, dict(stock)
     except Exception:
         return False, {}
@@ -55,10 +73,10 @@ async def get_forecast(
     )
     grams_used: Dict[int, float] = defaultdict(float)
     for order in completed_orders:
-        for req in order.item.filament_requirements:
-            grams_used[req.filament_spec_id] += req.grams * order.quantity
+        for spec_id, g in _grams_per_item(order.item).items():
+            grams_used[spec_id] += g * order.quantity
 
-    # Committed demand from all pending/printing orders (actual grams needed)
+    # Committed demand from all pending/printing orders
     committed_grams: Dict[int, float] = defaultdict(float)
     contributing_orders_map: Dict[int, list] = defaultdict(list)
     active_orders = (
@@ -72,14 +90,16 @@ async def get_forecast(
             customer_name = " ".join(filter(None, [c.given_name, c.family_name])) or c.company_name or ""
         else:
             customer_name = order.customer_name or ""
-        for req in order.item.filament_requirements:
-            committed_grams[req.filament_spec_id] += req.grams * order.quantity
-            contributing_orders_map[req.filament_spec_id].append(ContributingOrder(
+        item_grams = _grams_per_item(order.item)
+        for spec_id, g in item_grams.items():
+            grams_per_order = g * order.quantity
+            committed_grams[spec_id] += grams_per_order
+            contributing_orders_map[spec_id].append(ContributingOrder(
                 order_id=order.id,
                 model_name=order.item.name,
                 customer_name=customer_name,
                 quantity=order.quantity,
-                grams_needed=round(req.grams * order.quantity, 1),
+                grams_needed=round(grams_per_order, 1),
                 status=order.status.value,
             ))
 
@@ -88,7 +108,6 @@ async def get_forecast(
 
     all_specs = db.query(FilamentSpec).all()
 
-    # Include specs with any committed or historical demand
     model_spec_ids: set[int] = set(grams_used.keys()) | set(committed_grams.keys())
 
     items = []
@@ -101,11 +120,9 @@ async def get_forecast(
         rate_demand = per_week * forecast_weeks
         committed = committed_grams.get(spec.id, 0.0)
 
-        # Use whichever is greater: rate-based projection or known pending demand
         total_demand = max(rate_demand, committed)
 
-        key = _material_color_key(spec.material, spec.color_name)
-        on_hand = stock.get(key, 0.0)
+        on_hand = stock.get(spec.spoolman_id, 0.0) if spec.spoolman_id else 0.0
 
         shortfall = max(0.0, total_demand - on_hand)
         if shortfall == 0:

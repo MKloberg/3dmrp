@@ -368,13 +368,20 @@ export interface SpoolmanSpool {
   id: number
   remaining_weight: number | null
   used_weight: number | null
+  remaining_length: number | null
+  used_length: number | null
   archived: boolean
   location: string | null
+  lot_nr: string | null
+  comment: string | null
+  first_used: string | null
+  last_used: string | null
   filament: {
     id: number
     name: string
     material: string
     color_hex: string | null
+    multi_color_hexes: string | null
     vendor: { id: number; name: string } | null
     weight: number | null
   }
@@ -386,8 +393,34 @@ export const getSpoolmanStock = () =>
 export const spoolmanBulkImport = (ids: number[]) =>
   req<{ imported: number }>('/spoolman/import', { method: 'POST', body: JSON.stringify({ ids }) })
 
+export const createSpoolmanSpools = (filamentId: number, count: number) =>
+  req<{ spools: SpoolmanSpool[]; spoolman_url: string }>('/spoolman/create-spools', {
+    method: 'POST',
+    body: JSON.stringify({ filament_id: filamentId, count }),
+  })
+
 export const spoolmanSync = () =>
   req<{ updated: number }>('/spoolman/sync', { method: 'POST' })
+
+export interface SpoolmanSlotAssignment {
+  tool_index: number
+  spool_id: number | null
+}
+
+export const deductSpoolman = (deductions: { spool_id: number; grams: number }[]) =>
+  req<{ deducted: number; errors: { spool_id: number; error: string }[] }>(
+    '/spoolman/deduct',
+    { method: 'POST', body: JSON.stringify({ deductions }) },
+  )
+
+export const getPrinterSpoolmanSlots = (printerId: number, count: number) =>
+  req<SpoolmanSlotAssignment[]>(`/printers/${printerId}/spoolman-slots?count=${count}`)
+
+export const setPrinterSpoolmanSlots = (printerId: number, slots: SpoolmanSlotAssignment[]) =>
+  req<{ ok: boolean; errors: { tool_index: number; error: string }[] }>(
+    `/printers/${printerId}/spoolman-slots`,
+    { method: 'POST', body: JSON.stringify({ slots }) },
+  )
 
 // --- Slicers ---
 export interface Slicer {
@@ -477,6 +510,7 @@ export interface PrinterHistoryResponse {
 }
 
 export const getPrinters = () => req<Printer[]>('/printers')
+export const getPrinterByName = (name: string) => req<Printer>(`/printers/by-name/${encodeURIComponent(name)}`)
 export const createPrinter = (data: { name: string; url: string }) =>
   req<Printer>('/printers', { method: 'POST', body: JSON.stringify(data) })
 export const updatePrinter = (id: number, data: { name?: string; url?: string }) =>
@@ -520,6 +554,8 @@ export const getPrinterWebcams = (id: number) =>
   req<WebcamInfo[]>(`/printers/${id}/webcams`)
 export const getPrinterStatus = (id: number) =>
   req<PrinterStatus>(`/printers/${id}/status`)
+export const getMailsailSpoolman = (id: number) =>
+  req<{ configured: boolean | null; server_url: string | null }>(`/printers/${id}/mainsail-spoolman`)
 export const getPrinterHistory = (id: number, limit = 50) =>
   req<PrinterHistoryResponse>(`/printers/${id}/history?limit=${limit}`)
 export const uploadPrinterImage = async (id: number, file: File): Promise<void> => {

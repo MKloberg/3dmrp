@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { getOrders, getForecast, getPrinters, getPrinterStatus, getItems, getCustomers, getFilaments, PrinterStatus, Printer } from '../api/client'
 import StatusBadge from '../components/StatusBadge'
+import { SpoolIcon } from '../components/SpoolIcon'
 import { AlertTriangle, ClipboardList, Wifi, WifiOff, Printer as PrinterIcon, ShoppingCart, Clock, Box, Users, Disc2, LayoutDashboard } from 'lucide-react'
 
 // ---- helpers ----
@@ -271,10 +272,7 @@ export default function Dashboard() {
             {alerts.map(item => (
               <div key={item.filament_spec.id} className="flex items-center justify-between px-4 py-3 gap-4">
                 <div className="flex items-center gap-3 min-w-0">
-                  <div
-                    className="w-3 h-3 rounded-full border border-gray-300 dark:border-gray-600 shrink-0"
-                    style={{ backgroundColor: item.filament_spec.color_hex }}
-                  />
+                  <SpoolIcon color={item.filament_spec.color_hex ?? '#888888'} size={18} />
                   <div className="min-w-0">
                     <p className="font-medium text-sm truncate">
                       {item.filament_spec.material} — {item.filament_spec.color_name}

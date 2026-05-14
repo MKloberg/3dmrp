@@ -3,6 +3,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import Any, Dict, List
+from pydantic import BaseModel
 
 from ..database import get_db
 from ..models import FilamentSpec
@@ -100,6 +101,34 @@ async def import_spoolman_filaments(body: Dict[str, List[int]], db: Session = De
     return {"imported": imported}
 
 
+class CreateSpoolsRequest(BaseModel):
+    filament_id: int
+    count: int
+
+
+@router.post("/create-spools")
+async def create_spools(body: CreateSpoolsRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    url = get_setting(db, "spoolman_url")
+    if not url:
+        raise HTTPException(status_code=400, detail="Spoolman URL not configured")
+    base = url.rstrip("/")
+    created = []
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            for _ in range(body.count):
+                resp = await client.post(
+                    f"{base}/api/v1/spool",
+                    json={"filament_id": body.filament_id},
+                )
+                resp.raise_for_status()
+                created.append(resp.json())
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Spoolman error: {e.response.text}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Spoolman: {e}")
+    return {"spools": created, "spoolman_url": base}
+
+
 @router.post("/sync")
 async def sync_spoolman_filaments(db: Session = Depends(get_db)) -> Dict[str, Any]:
     url = get_setting(db, "spoolman_url")
@@ -144,3 +173,34 @@ async def sync_spoolman_filaments(db: Session = Depends(get_db)) -> Dict[str, An
 
     db.commit()
     return {"updated": updated}
+
+
+class DeductItem(BaseModel):
+    spool_id: int
+    grams: float
+
+
+class DeductRequest(BaseModel):
+    deductions: list[DeductItem]
+
+
+@router.post("/deduct")
+async def deduct_filament(body: DeductRequest, db: Session = Depends(get_db)):
+    url = get_setting(db, "spoolman_url")
+    if not url:
+        raise HTTPException(status_code=400, detail="Spoolman URL not configured")
+    base = url.rstrip("/")
+    errors = []
+    deducted = 0
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for d in body.deductions:
+            try:
+                resp = await client.put(
+                    f"{base}/api/v1/spool/{d.spool_id}/use",
+                    json={"use_weight": d.grams},
+                )
+                resp.raise_for_status()
+                deducted += 1
+            except Exception as e:
+                errors.append({"spool_id": d.spool_id, "error": str(e)})
+    return {"deducted": deducted, "errors": errors}

@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import {
   LayoutDashboard, Box, ClipboardList, TrendingUp, Disc2, Printer,
-  Settings, Users, FileText, ChevronRight, SlidersHorizontal, Layers, Database,
+  Settings, Users, FileText, ChevronRight, SlidersHorizontal, Layers, Database, X,
 } from 'lucide-react'
 import clsx from 'clsx'
+import { QRCodeSVG } from 'qrcode.react'
 
 type Child = { to: string; label: string; icon?: React.ElementType }
 type NavItemDef = {
@@ -20,7 +22,12 @@ const nav: NavItemDef[] = [
   { to: '/customers', label: 'Customers', icon: Users },
   { to: '/forecast', label: 'Forecast', icon: TrendingUp },
   { to: '/items', label: 'Items', icon: Box },
-  { to: '/filaments', label: 'Filaments', icon: Disc2 },
+  {
+    to: '/filaments', label: 'Filaments', icon: Disc2,
+    children: [
+      { to: '/filaments/spools', label: 'Spool Inventory', icon: Layers },
+    ],
+  },
   { to: '/printers', label: 'Printers', icon: Printer },
   {
     to: '/reports', label: 'Reports', icon: FileText,
@@ -35,6 +42,7 @@ const nav: NavItemDef[] = [
       { to: '/settings/slicers', label: 'Slicers', icon: Layers },
       { to: '/settings/printer-types', label: 'Printer Types', icon: Printer },
       { to: '/settings/database', label: 'Database', icon: Database },
+      { to: '/settings/mobile', label: 'Mobile Access', icon: Printer },
     ],
   },
 ]
@@ -73,7 +81,7 @@ function NavTreeItem({ item }: { item: NavItemDef }) {
     )
   }
 
-  const parentActive = location.pathname === item.to || isOnChildRoute
+  const onParentExactly = location.pathname === item.to
 
   return (
     <div>
@@ -88,8 +96,10 @@ function NavTreeItem({ item }: { item: NavItemDef }) {
         className={() =>
           clsx(
             'flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors w-full',
-            parentActive
+            onParentExactly
               ? 'bg-brand-600 text-white'
+              : isOnChildRoute
+              ? 'text-white'
               : 'text-gray-300 hover:bg-gray-800 hover:text-white',
           )
         }
@@ -112,7 +122,7 @@ function NavTreeItem({ item }: { item: NavItemDef }) {
                 clsx(
                   'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-colors',
                   isActive
-                    ? 'text-white font-medium'
+                    ? 'bg-brand-600 text-white font-medium'
                     : 'text-gray-400 hover:text-white hover:bg-gray-800',
                 )
               }
@@ -127,19 +137,100 @@ function NavTreeItem({ item }: { item: NavItemDef }) {
   )
 }
 
+function MobileQrWidget() {
+  const [expanded, setExpanded] = useState(false)
+
+  const { data: lanIpData } = useQuery({
+    queryKey: ['lan-ip'],
+    queryFn: () => fetch('/api/settings/lan-ip').then(r => r.json()) as Promise<{ ip: string; https_port: string }>,
+    staleTime: Infinity,
+  })
+
+  const { data: settings } = useQuery({
+    queryKey: ['settings'],
+    queryFn: () => fetch('/api/settings').then(r => r.json()) as Promise<Record<string, string>>,
+    staleTime: 60_000,
+  })
+
+  const url = useMemo(() => {
+    const ip = lanIpData?.ip ?? window.location.hostname
+    const protocol = settings?.mobile_protocol || 'https'
+    if (protocol === 'https') {
+      const httpsPort = lanIpData?.https_port ?? '7892'
+      return `https://${ip}:${httpsPort}/mobile`
+    }
+    const httpPort = window.location.port
+    return `http://${ip}${httpPort ? `:${httpPort}` : ''}/mobile`
+  }, [lanIpData, settings])
+
+  return (
+    <>
+      <button
+        onClick={() => setExpanded(true)}
+        className="w-full flex flex-col items-center gap-2 py-4 hover:bg-gray-800 transition-colors rounded-lg mx-1"
+        style={{ width: 'calc(100% - 8px)' }}
+        title="Open mobile filament loader"
+      >
+        <QRCodeSVG
+          value={url}
+          size={96}
+          bgColor="transparent"
+          fgColor="#ffffff"
+          level="M"
+        />
+        <span className="text-xs text-gray-400 font-medium">Mobile</span>
+      </button>
+
+      {expanded && (
+        <div
+          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6"
+          onClick={() => setExpanded(false)}
+        >
+          <div
+            className="bg-white rounded-2xl p-6 flex flex-col items-center gap-4 max-w-xs w-full"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between w-full">
+              <p className="text-sm font-semibold text-gray-800">Mobile Filament Loader</p>
+              <button onClick={() => setExpanded(false)} className="text-gray-400 hover:text-gray-600">
+                <X size={18} />
+              </button>
+            </div>
+            <QRCodeSVG
+              value={url}
+              size={220}
+              bgColor="#ffffff"
+              fgColor="#111827"
+              level="M"
+              includeMargin
+            />
+            <p className="text-xs text-gray-500 text-center leading-relaxed">
+              Scan with your phone to open the filament loading workflow. Works on iOS and Android.
+            </p>
+            <p className="text-xs text-gray-400 font-mono break-all text-center">{url}</p>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
 export default function Layout() {
   const navigate = useNavigate()
   return (
     <div className="flex h-screen overflow-hidden">
       <aside className="w-56 bg-gray-900 text-white flex flex-col shrink-0">
-        <div className="px-4 py-3 border-b border-gray-700">
+        <div className="px-4 py-3 border-b border-gray-700 shrink-0">
           <img src="/logo.png" alt="3DMRP" className="h-16 w-auto cursor-pointer" onClick={() => navigate('/')} />
         </div>
-        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+        <nav className="px-3 py-4 space-y-1 overflow-y-auto shrink-0">
           {nav.map(item => (
             <NavTreeItem key={item.to} item={item} />
           ))}
         </nav>
+        <div className="flex-1 flex items-center justify-center px-3 min-h-[140px]">
+          <MobileQrWidget />
+        </div>
       </aside>
       <main className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900">
         <Outlet />

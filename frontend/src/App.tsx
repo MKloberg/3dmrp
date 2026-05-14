@@ -12,12 +12,18 @@ import Slicers from './pages/Slicers'
 import Settings from './pages/Settings'
 import General from './pages/settings/General'
 import Database from './pages/settings/Database'
+import MobileAccess from './pages/settings/MobileAccess'
 import Reports from './pages/Reports'
 import FilamentInventory from './pages/reports/FilamentInventory'
+import SpoolInventory from './pages/filaments/SpoolInventory'
+import MobileLanding from './pages/mobile/MobileLanding'
+import MobilePrinterLoad from './pages/mobile/MobilePrinterLoad'
 
 export default function App() {
   return (
     <Routes>
+      <Route path="mobile" element={<MobileLanding />} />
+      <Route path="mobile/printer/:printerName" element={<MobilePrinterLoad />} />
       <Route element={<Layout />}>
         <Route index element={<Dashboard />} />
         <Route path="items" element={<Items />} />
@@ -31,8 +37,10 @@ export default function App() {
         <Route path="settings/printer-types" element={<PrinterTypes />} />
         <Route path="settings/slicers" element={<Slicers />} />
         <Route path="settings/database" element={<Database />} />
+        <Route path="settings/mobile" element={<MobileAccess />} />
         <Route path="reports" element={<Reports />} />
         <Route path="reports/filament-inventory" element={<FilamentInventory />} />
+        <Route path="filaments/spools" element={<SpoolInventory />} />
       </Route>
     </Routes>
   )
