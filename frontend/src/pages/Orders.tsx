@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { getOrders, createOrder, updateOrder, deleteOrder, getItems, updateItem, getCustomers, Order } from '../api/client'
 import Modal from '../components/Modal'
 import StatusBadge from '../components/StatusBadge'
@@ -10,6 +11,7 @@ type Status = typeof STATUSES[number]
 
 export default function Orders() {
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const [filterStatus, setFilterStatus] = useState<string>('')
   const { data: orders = [] } = useQuery({
     queryKey: ['orders', filterStatus],
@@ -351,7 +353,25 @@ export default function Orders() {
       {editing && (
         <Modal title="Edit Order" onClose={() => setEditing(null)}>
           <div className="space-y-3">
-            <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{editing.item.name}</p>
+            <div className="flex items-center gap-3">
+              {editing.item.images[0] ? (
+                <img
+                  src={`/api/items/${editing.item.id}/images/${editing.item.images[0].id}?v=${new Date(editing.item.images[0].created_at).getTime()}`}
+                  alt=""
+                  className="w-10 h-10 rounded-lg object-cover border border-gray-200 dark:border-gray-600 shrink-0"
+                />
+              ) : (
+                <div className="w-10 h-10 rounded-lg bg-gray-100 dark:bg-gray-700 shrink-0" />
+              )}
+              <p className="text-sm font-medium text-gray-700 dark:text-gray-300 flex-1 min-w-0 truncate">{editing.item.name}</p>
+              <button
+                onClick={() => { setEditing(null); navigate(`/items?open=${editing.item.id}`) }}
+                className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg"
+              >
+                <ExternalLink size={13} />
+                Open Item
+              </button>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">Quantity</label>

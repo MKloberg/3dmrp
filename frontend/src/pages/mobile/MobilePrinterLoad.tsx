@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft, ArrowUp, ArrowDown, X, RefreshCw, Check, Loader2, ScanLine } from 'lucide-react'
@@ -6,6 +6,7 @@ import {
   getPrinterByName,
   getSpoolmanStock,
   setPrinterSpoolmanSlots,
+  getMailsailSpoolman,
   SpoolmanSpool,
 } from '../../api/client'
 import QrScanner from '../../components/QrScanner'
@@ -35,6 +36,12 @@ interface SlotState {
 }
 
 export default function MobilePrinterLoad() {
+  useEffect(() => {
+    const prev = document.body.style.backgroundColor
+    document.body.style.backgroundColor = '#030712'
+    return () => { document.body.style.backgroundColor = prev }
+  }, [])
+
   const { printerName } = useParams<{ printerName: string }>()
   const navigate = useNavigate()
   const decodedName = decodeURIComponent(printerName ?? '')
@@ -48,6 +55,13 @@ export default function MobilePrinterLoad() {
   const { data: stockData } = useQuery({
     queryKey: ['spoolman-stock'],
     queryFn: getSpoolmanStock,
+  })
+
+  const { data: spoolmanInfo } = useQuery({
+    queryKey: ['mainsail-spoolman', printer?.id],
+    queryFn: () => getMailsailSpoolman(printer!.id),
+    enabled: !!printer,
+    retry: false,
   })
 
   const spools = stockData?.spools ?? []
@@ -132,15 +146,15 @@ export default function MobilePrinterLoad() {
   // ── Loading / error states ──
   if (printerLoading) {
     return (
-      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+      <div className="min-h-dvh bg-gray-950 flex items-center justify-center">
         <Loader2 size={28} className="text-brand-400 animate-spin" />
       </div>
     )
   }
 
-  if (printerError || !printer) {
+  if (!printer) {
     return (
-      <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center gap-4 px-6 text-center">
+      <div className="min-h-dvh bg-gray-950 flex flex-col items-center justify-center gap-4 px-6 text-center">
         <p className="text-white font-semibold">Printer not found</p>
         <p className="text-sm text-gray-400">
           No printer named <span className="text-white">"{decodedName}"</span> exists in 3DMRP.
@@ -158,7 +172,7 @@ export default function MobilePrinterLoad() {
   // ── Success ──
   if (saved) {
     return (
-      <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center gap-4 px-6 text-center">
+      <div className="min-h-dvh bg-gray-950 flex flex-col items-center justify-center gap-4 px-6 text-center">
         <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center mb-2">
           <Check size={32} className="text-green-400" />
         </div>
@@ -179,7 +193,7 @@ export default function MobilePrinterLoad() {
   const assignedCount = displaySlots.filter(s => s.spool !== null).length
 
   return (
-    <div className="min-h-screen bg-gray-950 flex flex-col text-white select-none">
+    <div className="min-h-dvh bg-gray-950 flex flex-col text-white select-none">
       {/* Header */}
       <div className="flex items-center gap-3 px-4 pt-safe pt-5 pb-3">
         <button
@@ -193,6 +207,19 @@ export default function MobilePrinterLoad() {
           <p className="text-xs text-gray-400">{effectiveCount} slot{effectiveCount !== 1 ? 's' : ''} · {assignedCount} assigned</p>
         </div>
       </div>
+
+      {/* Spoolman warning */}
+      {spoolmanInfo !== undefined && spoolmanInfo.configured !== true && (
+        <div className="mx-4 mb-1 px-3 py-2.5 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-start gap-2.5">
+          <span className="text-amber-400 text-base leading-none mt-0.5">⚠</span>
+          <div>
+            <p className="text-xs font-semibold text-amber-400">Spoolman not active</p>
+            <p className="text-xs text-amber-400/80 mt-0.5">
+              Spoolman is not active on this printer or is not responding. The assignment will be saved in 3DMRP only.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Slot list */}
       <div className="flex-1 px-4 pb-4 space-y-2 overflow-y-auto">

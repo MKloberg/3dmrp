@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getPrinters, createPrinter, updatePrinter, deletePrinter, getPrinterHistory, getPrinterStatus, getPrinterWebcams,
-  getPrinterFilamentDetect, getMailsailSpoolman,
+  getPrinterFilamentDetect, getMailsailSpoolman, getPrinterSpoolmanSlots, getSpoolmanStock,
   getFilaments, createItem, addFilamentReq, copyThumbnailToItem, uploadPrinterImage,
   setPrinterSlot, deletePrinterSlot, setPrinterType,
   getPrinterTypes,
@@ -11,7 +11,7 @@ import {
 } from '../api/client'
 import Modal from '../components/Modal'
 import { SpoolIcon } from '../components/SpoolIcon'
-import { Plus, Trash2, Printer as PrinterIcon, ChevronDown, ChevronRight, Upload, X, Cpu, Video, RefreshCw, Pencil, Check, ExternalLink, QrCode, Info, Copy } from 'lucide-react'
+import { Plus, Trash2, Printer as PrinterIcon, ChevronDown, ChevronRight, Upload, X, Cpu, Video, RefreshCw, Pencil, Check, ExternalLink, QrCode, Info, Copy, LayoutList, LayoutGrid } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 
 function formatDuration(seconds: number | null): string {
@@ -520,7 +520,33 @@ function PrinterSlotConfig({ printer, filaments }: { printer: Printer; filaments
   const [syncData, setSyncData] = useState<FilamentDetectSlot[] | null>(null)
   const [syncError, setSyncError] = useState<string | null>(null)
 
-  const maxSlot = printer.slots.length > 0 ? Math.max(...printer.slots.map(s => s.slot_number)) : 0
+  const maxConfiguredSlot = printer.slots.length > 0 ? Math.max(...printer.slots.map(s => s.slot_number)) : 0
+  const slotCount = Math.max(printer.effective_slot_count, maxConfiguredSlot)
+
+  const { data: spoolmanInfo } = useQuery({
+    queryKey: ['mainsail-spoolman', printer.id],
+    queryFn: () => getMailsailSpoolman(printer.id),
+    enabled: open,
+    staleTime: 60_000,
+    retry: false,
+  })
+  const spoolmanActive = spoolmanInfo?.configured === true
+
+  const { data: spoolmanSlots, isLoading: loadingSpoolmanSlots } = useQuery({
+    queryKey: ['printer-spoolman-slots', printer.id, slotCount],
+    queryFn: () => getPrinterSpoolmanSlots(printer.id, slotCount),
+    enabled: open && spoolmanActive,
+    staleTime: 10_000,
+    retry: false,
+  })
+
+  const { data: stockData } = useQuery({
+    queryKey: ['spoolman-stock'],
+    queryFn: getSpoolmanStock,
+    enabled: open && spoolmanActive,
+    staleTime: 30_000,
+  })
+  const spools = stockData?.spools ?? []
 
   async function handleSlotChange(slotNumber: number, specId: string) {
     setSaving(slotNumber)
@@ -533,8 +559,7 @@ function PrinterSlotConfig({ printer, filaments }: { printer: Printer; filaments
   }
 
   async function handleAddSlot() {
-    const next = maxSlot + 1
-    await setPrinterSlot(printer.id, next, null)
+    await setPrinterSlot(printer.id, slotCount + 1, null)
     qc.invalidateQueries({ queryKey: ['printers'] })
   }
 
@@ -564,6 +589,11 @@ function PrinterSlotConfig({ printer, filaments }: { printer: Printer; filaments
     setSyncData(null)
   }
 
+  function hexColor(hex: string | null | undefined) {
+    if (!hex) return '#888888'
+    return hex.startsWith('#') ? hex : `#${hex}`
+  }
+
   return (
     <div className="border-t dark:border-gray-700 px-4 py-3">
       <button
@@ -576,55 +606,97 @@ function PrinterSlotConfig({ printer, filaments }: { printer: Printer; filaments
 
       {open && (
         <div className="mt-2 space-y-2">
-          <div className="flex items-center justify-between">
-            <button
-              onClick={handleSync}
-              disabled={syncing}
-              className="text-xs text-gray-500 hover:text-brand-600 flex items-center gap-1 disabled:opacity-50"
-            >
-              <RefreshCw size={11} className={syncing ? 'animate-spin' : ''} />
-              {syncing ? 'Reading…' : 'Sync from printer'}
-            </button>
-            <button
-              onClick={handleAddSlot}
-              className="text-xs text-brand-600 hover:text-brand-700 flex items-center gap-1"
-            >
-              <Plus size={12} /> Add Slot
-            </button>
-          </div>
-          {syncError && (
-            <p className="text-xs text-red-500">{syncError}</p>
+          {!spoolmanActive && (
+            <div className="flex items-center justify-between">
+              <button
+                onClick={handleSync}
+                disabled={syncing}
+                className="text-xs text-gray-500 hover:text-brand-600 flex items-center gap-1 disabled:opacity-50"
+              >
+                <RefreshCw size={11} className={syncing ? 'animate-spin' : ''} />
+                {syncing ? 'Reading…' : 'Sync from printer'}
+              </button>
+              <button
+                onClick={handleAddSlot}
+                className="text-xs text-brand-600 hover:text-brand-700 flex items-center gap-1"
+              >
+                <Plus size={12} /> Add Slot
+              </button>
+            </div>
           )}
-          {printer.slots.length === 0 ? (
-            <p className="text-xs text-gray-400 italic">No slots configured. Add slots to track which filament is loaded where.</p>
+          {syncError && <p className="text-xs text-red-500">{syncError}</p>}
+
+          {spoolmanActive ? (
+            /* ── Spoolman active: read-only live view ── */
+            loadingSpoolmanSlots ? (
+              <p className="text-xs text-gray-400 italic">Loading from Spoolman…</p>
+            ) : (
+              <div className="space-y-1.5">
+                {Array.from({ length: slotCount }, (_, i) => {
+                  const spSlot = spoolmanSlots?.find(s => s.tool_index === i)
+                  const spool = spSlot?.spool_id != null ? spools.find(s => s.id === spSlot.spool_id) : null
+                  return (
+                    <div key={i} className="flex items-center gap-2 py-0.5">
+                      <span className="text-xs font-medium text-gray-500 dark:text-gray-400 w-14 shrink-0">Slot {i + 1}</span>
+                      {spool ? (
+                        <>
+                          <span className="w-3 h-3 rounded-full shrink-0 border border-black/10 dark:border-white/10"
+                            style={{ backgroundColor: hexColor(spool.filament.color_hex) }} />
+                          <span className="text-xs text-gray-700 dark:text-gray-200 flex-1 truncate">
+                            {spool.filament.vendor?.name ? `${spool.filament.vendor.name} ` : ''}{spool.filament.name}
+                          </span>
+                          <span className="text-xs text-gray-400 shrink-0">{spool.filament.material}</span>
+                          {spool.remaining_weight != null && (
+                            <span className="text-xs text-gray-400 shrink-0">
+                              {spool.remaining_weight >= 1000
+                                ? `${(spool.remaining_weight / 1000).toFixed(2)} kg`
+                                : `${Math.round(spool.remaining_weight)} g`}
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-xs text-gray-400 italic">— empty —</span>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )
           ) : (
+            /* ── No Spoolman: editable slots from mobile scan / manual ── */
             <div className="space-y-1.5">
-              {printer.slots.map(slot => (
-                <div key={slot.slot_number} className="flex items-center gap-2">
-                  <span className="text-xs font-medium text-gray-500 dark:text-gray-400 w-14 shrink-0">
-                    Slot {slot.slot_number}
-                  </span>
-                  <select
-                    className="flex-1 border rounded px-2 py-1 text-xs dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100 disabled:opacity-60"
-                    value={slot.filament_spec_id ? String(slot.filament_spec_id) : ''}
-                    disabled={saving === slot.slot_number}
-                    onChange={e => handleSlotChange(slot.slot_number, e.target.value)}
-                  >
-                    <option value="">— none —</option>
-                    {filaments.map(f => (
-                      <option key={f.id} value={f.id}>
-                        {f.material} — {f.color_name}{f.brand ? ` (${f.brand})` : ''}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    onClick={() => handleDeleteSlot(slot.slot_number)}
-                    className="text-gray-400 hover:text-red-500 shrink-0"
-                  >
-                    <X size={13} />
-                  </button>
-                </div>
-              ))}
+              {Array.from({ length: slotCount }, (_, i) => {
+                const slotNum = i + 1
+                const existing = printer.slots.find(s => s.slot_number === slotNum)
+                const isExtra = slotNum > printer.effective_slot_count
+                return (
+                  <div key={slotNum} className="flex items-center gap-2">
+                    <span className="text-xs font-medium text-gray-500 dark:text-gray-400 w-14 shrink-0">Slot {slotNum}</span>
+                    {existing?.filament_spec && (
+                      <span className="w-3 h-3 rounded-full shrink-0 border border-black/10 dark:border-white/10"
+                        style={{ backgroundColor: hexColor(existing.filament_spec.color_hex) }} />
+                    )}
+                    <select
+                      className="flex-1 border rounded px-2 py-1 text-xs dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100 disabled:opacity-60"
+                      value={existing?.filament_spec_id ? String(existing.filament_spec_id) : ''}
+                      disabled={saving === slotNum}
+                      onChange={e => handleSlotChange(slotNum, e.target.value)}
+                    >
+                      <option value="">— empty —</option>
+                      {filaments.map(f => (
+                        <option key={f.id} value={f.id}>
+                          {f.material} — {f.color_name}{f.brand ? ` (${f.brand})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {isExtra && (
+                      <button onClick={() => handleDeleteSlot(slotNum)} className="text-gray-400 hover:text-red-500 shrink-0">
+                        <X size={13} />
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
@@ -1017,6 +1089,91 @@ function PrinterStickerModal({ printer, onClose }: { printer: Printer; onClose: 
   )
 }
 
+function PrinterRow({
+  printer, onDelete, onSelect,
+}: {
+  printer: Printer
+  onDelete: () => void
+  onSelect: () => void
+}) {
+  const [showSticker, setShowSticker] = useState(false)
+
+  const { data: status } = useQuery<PrinterStatus>({
+    queryKey: ['printer-status', printer.id],
+    queryFn: () => getPrinterStatus(printer.id),
+    refetchInterval: 10000,
+    retry: false,
+  })
+
+  const style = STATE_STYLES[status?.state ?? 'offline'] ?? STATE_STYLES.offline
+
+  return (
+    <div
+      id={`printer-${printer.id}`}
+      className="flex items-center gap-3 px-4 py-3 border-b dark:border-gray-700 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-700/30 cursor-pointer"
+      onClick={onSelect}
+    >
+      {showSticker && <PrinterStickerModal printer={printer} onClose={() => setShowSticker(false)} />}
+
+      {/* Avatar */}
+      <div className="shrink-0">
+        {printer.has_image
+          ? <img src={`/api/printers/${printer.id}/image`} className="w-9 h-9 rounded-lg object-cover" />
+          : <div className="w-9 h-9 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center"><PrinterIcon size={16} className="text-gray-400" /></div>
+        }
+      </div>
+
+      {/* Name */}
+      <p className="font-semibold text-sm text-gray-900 dark:text-gray-100 w-40 shrink-0 truncate">{printer.name}</p>
+
+      {/* Status dot + label */}
+      <div className="flex items-center gap-1.5 w-20 shrink-0">
+        <span className={`w-2 h-2 rounded-full shrink-0 ${style.dot}`} />
+        <span className={`text-xs font-medium ${style.text}`}>{style.label}</span>
+      </div>
+
+      {/* Progress + filename */}
+      <div className="flex-1 min-w-0">
+        {status?.state === 'printing' && (
+          <div className="flex items-center gap-2 min-w-0">
+            {status.filename && (
+              <span className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                {status.filename.replace(/\.[^/.]+$/, '')}
+              </span>
+            )}
+            {status.progress != null && (
+              <span className="text-xs text-gray-400 shrink-0">{(status.progress * 100).toFixed(0)}%</span>
+            )}
+          </div>
+        )}
+        {status?.state === 'printing' && status.progress != null && (
+          <div className="w-full max-w-48 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden mt-1">
+            <div className="h-full bg-green-500 rounded-full transition-all duration-1000" style={{ width: `${(status.progress * 100).toFixed(1)}%` }} />
+          </div>
+        )}
+      </div>
+
+      {/* Temps */}
+      {status && status.state !== 'offline' && (status.extruder_temp != null || status.bed_temp != null) && (
+        <div className="flex items-center gap-2 text-xs text-gray-400 shrink-0">
+          {status.extruder_temp != null && <span>🌡 {status.extruder_temp.toFixed(0)}°</span>}
+          {status.bed_temp != null && <span>⬛ {status.bed_temp.toFixed(0)}°</span>}
+        </div>
+      )}
+
+      {/* Actions */}
+      <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+        <button onClick={() => setShowSticker(true)} title="Print QR label" className="p-1.5 text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 transition-colors">
+          <QrCode size={14} />
+        </button>
+        <button onClick={onDelete} title="Remove printer" className="p-1.5 text-gray-400 hover:text-red-500 transition-colors">
+          <Trash2 size={14} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function PrinterCard({
   printer, isOpen, filaments, printerTypes, onToggle, onDelete,
 }: {
@@ -1183,6 +1340,12 @@ function PrinterCard({
   )
 }
 
+const PRINTERS_VIEW_KEY = 'printers-view'
+type PrintersView = 'list' | 'details'
+function loadPrintersView(): PrintersView {
+  try { return (localStorage.getItem(PRINTERS_VIEW_KEY) as PrintersView) || 'details' } catch { return 'details' }
+}
+
 export default function Printers() {
   const qc = useQueryClient()
   const location = useLocation()
@@ -1192,6 +1355,12 @@ export default function Printers() {
 
   const openPrinterId = (location.state as { openPrinterId?: number } | null)?.openPrinterId ?? null
   const [expanded, setExpanded] = useState<number | null>(openPrinterId)
+  const [view, setView] = useState<PrintersView>(loadPrintersView)
+
+  function changeView(v: PrintersView) {
+    setView(v)
+    try { localStorage.setItem(PRINTERS_VIEW_KEY, v) } catch { /* ignore */ }
+  }
 
   useEffect(() => {
     if (openPrinterId) {
@@ -1217,32 +1386,64 @@ export default function Printers() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-3"><PrinterIcon size={26} className="text-brand-600" />Printers</h1>
-        <button onClick={() => setShowForm(true)}
-          className="flex items-center gap-1.5 bg-brand-600 hover:bg-brand-700 text-white text-sm px-4 py-2 rounded-lg">
-          <Plus size={15} /> Add Printer
-        </button>
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+            <button
+              onClick={() => changeView('list')}
+              title="List view"
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors ${view === 'list' ? 'bg-brand-600 text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}`}
+            >
+              <LayoutList size={15} /> List
+            </button>
+            <button
+              onClick={() => changeView('details')}
+              title="Details view"
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-l border-gray-200 dark:border-gray-700 transition-colors ${view === 'details' ? 'bg-brand-600 text-white' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'}`}
+            >
+              <LayoutGrid size={15} /> Details
+            </button>
+          </div>
+          <button onClick={() => setShowForm(true)}
+            className="flex items-center gap-1.5 bg-brand-600 hover:bg-brand-700 text-white text-sm px-4 py-2 rounded-lg">
+            <Plus size={15} /> Add Printer
+          </button>
+        </div>
       </div>
 
       {printers.length === 0 && (
         <p className="text-sm text-gray-400 italic">No printers configured. Add a Moonraker printer to import print history.</p>
       )}
 
-      <div className="space-y-2">
-        {printers.map(printer => {
-          const isOpen = expanded === printer.id
-          return (
-            <PrinterCard
+      {view === 'list' ? (
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+          {printers.map(printer => (
+            <PrinterRow
               key={printer.id}
               printer={printer}
-              isOpen={isOpen}
-              filaments={filaments}
-              printerTypes={printerTypes}
-              onToggle={() => setExpanded(isOpen ? null : printer.id)}
               onDelete={() => { if (confirm('Remove this printer?')) deleteMutation.mutate(printer.id) }}
+              onSelect={() => { changeView('details'); setExpanded(printer.id) }}
             />
-          )
-        })}
-      </div>
+          ))}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {printers.map(printer => {
+            const isOpen = expanded === printer.id
+            return (
+              <PrinterCard
+                key={printer.id}
+                printer={printer}
+                isOpen={isOpen}
+                filaments={filaments}
+                printerTypes={printerTypes}
+                onToggle={() => setExpanded(isOpen ? null : printer.id)}
+                onDelete={() => { if (confirm('Remove this printer?')) deleteMutation.mutate(printer.id) }}
+              />
+            )
+          })}
+        </div>
+      )}
+
 
       {showForm && (
         <Modal title="Add Printer" onClose={() => setShowForm(false)}>

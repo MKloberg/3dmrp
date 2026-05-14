@@ -401,7 +401,7 @@ async def get_mainsail_spoolman(printer_id: int, db: Session = Depends(get_db)):
 
     url = printer.url.rstrip("/")
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with httpx.AsyncClient(timeout=2.0) as client:
             # Spoolman integration is enabled via [spoolman] in moonraker.conf —
             # it shows up as a component in /server/info when active.
             info_resp = await client.get(f"{url}/server/info")
@@ -461,6 +461,16 @@ async def get_spoolman_slots(printer_id: int, count: int = 1, db: Session = Depe
                 results.append({"tool_index": i, "spool_id": spool_id})
             except Exception:
                 results.append({"tool_index": i, "spool_id": None})
+
+    # Moonraker returns the global active spool as a fallback when per-tool tracking
+    # isn't set up. If tools 1..N all return the same spool_id as tool 0, they're
+    # hitting the global fallback — not a real per-tool assignment.
+    if len(results) > 1 and results[0]["spool_id"] is not None:
+        base_id = results[0]["spool_id"]
+        for r in results[1:]:
+            if r["spool_id"] == base_id:
+                r["spool_id"] = None
+
     return results
 
 

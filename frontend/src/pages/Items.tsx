@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import ReactCrop, { Crop, PixelCrop } from 'react-image-crop'
 import 'react-image-crop/dist/ReactCrop.css'
@@ -457,6 +457,10 @@ function PrinterStatusRow({ printer, sending, onSend, onAnalyze }: {
     staleTime: 0,
     refetchInterval: 10_000,
   })
+  const { data: spoolmanInfo } = useQuery({
+    queryKey: ['mainsail-spoolman', printer.id],
+    queryFn: () => getMailsailSpoolman(printer.id),
+  })
 
   const lastFilenameRef = useRef<string | null>(null)
   if (status?.filename) lastFilenameRef.current = status.filename
@@ -475,6 +479,22 @@ function PrinterStatusRow({ printer, sending, onSend, onAnalyze }: {
           <span className="text-xs text-gray-400 capitalize shrink-0">
             {status?.state ?? '…'}{isComplete && displayFilename ? ` — ${displayFilename}` : ''}
           </span>
+          {spoolmanInfo?.configured === true && (
+            <span className="inline-flex items-center gap-0.5 text-xs text-green-600 dark:text-green-400 shrink-0">
+              <span className="w-3 h-3 rounded-full bg-green-500 flex items-center justify-center">
+                <Check size={8} strokeWidth={3} className="text-white" />
+              </span>
+              Spoolman
+            </span>
+          )}
+          {spoolmanInfo?.configured === false && (
+            <span className="inline-flex items-center gap-0.5 text-xs text-red-500 dark:text-red-400 shrink-0">
+              <span className="w-3 h-3 rounded-full bg-red-500 flex items-center justify-center">
+                <X size={8} strokeWidth={3} className="text-white" />
+              </span>
+              Spoolman
+            </span>
+          )}
         </div>
         {isPrinting && (
           <div className="space-y-0.5">
@@ -2088,13 +2108,27 @@ export default function Items() {
   const { data: printerTypes = [] } = useQuery({ queryKey: ['printer-types'], queryFn: getPrinterTypes })
   const { data: printers = [] } = useQuery({ queryKey: ['printers'], queryFn: getPrinters })
 
-  const [expanded, setExpanded] = useState<number | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [expanded, setExpanded] = useState<number | null>(() => {
+    const id = Number(searchParams.get('open'))
+    return id || null
+  })
   const [showForm, setShowForm] = useState(false)
   const [showTagManager, setShowTagManager] = useState(false)
   const [filterTagIds, setFilterTagIds] = useState<Set<number>>(new Set())
   const [editing, setEditing] = useState<Item | null>(null)
   const [form, setForm] = useState({ name: '', sku: '', description: '', notes: '', stl_source_url: '' })
   const [gcodeRenamePrompt, setGcodeRenamePrompt] = useState<{ oldName: string; newName: string } | null>(null)
+
+  useEffect(() => {
+    const id = Number(searchParams.get('open'))
+    if (!id || !items.length) return
+    setExpanded(id)
+    setTimeout(() => {
+      document.getElementById(`item-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 50)
+    setSearchParams({}, { replace: true })
+  }, [items])
 
   function toggleFilterTag(id: number) {
     setFilterTagIds(prev => {
@@ -2201,7 +2235,7 @@ export default function Items() {
           const isOpen = expanded === item.id
           const firstImage = item.images[0]
           return (
-            <div key={item.id} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+            <div key={item.id} id={`item-${item.id}`} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
               <div
                 className="flex items-center justify-between px-4 py-3 cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-700/30"
                 onClick={() => setExpanded(isOpen ? null : item.id)}

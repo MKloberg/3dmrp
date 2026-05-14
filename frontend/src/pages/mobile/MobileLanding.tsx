@@ -1,9 +1,15 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Disc2 } from 'lucide-react'
 import QrScanner from '../../components/QrScanner'
 
 export default function MobileLanding() {
+  useEffect(() => {
+    const prev = document.body.style.backgroundColor
+    document.body.style.backgroundColor = '#030712'
+    return () => { document.body.style.backgroundColor = prev }
+  }, [])
+
   const navigate = useNavigate()
   const [error, setError] = useState<string | null>(null)
   const [scanned, setScanned] = useState(false)
@@ -17,7 +23,7 @@ export default function MobileLanding() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 flex flex-col text-white select-none">
+    <div className="min-h-dvh bg-gray-950 flex flex-col text-white select-none">
       {/* Header */}
       <div className="flex items-center gap-2.5 px-5 pt-safe pt-5 pb-4">
         <Disc2 size={22} className="text-brand-400 shrink-0" />
