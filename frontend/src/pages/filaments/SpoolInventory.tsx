@@ -204,6 +204,7 @@ function SpoolRow({ spool, onPrintLabel }: { spool: SpoolmanSpool; onPrintLabel:
   const pct = spool.filament.weight && spool.remaining_weight != null
     ? Math.min(100, (spool.remaining_weight / spool.filament.weight) * 100)
     : null
+  const isLow = pct !== null && pct < 20
 
   return (
     <div className="flex items-center gap-3 px-4 py-3 border-b dark:border-gray-700 last:border-0">
@@ -212,11 +213,21 @@ function SpoolRow({ spool, onPrintLabel }: { spool: SpoolmanSpool; onPrintLabel:
         #{spool.id}
       </p>
       <div className="flex-1 min-w-0">
-        <div className="flex items-baseline gap-2 flex-wrap">
-          <span className="text-sm font-medium truncate">{spool.filament.name || '—'}</span>
-          {spool.filament.vendor?.name && (
-            <span className="text-xs text-gray-400 shrink-0">{spool.filament.vendor.name}</span>
-          )}
+        <div className="flex items-baseline gap-2 flex-wrap justify-between">
+          <div className="flex items-baseline gap-2 min-w-0">
+            <span className="text-sm font-medium truncate">{spool.filament.name || '—'}</span>
+            {spool.filament.vendor?.name && (
+              <span className="text-xs text-gray-400 shrink-0">{spool.filament.vendor.name}</span>
+            )}
+          </div>
+          <div className="flex items-baseline gap-1.5 shrink-0">
+            <span className={`text-sm font-semibold ${isLow ? 'text-red-500' : 'text-gray-800 dark:text-gray-100'}`}>
+              {weightLabel(spool.remaining_weight)}
+            </span>
+            {pct !== null && (
+              <span className={`text-xs ${isLow ? 'text-red-400' : 'text-gray-400'}`}>{Math.round(pct)}%</span>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2 mt-0.5 flex-wrap">
           <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 font-medium">
@@ -232,20 +243,17 @@ function SpoolRow({ spool, onPrintLabel }: { spool: SpoolmanSpool; onPrintLabel:
             <span className="text-xs text-gray-400 italic truncate max-w-40">{spool.comment}</span>
           )}
         </div>
-      </div>
-      <div className="flex flex-col items-end gap-1 shrink-0">
-        <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">
-          {weightLabel(spool.remaining_weight)}
-        </span>
         {pct !== null && (
-          <div className="w-24 h-1.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+          <div
+            className="mt-2 h-2.5 rounded-full overflow-hidden border border-black/5 dark:border-white/5"
+            style={{ backgroundColor: `${color}28` }}
+          >
             <div
-              className={`h-full rounded-full ${pct < 20 ? 'bg-red-400' : pct < 50 ? 'bg-yellow-400' : 'bg-teal-500'}`}
-              style={{ width: `${pct}%` }}
+              className="h-full rounded-full transition-all duration-300"
+              style={{ width: `${pct}%`, backgroundColor: isLow ? '#ef4444' : color }}
             />
           </div>
         )}
-        {pct !== null && <span className="text-xs text-gray-400">{Math.round(pct)}%</span>}
       </div>
       <button
         onClick={onPrintLabel}
@@ -263,6 +271,7 @@ function SpoolCard({ spool, onPrintLabel }: { spool: SpoolmanSpool; onPrintLabel
   const pct = spool.filament.weight && spool.remaining_weight != null
     ? Math.min(100, (spool.remaining_weight / spool.filament.weight) * 100)
     : null
+  const isLow = pct !== null && pct < 20
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col">
@@ -297,23 +306,24 @@ function SpoolCard({ spool, onPrintLabel }: { spool: SpoolmanSpool; onPrintLabel
           )}
           {spool.lot_nr && <span className="text-xs text-gray-400">Lot: {spool.lot_nr}</span>}
         </div>
-        <div className="mt-auto pt-3">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">
-              {weightLabel(spool.remaining_weight)}
-            </span>
-            {pct !== null && <span className="text-xs text-gray-400">{Math.round(pct)}%</span>}
-          </div>
+        <div className="mt-auto pt-3 flex items-baseline justify-between">
+          <span className={`text-sm font-semibold ${isLow ? 'text-red-500' : 'text-gray-800 dark:text-gray-100'}`}>
+            {weightLabel(spool.remaining_weight)}
+          </span>
           {pct !== null && (
-            <div className="h-1.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full ${pct < 20 ? 'bg-red-400' : pct < 50 ? 'bg-yellow-400' : 'bg-teal-500'}`}
-                style={{ width: `${pct}%` }}
-              />
-            </div>
+            <span className={`text-xs ${isLow ? 'text-red-400' : 'text-gray-400'}`}>{Math.round(pct)}%</span>
           )}
         </div>
       </div>
+      {/* Full-width gauge strip at the card bottom */}
+      {pct !== null && (
+        <div className="h-3 relative" style={{ backgroundColor: `${color}28` }}>
+          <div
+            className="absolute inset-y-0 left-0 transition-all duration-300"
+            style={{ width: `${pct}%`, backgroundColor: isLow ? '#ef4444' : color }}
+          />
+        </div>
+      )}
     </div>
   )
 }

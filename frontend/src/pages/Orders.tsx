@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { getOrders, createOrder, updateOrder, deleteOrder, getItems, updateItem, getCustomers, Order } from '../api/client'
 import Modal from '../components/Modal'
 import StatusBadge from '../components/StatusBadge'
-import { Plus, Trash2, Pencil, User, ExternalLink, ClipboardList } from 'lucide-react'
+import { Plus, Trash2, Pencil, Package, User, ExternalLink, ClipboardList } from 'lucide-react'
 
 const STATUSES = ['pending', 'printing', 'complete', 'cancelled'] as const
 type Status = typeof STATUSES[number]
@@ -208,6 +208,13 @@ export default function Orders() {
                       <div className="flex items-center gap-2 justify-end">
                         <button onClick={() => openEdit(order)} className="text-gray-400 hover:text-brand-600">
                           <Pencil size={14} />
+                        </button>
+                        <button
+                          onClick={() => navigate(`/items?open=${order.item.id}`)}
+                          title="Go to item"
+                          className="text-gray-400 hover:text-brand-600"
+                        >
+                          <Package size={14} />
                         </button>
                         <button
                           onClick={() => { if (confirm('Delete order?')) deleteMutation.mutate(order.id) }}

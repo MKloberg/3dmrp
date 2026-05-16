@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import ReactCrop, { Crop, PixelCrop } from 'react-image-crop'
@@ -23,6 +23,19 @@ import ConfirmModal from '../components/ConfirmModal'
 import PrintSpoolWizard from '../components/PrintSpoolWizard'
 import { SpoolIcon } from '../components/SpoolIcon'
 import { Plus, Trash2, ChevronDown, ChevronRight, Pencil, Check, X, Upload, ShoppingCart, GripVertical, Tag as TagIcon, Crop as CropIcon, Download, Route, Send, RefreshCw, Clock, Box, Share2, DollarSign, ClipboardList as BomIcon, FolderOpen } from 'lucide-react'
+
+function smoothScrollTo(container: HTMLElement, target: number, duration = 700) {
+  const start = container.scrollTop
+  const distance = target - start
+  const startTime = performance.now()
+  const ease = (t: number) => t === 1 ? 1 : 1 - Math.pow(2, -10 * t)
+  function step(now: number) {
+    const progress = Math.min((now - startTime) / duration, 1)
+    container.scrollTop = start + distance * ease(progress)
+    if (progress < 1) requestAnimationFrame(step)
+  }
+  requestAnimationFrame(step)
+}
 
 function CropModal({
   itemId,
@@ -103,8 +116,10 @@ function CropModal({
 }
 
 const TAG_COLORS = [
-  '#6366f1','#8b5cf6','#ec4899','#ef4444','#f97316',
-  '#eab308','#22c55e','#14b8a6','#3b82f6','#64748b',
+  '#ef4444','#f43f5e','#f97316','#fb923c','#eab308',
+  '#84cc16','#22c55e','#10b981','#14b8a6','#06b6d4',
+  '#3b82f6','#0ea5e9','#6366f1','#8b5cf6','#a855f7',
+  '#ec4899','#1d4ed8','#64748b','#374151','#78716c',
 ]
 
 function TagPill({ tag, onRemove }: { tag: Tag; onRemove?: () => void }) {
@@ -125,6 +140,25 @@ function TagPill({ tag, onRemove }: { tag: Tag; onRemove?: () => void }) {
 
 function FilamentDot({ hex }: { hex: string }) {
   return <SpoolIcon color={hex} size={16} />
+}
+
+function ToggleSwitch({ checked, onChange, tooltip }: { checked: boolean; onChange: (v: boolean) => void; tooltip: string }) {
+  return (
+    <div className="flex items-center gap-1.5 shrink-0" title={tooltip}>
+      <span className={`text-xs font-medium select-none ${checked ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+        Include in BOM
+      </span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        onClick={e => { e.stopPropagation(); onChange(!checked) }}
+        className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${checked ? 'bg-green-500' : 'bg-red-400'}`}
+      >
+        <span className={`inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+      </button>
+    </div>
+  )
 }
 
 function formatPrintTime(secs: number): string {
@@ -446,9 +480,13 @@ function FilamentCheckModal({ printer, stepFilaments, filamentWeights, analyzeOn
   )
 }
 
-function PrinterStatusRow({ printer, sending, onSend, onAnalyze }: {
+function PrinterStatusRow({ printer, anySending, uploadSending, uploadSent, uploadProgress, uploadError, onSend, onAnalyze }: {
   printer: Printer
-  sending: boolean
+  anySending: boolean
+  uploadSending: boolean
+  uploadSent: boolean
+  uploadProgress: number
+  uploadError: string | null
   onSend: (printerId: number, startPrint: boolean) => void
   onAnalyze: (printerId: number) => void
 }) {
@@ -513,6 +551,20 @@ function PrinterStatusRow({ printer, sending, onSend, onAnalyze }: {
             )}
           </div>
         )}
+        {(uploadSending || uploadSent || uploadError) && (
+          <div className="space-y-0.5">
+            {(uploadSending || uploadSent) && (
+              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-300 ${uploadSent ? 'bg-green-500' : 'bg-brand-500'}`}
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+            )}
+            {uploadSent && <p className="text-xs text-green-600">Sent!</p>}
+            {uploadError && <p className="text-xs text-red-500">{uploadError}</p>}
+          </div>
+        )}
       </div>
       <div className="flex items-center gap-1 shrink-0">
         <button
@@ -522,14 +574,14 @@ function PrinterStatusRow({ printer, sending, onSend, onAnalyze }: {
           Analyze
         </button>
         <button
-          disabled={sending}
+          disabled={anySending || isPrinting}
           onClick={() => onSend(printer.id, false)}
           className="flex items-center gap-1 text-xs border border-brand-300 dark:border-brand-700 text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/20 px-2 py-0.5 rounded disabled:opacity-50"
         >
           <Send size={9} /> Send
         </button>
         <button
-          disabled={sending}
+          disabled={anySending || isPrinting}
           onClick={() => onSend(printer.id, true)}
           className="flex items-center gap-1 text-xs border border-green-300 dark:border-green-700 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 px-2 py-0.5 rounded disabled:opacity-50"
         >
@@ -577,10 +629,11 @@ function GcodePanel({ itemId, itemName, slicerName, printerTypeName, printerType
     enabled: !!activeFile,
     staleTime: 60_000,
   })
-  const [sending, setSending] = useState(false)
-  const [sent, setSent] = useState(false)
-  const [sendError, setSendError] = useState<string | null>(null)
+  const [sendingPrinterId, setSendingPrinterId] = useState<number | null>(null)
+  const [sentPrinterId, setSentPrinterId] = useState<number | null>(null)
+  const [sendError, setSendError] = useState<{ printerId: number; message: string } | null>(null)
   const [progress, setProgress] = useState(0)
+  const sending = sendingPrinterId !== null
   const [filamentWarning, setFilamentWarning] = useState<{ printer: Printer; analyze: boolean; gcodeMatchesSpec: boolean } | null>(null)
   const [pendingSend, setPendingSend] = useState<{ printerId: number; startPrint: boolean; analyze: boolean; gcodeMatchesSpec: boolean } | null>(null)
   const [showWeightMismatch, setShowWeightMismatch] = useState(false)
@@ -599,13 +652,13 @@ function GcodePanel({ itemId, itemName, slicerName, printerTypeName, printerType
   }, [sending])
 
   useEffect(() => {
-    if (sent) setProgress(100)
-  }, [sent])
+    if (sentPrinterId !== null) setProgress(100)
+  }, [sentPrinterId])
 
   function selectFile(f: string) {
     setSelected(f)
     localStorage.setItem(storageKey, f)
-    setSent(false)
+    setSentPrinterId(null)
     setSendError(null)
     setProgress(0)
   }
@@ -615,17 +668,18 @@ function GcodePanel({ itemId, itemName, slicerName, printerTypeName, printerType
   async function doSend(printerId: number, startPrint: boolean) {
     if (!data?.folder || !activeFile) return
     const filePath = `${data.folder}\\${activeFile}`
-    setSending(true)
+    setSendingPrinterId(printerId)
+    setSentPrinterId(null)
     setSendError(null)
     try {
       await sendGcodeToPrinter(printerId, filePath, startPrint)
-      setSent(true)
-      setTimeout(() => { setSent(false); setProgress(0) }, 3000)
+      setSentPrinterId(printerId)
+      setTimeout(() => { setSentPrinterId(null); setProgress(0) }, 3000)
     } catch (e) {
-      setSendError(e instanceof Error ? e.message : 'Send failed')
+      setSendError({ printerId, message: e instanceof Error ? e.message : 'Send failed' })
       setProgress(0)
     } finally {
-      setSending(false)
+      setSendingPrinterId(null)
     }
   }
 
@@ -723,24 +777,20 @@ function GcodePanel({ itemId, itemName, slicerName, printerTypeName, printerType
           )}
         </div>
       )}
-      {(sending || sent || sendError) && (
-        <div className="space-y-0.5">
-          {(sending || sent) && (
-            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-300 ${sent ? 'bg-green-500' : 'bg-brand-500'}`}
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-          )}
-          {sent && <p className="text-xs text-green-600">Sent!</p>}
-          {sendError && <p className="text-xs text-red-500">{sendError}</p>}
-        </div>
-      )}
       {matchingPrinters.length === 0 ? (
         <p className="text-xs text-gray-400 italic">No printers of this type</p>
       ) : matchingPrinters.map(printer => (
-        <PrinterStatusRow key={printer.id} printer={printer} sending={sending} onSend={handleSend} onAnalyze={handleAnalyze} />
+        <PrinterStatusRow
+          key={printer.id}
+          printer={printer}
+          anySending={sending}
+          uploadSending={sendingPrinterId === printer.id}
+          uploadSent={sentPrinterId === printer.id}
+          uploadProgress={progress}
+          uploadError={sendError?.printerId === printer.id ? sendError.message : null}
+          onSend={handleSend}
+          onAnalyze={handleAnalyze}
+        />
       ))}
       {showWeightMismatch && (
         <GcodeMismatchModal
@@ -820,56 +870,58 @@ function SlicerFileRow({ itemId, printerType, slicerFile, onChanged }: {
   }
 
   return (
-    <div className="flex items-center gap-2 text-sm">
-      <span className="text-xs text-gray-500 dark:text-gray-400 w-36 shrink-0 truncate" title={`${printerType.name}${printerType.slicer ? ` · ${printerType.slicer.name}` : ''}`}>
-        {printerType.name}
+    <>
+      <span className="text-xs text-gray-500 dark:text-gray-400">
+        {printerType.name}{printerType.slicer && <span className="text-gray-400 dark:text-gray-500"> ({printerType.slicer.name})</span>}
       </span>
-      {editing ? (
-        <>
-          <input
-            autoFocus
-            className="flex-1 border rounded px-2 py-1 text-xs font-mono dark:bg-gray-700 dark:border-gray-600"
-            placeholder="C:\path\to\model.3mf"
-            value={path}
-            onChange={e => setPath(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') setEditing(false) }}
-          />
-          <button onClick={handleSave} disabled={saving || !path.trim()} className="text-green-600 hover:text-green-700 disabled:opacity-40 shrink-0">
-            <Check size={14} />
-          </button>
-          <button onClick={() => setEditing(false)} className="text-gray-400 hover:text-gray-600 shrink-0">
-            <X size={14} />
-          </button>
-        </>
-      ) : slicerFile ? (
-        <>
-          <span className="flex-1 text-xs font-mono text-gray-600 dark:text-gray-300 truncate" title={slicerFile.file_path}>
-            {slicerFile.file_path}
-          </span>
+      <div className="flex items-center gap-2">
+        {editing ? (
+          <>
+            <input
+              autoFocus
+              className="flex-1 border rounded px-2 py-1 text-xs font-mono dark:bg-gray-700 dark:border-gray-600"
+              placeholder="C:\path\to\model.3mf"
+              value={path}
+              onChange={e => setPath(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') setEditing(false) }}
+            />
+            <button onClick={handleSave} disabled={saving || !path.trim()} className="text-green-600 hover:text-green-700 disabled:opacity-40 shrink-0">
+              <Check size={14} />
+            </button>
+            <button onClick={() => setEditing(false)} className="text-gray-400 hover:text-gray-600 shrink-0">
+              <X size={14} />
+            </button>
+          </>
+        ) : slicerFile ? (
+          <>
+            <span className="flex-1 text-xs font-mono text-gray-600 dark:text-gray-300 truncate" title={slicerFile.file_path}>
+              {slicerFile.file_path}
+            </span>
+            <button
+              onClick={handleOpen}
+              disabled={opening}
+              className="shrink-0 flex items-center gap-1 text-xs text-brand-600 hover:text-brand-700 font-medium disabled:opacity-50"
+              title={`Open in ${printerType.slicer?.name ?? 'slicer'}`}
+            >
+              <FolderOpen size={13} /> {opening ? 'Opening…' : 'Open'}
+            </button>
+            <button onClick={() => { setPath(slicerFile.file_path); setEditing(true) }} className="shrink-0 text-gray-400 hover:text-gray-600">
+              <Pencil size={13} />
+            </button>
+            <button onClick={handleDelete} className="shrink-0 text-gray-400 hover:text-red-500">
+              <Trash2 size={13} />
+            </button>
+          </>
+        ) : (
           <button
-            onClick={handleOpen}
-            disabled={opening}
-            className="shrink-0 flex items-center gap-1 text-xs text-brand-600 hover:text-brand-700 font-medium disabled:opacity-50"
-            title={`Open in ${printerType.slicer?.name ?? 'slicer'}`}
+            onClick={() => setEditing(true)}
+            className="text-xs text-gray-400 hover:text-brand-600 flex items-center gap-1"
           >
-            <FolderOpen size={13} /> {opening ? 'Opening…' : 'Open'}
+            <Plus size={12} /> Set model file
           </button>
-          <button onClick={() => { setPath(slicerFile.file_path); setEditing(true) }} className="shrink-0 text-gray-400 hover:text-gray-600">
-            <Pencil size={13} />
-          </button>
-          <button onClick={handleDelete} className="shrink-0 text-gray-400 hover:text-red-500">
-            <Trash2 size={13} />
-          </button>
-        </>
-      ) : (
-        <button
-          onClick={() => setEditing(true)}
-          className="text-xs text-gray-400 hover:text-brand-600 flex items-center gap-1"
-        >
-          <Plus size={12} /> Set model file
-        </button>
-      )}
-    </div>
+        )}
+      </div>
+    </>
   )
 }
 
@@ -882,6 +934,16 @@ function ItemDetail({ item, filaments, allTags, printerTypes, printers }: { item
   const [cropTarget, setCropTarget] = useState<{ imageId: number; url: string } | null>(null)
   const [editingReq, setEditingReq] = useState<{ reqId: number; specId: string; grams: string } | null>(null)
   const [reqForm, setReqForm] = useState<{ specId: string; grams: string } | null>(null)
+  const [editingDesc, setEditingDesc] = useState(false)
+  const [descValue, setDescValue] = useState(item.description)
+
+  const saveDescMutation = useMutation({
+    mutationFn: () => updateItem(item.id, {
+      name: item.name, description: descValue, notes: item.notes, sku: item.sku,
+      stl_source_url: item.stl_source_url, use_advanced_routing: item.use_advanced_routing,
+    }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['items'] }); setEditingDesc(false) },
+  })
 const addTagMutation = useMutation({
     mutationFn: (tagId: number) => addTagToItem(tagId, item.id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['items'] }),
@@ -1026,7 +1088,7 @@ const addTagMutation = useMutation({
 
 function confirmEdit(reqId: number, specId: string, gramsStr: string) {
     const g = parseFloat(gramsStr)
-    if (!isNaN(g) && g > 0 && specId) updateReqMutation.mutate({ reqId, grams: g, filament_spec_id: Number(specId) })
+    if (specId) updateReqMutation.mutate({ reqId, grams: (!isNaN(g) && g > 0) ? g : 0, filament_spec_id: Number(specId) })
   }
 
   // --- Cost / BOM modals ---
@@ -1154,6 +1216,42 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['items'] }),
   })
 
+  const toggleRoutingSummaryMutation = useMutation({
+    mutationFn: ({ routingId, include_in_summary }: { routingId: number; include_in_summary: boolean }) =>
+      updateRouting(item.id, routingId, { include_in_summary }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['items'] }),
+  })
+
+  const toggleStepPlanningMutation = useMutation({
+    mutationFn: ({ routingId, stepId, include_in_planning }: { routingId: number; stepId: number; include_in_planning: boolean }) =>
+      updateRoutingStep(item.id, routingId, stepId, { include_in_planning }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['items'] }),
+  })
+
+  const hasProductionSteps = item.routings.some(r => r.steps.length > 0)
+
+  const computedFilaments = useMemo(() => {
+    if (!hasProductionSteps) return null
+    const map = new Map<number, { filament_spec: typeof item.filament_requirements[0]['filament_spec']; grams: number }>()
+    for (const routing of item.routings) {
+      if (!routing.include_in_summary) continue
+      for (const step of routing.steps) {
+        if (!step.include_in_planning) continue
+        const multiplier = step.quantity_on_plate > 0 ? step.parts_per_item / step.quantity_on_plate : step.parts_per_item
+        for (const fil of step.filaments) {
+          const grams = fil.grams * multiplier
+          const existing = map.get(fil.filament_spec_id)
+          if (existing) {
+            map.set(fil.filament_spec_id, { ...existing, grams: existing.grams + grams })
+          } else {
+            map.set(fil.filament_spec_id, { filament_spec: fil.filament_spec, grams })
+          }
+        }
+      }
+    }
+    return Array.from(map.values())
+  }, [item.routings, hasProductionSteps])
+
   async function handleAddStep(routingId: number) {
     const { desc, printerTypeId, qty, partsPerItem, printTimeHrs, printTimeMins } = newStepForm
     createStepMutation.mutate({ routingId, desc, printerTypeId, qty, partsPerItem, printTimeHrs, printTimeMins })
@@ -1250,7 +1348,16 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                     <span className="flex items-center gap-1 text-xs text-gray-400 shrink-0"><Share2 size={10} />{step.parts_per_item} {step.parts_per_item === 1 ? 'Part' : 'Parts'} per Item (BOM)</span>
                     {step.estimated_print_time != null && <span className="flex items-center gap-1 text-xs text-gray-400 shrink-0"><Clock size={10} />{formatPrintTime(step.estimated_print_time)}</span>}
                   </div>
-                  <div className="flex items-center gap-1 shrink-0">
+                  <div className="flex items-center gap-2 shrink-0">
+                    {hasProductionSteps && (
+                      <ToggleSwitch
+                        checked={step.include_in_planning}
+                        onChange={v => toggleStepPlanningMutation.mutate({ routingId: routing.id, stepId: step.id, include_in_planning: v })}
+                        tooltip={step.include_in_planning
+                          ? 'This step is included in the Summarized Bill of Materials. Its filament consumption is scaled by parts per item ÷ quantity on plate and counted in the item-level summary.'
+                          : 'This step is excluded from the Summarized Bill of Materials. Its filament consumption is not counted in the item-level summary.'}
+                      />
+                    )}
                     <button onClick={() => setEditingStep({ routingId: routing.id, stepId: step.id, desc: step.description, printerTypeId: String(step.printer_type_id ?? ''), qty: String(step.quantity_on_plate), partsPerItem: String(step.parts_per_item ?? 1), printTimeHrs: step.estimated_print_time != null ? String(Math.floor(step.estimated_print_time / 3600)) : '', printTimeMins: step.estimated_print_time != null ? String(Math.floor((step.estimated_print_time % 3600) / 60)) : '' })} className="text-gray-400 hover:text-brand-600"><Pencil size={12} /></button>
                     <button onClick={() => { if (confirm('Delete this step?')) deleteStepMutation.mutate({ routingId: routing.id, stepId: step.id }) }} className="text-red-400 hover:text-red-600"><Trash2 size={12} /></button>
                   </div>
@@ -1286,6 +1393,20 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                     </div>
                   )
                 })}
+                {isAddingFilHere && addingStepFil ? (
+                  <div className="flex items-center gap-1.5">
+                    <select className="flex-1 border rounded px-1.5 py-0.5 text-xs dark:bg-gray-700 dark:border-gray-600" value={newStepFilForm.specId} onChange={e => setNewStepFilForm(f => ({ ...f, specId: e.target.value }))}>
+                      <option value="">— select filament —</option>
+                      {filaments.map(f => <option key={f.id} value={f.id}>{f.material} — {f.color_name}{f.brand ? ` (${f.brand})` : ''}</option>)}
+                    </select>
+                    <input type="number" min="0.1" step="0.1" placeholder="g" className="w-16 border rounded px-1.5 py-0.5 text-xs text-right dark:bg-gray-700 dark:border-gray-600" value={newStepFilForm.grams} onChange={e => setNewStepFilForm(f => ({ ...f, grams: e.target.value }))} />
+                    <span className="text-gray-500 text-xs">g</span>
+                    <button disabled={!newStepFilForm.specId || !newStepFilForm.grams || addStepFilMutation.isPending} onClick={() => addStepFilMutation.mutate({ routingId: routing.id, stepId: step.id, ...newStepFilForm })} className="text-green-500 hover:text-green-600 disabled:opacity-40"><Check size={11} /></button>
+                    <button onClick={() => setAddingStepFil(null)} className="text-gray-400 hover:text-gray-600"><X size={11} /></button>
+                  </div>
+                ) : (
+                  <button onClick={() => { setAddingStepFil({ routingId: routing.id, stepId: step.id }); setNewStepFilForm({ specId: '', grams: '' }) }} className="text-xs text-brand-600 hover:underline flex items-center gap-0.5"><Plus size={10} /> Add filament</button>
+                )}
                 {/* G-Code files */}
                 {printerType?.slicer && (
                   <div className="pt-1 border-t border-gray-200 dark:border-gray-600 mt-1">
@@ -1324,20 +1445,6 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                       }}
                     />
                   </div>
-                )}
-                {isAddingFilHere && addingStepFil ? (
-                  <div className="flex items-center gap-1.5">
-                    <select className="flex-1 border rounded px-1.5 py-0.5 text-xs dark:bg-gray-700 dark:border-gray-600" value={newStepFilForm.specId} onChange={e => setNewStepFilForm(f => ({ ...f, specId: e.target.value }))}>
-                      <option value="">— select filament —</option>
-                      {filaments.map(f => <option key={f.id} value={f.id}>{f.material} — {f.color_name}{f.brand ? ` (${f.brand})` : ''}</option>)}
-                    </select>
-                    <input type="number" min="0.1" step="0.1" placeholder="g" className="w-16 border rounded px-1.5 py-0.5 text-xs text-right dark:bg-gray-700 dark:border-gray-600" value={newStepFilForm.grams} onChange={e => setNewStepFilForm(f => ({ ...f, grams: e.target.value }))} />
-                    <span className="text-gray-500 text-xs">g</span>
-                    <button disabled={!newStepFilForm.specId || !newStepFilForm.grams || addStepFilMutation.isPending} onClick={() => addStepFilMutation.mutate({ routingId: routing.id, stepId: step.id, ...newStepFilForm })} className="text-green-500 hover:text-green-600 disabled:opacity-40"><Check size={11} /></button>
-                    <button onClick={() => setAddingStepFil(null)} className="text-gray-400 hover:text-gray-600"><X size={11} /></button>
-                  </div>
-                ) : (
-                  <button onClick={() => { setAddingStepFil({ routingId: routing.id, stepId: step.id }); setNewStepFilForm({ specId: '', grams: '' }) }} className="text-xs text-brand-600 hover:underline flex items-center gap-0.5"><Plus size={10} /> Add filament</button>
                 )}
               </div>
             </div>
@@ -1387,27 +1494,6 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
     <div className="border-t dark:border-gray-700 px-4 py-3 space-y-4">
       {item.notes && <p className="text-sm text-gray-500 dark:text-gray-400 italic">{item.notes}</p>}
 
-      {/* Tags */}
-      <div className="flex flex-wrap items-center gap-2">
-        {item.tags.map(tag => (
-          <TagPill key={tag.id} tag={tag} onRemove={() => removeTagMutation.mutate(tag.id)} />
-        ))}
-        {allTags.filter(t => !item.tags.some(it => it.id === t.id)).length > 0 && (
-          <select
-            className="text-xs border rounded-full px-2 py-0.5 text-gray-500 dark:text-gray-400 dark:bg-gray-800 dark:border-gray-600 cursor-pointer"
-            value=""
-            onChange={e => { if (e.target.value) addTagMutation.mutate(Number(e.target.value)) }}
-          >
-            <option value="">+ Add tag</option>
-            {allTags.filter(t => !item.tags.some(it => it.id === t.id)).map(t => (
-              <option key={t.id} value={t.id}>{t.name}</option>
-            ))}
-          </select>
-        )}
-        {allTags.length === 0 && item.tags.length === 0 && (
-          <span className="text-xs text-gray-400 italic">No tags yet — create some with the tag manager above.</span>
-        )}
-      </div>
 
 
       {/* Images */}
@@ -1549,10 +1635,79 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
         )
       })()}
 
-      {/* Filaments */}
+      {/* Description */}
       <div>
-        <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2">Filaments</p>
-        <div className="space-y-1.5">
+        <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1.5">Description</p>
+        {editingDesc ? (
+          <div className="space-y-1.5">
+            <textarea
+              autoFocus
+              rows={3}
+              className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100 resize-none"
+              value={descValue}
+              onChange={e => setDescValue(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Escape') { setDescValue(item.description); setEditingDesc(false) } }}
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => saveDescMutation.mutate()}
+                disabled={saveDescMutation.isPending}
+                className="text-xs bg-brand-600 text-white px-3 py-1 rounded-lg disabled:opacity-50"
+              >
+                {saveDescMutation.isPending ? 'Saving…' : 'Save'}
+              </button>
+              <button
+                onClick={() => { setDescValue(item.description); setEditingDesc(false) }}
+                className="text-xs text-gray-500 hover:text-gray-700 px-2 py-1"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div
+            onClick={() => setEditingDesc(true)}
+            className="min-h-[2rem] text-sm text-gray-700 dark:text-gray-300 cursor-text rounded-lg px-3 py-2 -mx-3 hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors"
+          >
+            {item.description
+              ? item.description
+              : <span className="text-gray-400 dark:text-gray-500 italic">Add a description…</span>}
+          </div>
+        )}
+      </div>
+
+      {/* Bill of Materials */}
+      <div>
+        <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-2">Summarized Bill of Materials</p>
+        {hasProductionSteps ? (
+          <div className="space-y-1.5">
+            {computedFilaments && computedFilaments.length > 0 ? (
+              computedFilaments.map(({ filament_spec, grams }) => (
+                <div key={filament_spec.id} className="flex items-center justify-between text-sm py-0.5">
+                  <div className="flex items-center gap-2">
+                    <FilamentDot hex={filament_spec.color_hex} />
+                    <span>{filament_spec.material} — {filament_spec.color_name}</span>
+                    {filament_spec.brand && <span className="text-gray-400 text-xs">{filament_spec.brand}</span>}
+                  </div>
+                  <span className="font-medium tabular-nums">{grams > 0 ? `${grams.toFixed(1)}g` : '—'}</span>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-gray-400 italic">
+                {item.routings.some(r => r.include_in_summary && r.steps.some(s => s.include_in_planning && s.filaments.length > 0))
+                  ? 'No filaments yet.'
+                  : item.routings.every(r => !r.include_in_summary)
+                    ? 'All routings excluded from summary.'
+                    : 'No filaments defined in included steps.'}
+              </p>
+            )}
+            <p className="text-xs text-gray-400 flex items-center gap-1 mt-1">
+              <Route size={10} /> Computed from production steps — edit filaments within each step
+            </p>
+          </div>
+        ) : (
+          <>
+          <div className="space-y-1.5">
           {item.filament_requirements.map((req, index) => {
             const isEditing = editingReq?.reqId === req.id
             const isDragOver = overIndex === index && dragIndex !== index
@@ -1616,7 +1771,7 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                       {req.filament_spec.brand && <span className="text-gray-400 text-xs">{req.filament_spec.brand}</span>}
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="font-medium">{req.grams}g</span>
+                      <span className="font-medium">{req.grams > 0 ? `${req.grams}g` : '—'}</span>
                       {req.filament_spec.purchase_url && (
                         <a href={req.filament_spec.purchase_url} target="_blank" rel="noopener noreferrer"
                           title="Order" className="text-gray-400 hover:text-green-600">
@@ -1670,11 +1825,8 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
             </div>
             <button
               className="bg-brand-600 text-white px-3 py-1.5 rounded-lg text-sm disabled:opacity-50"
-              disabled={!reqForm.specId || !reqForm.grams || addReqMutation.isPending}
-              onClick={() => addReqMutation.mutate({
-                filament_spec_id: Number(reqForm.specId),
-                grams: Number(reqForm.grams),
-              })}
+              disabled={!reqForm.specId || addReqMutation.isPending}
+              onClick={() => { const g = parseFloat(reqForm.grams); addReqMutation.mutate({ filament_spec_id: Number(reqForm.specId), grams: (!isNaN(g) && g > 0) ? g : 0 }) }}
             >Save</button>
             <button className="text-sm text-gray-400 px-1" onClick={() => setReqForm(null)}>Cancel</button>
           </div>
@@ -1685,6 +1837,8 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
           >
             <Plus size={13} /> Add filament
           </button>
+        )}
+          </>
         )}
       </div>
 
@@ -1710,7 +1864,7 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
           <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide flex items-center gap-1.5 mb-2">
             <FolderOpen size={11} /> Model Files
           </p>
-          <div className="space-y-1.5">
+          <div className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1.5 items-center">
             {printerTypes.filter(pt => pt.slicer).map(pt => {
               const sf: SlicerFile | undefined = item.slicer_files.find(f => f.printer_type_id === pt.id)
               return (
@@ -1733,14 +1887,25 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
           <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide flex items-center gap-1.5">
             <Route size={11} /> Production Steps (Routing)
           </p>
-          <button
-            onClick={() => toggleAdvancedMutation.mutate()}
-            disabled={toggleAdvancedMutation.isPending}
-            className="text-xs text-gray-400 hover:text-brand-600 flex items-center gap-1"
-            title={item.use_advanced_routing ? 'Switch to simple mode (one routing)' : 'Switch to advanced mode (multiple routings)'}
-          >
-            {item.use_advanced_routing ? 'Advanced' : 'Simple'} <ChevronDown size={10} />
-          </button>
+          <div className="flex items-center gap-3">
+            {!item.use_advanced_routing && hasProductionSteps && item.routings.length > 0 && (
+              <ToggleSwitch
+                checked={item.routings[0].include_in_summary}
+                onChange={v => toggleRoutingSummaryMutation.mutate({ routingId: item.routings[0].id, include_in_summary: v })}
+                tooltip={item.routings[0].include_in_summary
+                  ? 'This routing is included in the Summarized Bill of Materials. Filament consumption from its steps is counted in the item-level summary.'
+                  : 'This routing is excluded from the Summarized Bill of Materials. Its filament consumption is not counted in the item-level summary.'}
+              />
+            )}
+            <button
+              onClick={() => toggleAdvancedMutation.mutate()}
+              disabled={toggleAdvancedMutation.isPending}
+              className="text-xs text-gray-400 hover:text-brand-600 flex items-center gap-1"
+              title={item.use_advanced_routing ? 'Switch to simple mode (one routing)' : 'Switch to advanced mode (multiple routings)'}
+            >
+              {item.use_advanced_routing ? 'Advanced' : 'Simple'} <ChevronDown size={10} />
+            </button>
+          </div>
         </div>
 
         {item.use_advanced_routing ? (
@@ -1771,12 +1936,23 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                       <button onClick={() => { setEditingRoutingId(routing.id); setEditingRoutingName(routing.name) }} className="text-gray-400 hover:text-brand-600"><Pencil size={12} /></button>
                     </div>
                   )}
-                  <button
-                    onClick={() => { if (confirm(`Delete routing "${routing.name || 'Untitled'}"?`)) deleteRoutingMutation.mutate(routing.id) }}
-                    className="text-red-400 hover:text-red-600 shrink-0"
-                  >
-                    <Trash2 size={13} />
-                  </button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {hasProductionSteps && (
+                      <ToggleSwitch
+                        checked={routing.include_in_summary}
+                        onChange={v => toggleRoutingSummaryMutation.mutate({ routingId: routing.id, include_in_summary: v })}
+                        tooltip={routing.include_in_summary
+                          ? 'This routing is included in the Summarized Bill of Materials. Filament consumption from its steps is counted in the item-level summary.'
+                          : 'This routing is excluded from the Summarized Bill of Materials. Its filament consumption is not counted in the item-level summary.'}
+                      />
+                    )}
+                    <button
+                      onClick={() => { if (confirm(`Delete routing "${routing.name || 'Untitled'}"?`)) deleteRoutingMutation.mutate(routing.id) }}
+                      className="text-red-400 hover:text-red-600"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
                 </div>
                 <div className="px-3 py-2">
                   {renderRoutingSteps(routing)}
@@ -2157,10 +2333,10 @@ function TagManager({ onClose }: { onClose: () => void }) {
             <div key={tag.id} className="flex items-center gap-2">
               {editingId === tag.id ? (
                 <>
-                  <div className="flex gap-1 flex-wrap">
+                  <div className="grid grid-cols-10 gap-1">
                     {TAG_COLORS.map(c => (
                       <button key={c} onClick={() => setEditForm(f => ({ ...f, color_hex: c }))}
-                        className={`w-5 h-5 rounded-full border-2 ${editForm.color_hex === c ? 'border-gray-900 dark:border-white' : 'border-transparent'}`}
+                        className={`w-6 h-6 rounded-full border-2 ${editForm.color_hex === c ? 'border-gray-900 dark:border-white scale-110' : 'border-transparent hover:scale-110'} transition-transform`}
                         style={{ backgroundColor: c }} />
                     ))}
                   </div>
@@ -2186,10 +2362,10 @@ function TagManager({ onClose }: { onClose: () => void }) {
 
         <div className="border-t dark:border-gray-700 pt-3 space-y-2">
           <p className="text-xs font-medium text-gray-500 dark:text-gray-400">New tag</p>
-          <div className="flex gap-1 flex-wrap">
+          <div className="grid grid-cols-10 gap-1">
             {TAG_COLORS.map(c => (
               <button key={c} onClick={() => setForm(f => ({ ...f, color_hex: c }))}
-                className={`w-5 h-5 rounded-full border-2 ${form.color_hex === c ? 'border-gray-900 dark:border-white' : 'border-transparent'}`}
+                className={`w-6 h-6 rounded-full border-2 ${form.color_hex === c ? 'border-gray-900 dark:border-white scale-110' : 'border-transparent hover:scale-110'} transition-transform`}
                 style={{ backgroundColor: c }} />
             ))}
           </div>
@@ -2350,7 +2526,20 @@ export default function Items() {
             <div key={item.id} id={`item-${item.id}`} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
               <div
                 className="flex items-center justify-between px-4 py-3 cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-700/30"
-                onClick={() => setExpanded(isOpen ? null : item.id)}
+                onClick={() => {
+                  const next = isOpen ? null : item.id
+                  setExpanded(next)
+                  if (next !== null) {
+                    setTimeout(() => {
+                      const el = document.getElementById(`item-${next}`)
+                      const main = el?.closest('main') as HTMLElement | null
+                      if (el && main) {
+                        const top = main.scrollTop + el.getBoundingClientRect().top - main.getBoundingClientRect().top - 24
+                        smoothScrollTo(main, top)
+                      }
+                    }, 50)
+                  }
+                }}
               >
                 <div className="flex items-center gap-2">
                   {isOpen ? <ChevronDown size={15} className="text-gray-400" /> : <ChevronRight size={15} className="text-gray-400" />}
@@ -2364,8 +2553,22 @@ export default function Items() {
                     <div className="w-8 h-8 rounded bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 shrink-0" />
                   )}
                   <span className="font-medium">{item.name}</span>
-                  {item.description && <span className="text-sm text-gray-400 hidden sm:inline">— {item.description}</span>}
-                  {item.tags.map(tag => <TagPill key={tag.id} tag={tag} />)}
+                  {item.tags.map(tag => (
+                    <TagPill key={tag.id} tag={tag} onRemove={() => removeTagFromItem(tag.id, item.id).then(() => qc.invalidateQueries({ queryKey: ['items'] }))} />
+                  ))}
+                  {expanded === item.id && allTags.filter(t => !item.tags.some(it => it.id === t.id)).length > 0 && (
+                    <select
+                      className="text-xs border rounded-full px-2 py-0.5 text-gray-500 dark:text-gray-400 dark:bg-gray-800 dark:border-gray-600 cursor-pointer"
+                      value=""
+                      onClick={e => e.stopPropagation()}
+                      onChange={e => { if (e.target.value) addTagToItem(Number(e.target.value), item.id).then(() => qc.invalidateQueries({ queryKey: ['items'] })) }}
+                    >
+                      <option value="">+ Add tag</option>
+                      {allTags.filter(t => !item.tags.some(it => it.id === t.id)).map(t => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   {item.stl_source_url && (

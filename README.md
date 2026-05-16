@@ -4,6 +4,8 @@
 
 A self-hosted web app for managing 3D print items, filament inventory, orders, and print queues. Built for multi-printer workshops that want a single place to track what gets printed, with what filament, and for whom.
 
+> **v0.3.0 note:** 3DMRP started as a production planning tool — a place to manage items, orders, and filament. It has quietly grown into something more: a **fleet command and control center** for Klipper/Moonraker printer farms. You can now monitor every printer's live status, load and unload filament lanes remotely, mirror and interact with the printer touchscreen, and see aggregated fleet statistics across your entire operation — all from a single browser tab. The MRP roots are still here; the scope is now bigger.
+
 ---
 
 ## Features
@@ -15,10 +17,12 @@ Live overview of your shop at a glance.
 - Pending, printing, overdue, and stock alert counts
 - Quick-nav cards with live counts for Items, Orders, Customers, Printers, and Filaments
 - Live printer status cards with progress and temperatures — click any card to jump to that printer
+- **Fleet Stats** — aggregated across all printers: total jobs, total print time, total filament used, longest print, and job outcome breakdown (completed / cancelled / errors)
 - Active orders sorted by urgency with due-date badges
 - Filament stock alerts with one-click purchase links
 
 ![Dashboard](docs/screenshots/dashboard.png)
+<!-- SCREENSHOT PLACEHOLDER: Full dashboard showing the Fleet Stats row beneath the printer cards. Make sure at least one printer is printing so the live status card shows a progress bar. -->
 
 ---
 
@@ -80,24 +84,64 @@ Manage your filament library and track stock.
 
 ### Printers
 
-Connect to and monitor your Klipper/Moonraker printers.
+Connect to, monitor, and control your Klipper/Moonraker printers.
 
 - Add printers by URL; inline-edit name and URL at any time
 - **List view / Details view toggle** — switch between a compact status list and full detail cards, with the preference remembered across sessions
 - Live status: print state, progress bar, temperatures, and ETA
+- **Completed job filename** — when a print finishes, the filename is shown next to the "Complete" badge in both the list and detail views
 - **Spoolman status badge** — each printer card shows whether Spoolman is active in Moonraker (green check) or not (red cross), fetched live from the printer
-- Webcam feed via snapshot polling (Moonraker camera API)
+- Lifetime stats per printer: total jobs, print time, filament used, longest print, job outcomes, and per-extruder tool-change and error counts
 - Browse print job history and import completed jobs directly as item records
 - Thumbnail preview shown during import
-- **Filament slot tracking** — automatically shows the correct number of slots based on the printer's assigned type, with no manual setup required:
-  - **Spoolman-active printers:** slots display the current live Spoolman assignments (color swatch, vendor, filament name, material, and remaining weight) — read-only, always up to date
-  - **Non-Spoolman printers:** slots show what was last scanned and assigned via the Mobile Filament Loader, displayed as editable dropdowns with color swatches
-  - Extra slots beyond the printer type's default can be added and deleted individually
-- RFID auto-sync — reads `filament_detect` from Moonraker and matches slots to your filament library by material and color
 - Assign a **Printer Type** to each printer with optional slot count override
-- **Print QR Label** — each printer card has a QR button that opens a sticker preview modal. Choose your label size (saved across sessions), then click **Print Sticker** to open a centered preview popup and send to your label printer. A **Copy QR code image to clipboard** link provides a fallback for pasting into Word or another app. Supports common label sizes including 40×25mm, Brother 62mm, and Dymo 57mm.
+- **Print QR Label** — each printer card has a QR button that opens a sticker preview modal. Choose your label size (saved across sessions), then click **Print Sticker** to open a centered preview popup and send to your label printer. Supports common label sizes including 40×25mm, Brother 62mm, and Dymo 57mm.
 
 ![Printers](docs/screenshots/printers.png)
+<!-- SCREENSHOT PLACEHOLDER: Printer list view showing multiple printers. Ideally one is printing (green pulse dot + filename) and one is complete (filename shown). -->
+
+#### AFC Lanes (Multi-Material)
+
+For printers running an Automated Filament Changer (AFC), 3DMRP shows a live lane panel with full remote control.
+
+- One card per lane showing: filament color swatch, tool mapping (T0–T3), material, spool name and number, remaining weight and percentage, and a color-matched progress bar
+- **Load / Unload controls** — small pill buttons on each lane card:
+  - Load button triggers the lane's gcode mapping command (e.g. `T0`) and remains disabled until the printer confirms the filament is in the toolhead
+  - Unload button sends `TOOL_UNLOAD` and waits for the printer to confirm the lane is clear
+  - Both buttons are disabled while a print is in progress, and re-enable automatically when the print ends
+  - A 60-second safety timeout releases the lock if the printer never responds
+- AFC lane color pills also appear in the printer card header and in the compact list view, giving an at-a-glance view of all loaded filaments
+
+![AFC Lanes](docs/screenshots/printer-afc.png)
+<!-- SCREENSHOT PLACEHOLDER: Expanded printer detail showing the AFC Lanes section. Ideally show 4 lanes with different colors, at least one marked "Loaded" and one showing the Load button available. The colored progress bars should be visible. -->
+
+#### Camera & Touchscreen
+
+Each expanded printer card shows a live media section below the AFC lanes.
+
+- **Camera feeds** — snapshot-polled webcam streams from Moonraker's camera API, displayed in the left column. Multiple cameras tile in a 2-column sub-grid.
+- **Interactive touchscreen mirror** — for printers running the [paxx12](https://github.com/paxx13/snapmaker-moonraker) extended firmware (Snapmaker U1), the right column shows a live mirror of the printer's touchscreen:
+  - Refreshed at 300ms intervals via the printer's framebuffer HTTP endpoint
+  - **Click to tap** — a single click sends a `tap` action at the correct screen coordinates
+  - **Click and drag to swipe** — holding and dragging sends `down` / `move` / `up` events, enabling scroll and drag gestures on the printer's UI
+  - Coordinates are automatically mapped from displayed image pixels to native framebuffer resolution
+  - The panel is hidden automatically for printers that don't expose the framebuffer endpoint
+
+![Camera and Touchscreen](docs/screenshots/printer-media.png)
+<!-- SCREENSHOT PLACEHOLDER: The two-column camera + touchscreen layout on a Snapmaker U1 printer card. Left column: camera feed showing the print bed. Right column: touchscreen mirror showing the printer's UI with colored filament slots visible. Both columns should be clearly visible side by side. -->
+
+#### Filament Slots
+
+The Filament Slots section below the media area shows what's loaded in each slot, using the most authoritative source available:
+
+- **AFC active (highest priority)** — slots are driven entirely by live AFC lane data. The section is read-only and updates automatically as the AFC state changes. Each slot row shows:
+  - Slot number, filament color dot, Spoolman spool ID (`#5`), material pill, filament name, a color-matched progress bar (fixed width so all bars align perfectly), and remaining weight with percentage
+  - A **Spoolman ✓** indicator appears in the section header when Spoolman data is enriching the AFC assignments
+- **Spoolman active, no AFC** — slots show the current live Spoolman assignments from Moonraker. Read-only.
+- **Neither** — editable dropdowns from 3DMRP's own database. A "Sync from printer" button reads the printer's `filament_detect` data and offers to update slots.
+
+![Filament Slots](docs/screenshots/printer-slots.png)
+<!-- SCREENSHOT PLACEHOLDER: The Filament Slots section on a U1 printer with AFC active. Show all 4 slots fully populated — each with a colored dot, spool ID, material pill, filament name, colored progress bar, and weight/percentage on the right. The "Spoolman ✓" badge should be visible in the section header. Dark mode preferred. -->
 
 ---
 
@@ -211,7 +255,7 @@ A structured folder tree that stores G-Code files for each item, organized by sl
 
 ### Navigation
 
-The sidebar uses a collapsible tree. **Settings** and **Reports** expand in place to show their sub-pages, and auto-expand when you navigate directly to a sub-page.
+The sidebar uses a collapsible tree. **Settings** and **Reports** expand in place to show their sub-pages, and auto-expand when you navigate directly to a sub-page. The current app version is shown at the bottom of the sidebar.
 
 ---
 
@@ -334,3 +378,42 @@ Set the Spoolman URL in **Settings → General** (e.g. `http://192.168.1.100:791
 - **Reports → Filament Inventory** gives a real-time view of all active spools
 - The **Mobile Filament Loader** looks up scanned spool QR codes against Spoolman and writes slot assignments back to Moonraker
 - The **Printers** page shows live Spoolman slot assignments per printer when Spoolman is active
+- AFC-equipped printers automatically enrich their lane data with Spoolman spool names, weights, and IDs
+
+---
+
+## What's new in v0.3.0
+
+### Fleet command & control
+
+The biggest theme of this release is printer-side control. You can now do things from 3DMRP that previously required walking to the printer or opening a separate Moonraker/Fluidd tab.
+
+**AFC lane remote control**
+- Load and unload filament lanes directly from the printer detail card
+- Load/Unload buttons stay disabled during a print and remain locked until the printer confirms the action completed — no guessing whether the command went through
+- 60-second safety timeout prevents buttons from staying locked forever if the printer goes offline mid-operation
+
+**Interactive touchscreen mirror (Snapmaker U1 / paxx12)**
+- For printers running paxx12 extended firmware, the printer card now shows a live mirror of the printer's touchscreen
+- Click to tap, click-and-drag to swipe — full touch interaction proxied through the backend
+- Displayed side-by-side with the camera feed in a two-column layout
+
+**AFC-driven filament slots**
+- When a printer has AFC data, the Filament Slots section is now driven entirely by that live data — no manual slot assignment needed
+- Each row shows the spool ID, material pill, filament name, color-matched progress bar, and weight/percentage, all horizontally aligned across slots
+- Automatically falls back to Spoolman data, then local database, for printers without AFC
+
+### Dashboard fleet stats
+
+A new Fleet Stats row on the dashboard aggregates data across all printers: total jobs ever run, cumulative print time, total filament consumed (shown in km when over 1000m), longest single print, and a breakdown of completed / cancelled / error jobs.
+
+### Printer status improvements
+
+- The filename of the last completed job is now shown next to the "Complete" badge in both the list and detail views
+- AFC lane color pills appear in the printer detail header (previously list-only)
+- Printer lifetime stats cards are more compact, leaving more room for the media and lane sections
+- Camera feeds no longer show black pillarbox bars — they fill their column edge-to-edge
+
+### Sidebar version display
+
+The current app version is shown at the bottom of the sidebar, automatically sourced from the latest git tag at build time.

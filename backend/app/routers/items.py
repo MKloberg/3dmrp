@@ -316,7 +316,7 @@ def _get_step_or_404(routing_id: int, step_id: int, db: Session) -> RoutingStep:
 def create_routing(item_id: int, data: RoutingCreate, db: Session = Depends(get_db)):
     _get_item_or_404(item_id, db)
     count = db.query(Routing).filter(Routing.item_id == item_id).count()
-    routing = Routing(item_id=item_id, name=data.name, is_default=data.is_default, sort_order=count)
+    routing = Routing(item_id=item_id, name=data.name, is_default=data.is_default, include_in_summary=data.include_in_summary, sort_order=count)
     db.add(routing)
     db.commit()
     db.refresh(routing)

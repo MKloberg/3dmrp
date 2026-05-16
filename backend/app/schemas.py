@@ -117,6 +117,7 @@ class RoutingStepCreate(BaseModel):
     quantity_on_plate: int = 1
     parts_per_item: int = 1
     estimated_print_time: Optional[int] = None
+    include_in_planning: bool = True
 
 
 class RoutingStepUpdate(BaseModel):
@@ -125,6 +126,7 @@ class RoutingStepUpdate(BaseModel):
     quantity_on_plate: Optional[int] = None
     parts_per_item: Optional[int] = None
     estimated_print_time: Optional[int] = None
+    include_in_planning: Optional[bool] = None
 
 
 class RoutingStepReorderItem(BaseModel):
@@ -141,6 +143,7 @@ class RoutingStepOut(BaseModel):
     quantity_on_plate: int
     parts_per_item: int = 1
     estimated_print_time: Optional[int] = None
+    include_in_planning: bool = True
     filaments: List[RoutingStepFilamentOut] = []
 
     model_config = {"from_attributes": True}
@@ -149,11 +152,13 @@ class RoutingStepOut(BaseModel):
 class RoutingCreate(BaseModel):
     name: str = ""
     is_default: bool = False
+    include_in_summary: bool = True
 
 
 class RoutingUpdate(BaseModel):
     name: Optional[str] = None
     is_default: Optional[bool] = None
+    include_in_summary: Optional[bool] = None
 
 
 class RoutingOut(BaseModel):
@@ -161,6 +166,7 @@ class RoutingOut(BaseModel):
     item_id: int
     name: str
     is_default: bool
+    include_in_summary: bool = True
     sort_order: int
     steps: List[RoutingStepOut] = []
 

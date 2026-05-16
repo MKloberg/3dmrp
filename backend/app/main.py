@@ -142,6 +142,12 @@ with engine.connect() as conn:
         conn.execute(text("ALTER TABLE routing_steps ADD COLUMN parts_per_item INTEGER NOT NULL DEFAULT 1"))
     if "estimated_print_time" not in existing_steps:
         conn.execute(text("ALTER TABLE routing_steps ADD COLUMN estimated_print_time INTEGER"))
+    if "include_in_planning" not in existing_steps:
+        conn.execute(text("ALTER TABLE routing_steps ADD COLUMN include_in_planning BOOLEAN NOT NULL DEFAULT 1"))
+
+    existing_routings = {row[1] for row in conn.execute(text("PRAGMA table_info(routings)"))}
+    if "include_in_summary" not in existing_routings:
+        conn.execute(text("ALTER TABLE routings ADD COLUMN include_in_summary BOOLEAN NOT NULL DEFAULT 1"))
 
     existing_items_cols2 = {row[1] for row in conn.execute(text("PRAGMA table_info(items)"))}
     if "use_advanced_routing" not in existing_items_cols2:

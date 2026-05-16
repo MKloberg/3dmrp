@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
+declare const __APP_VERSION__: string
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -230,6 +231,9 @@ export default function Layout() {
         </nav>
         <div className="flex-1 flex items-center justify-center px-3 min-h-[140px]">
           <MobileQrWidget />
+        </div>
+        <div className="shrink-0 px-4 py-2 border-t border-gray-700/50">
+          <p className="text-xs text-gray-600 text-center">v{__APP_VERSION__}</p>
         </div>
       </aside>
       <main className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900">

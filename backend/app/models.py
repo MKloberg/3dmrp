@@ -252,6 +252,7 @@ class Routing(Base):
     item_id = Column(Integer, ForeignKey("items.id", ondelete="CASCADE"), nullable=False)
     name = Column(String, nullable=False, default="")
     is_default = Column(Boolean, nullable=False, default=False)
+    include_in_summary = Column(Boolean, nullable=False, default=True)
     sort_order = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -270,6 +271,7 @@ class RoutingStep(Base):
     quantity_on_plate = Column(Integer, nullable=False, default=1)
     parts_per_item = Column(Integer, nullable=False, default=1)
     estimated_print_time = Column(Integer, nullable=True)  # seconds
+    include_in_planning = Column(Boolean, nullable=False, default=True)
 
     routing = relationship("Routing", back_populates="steps")
     printer_type = relationship("PrinterType")

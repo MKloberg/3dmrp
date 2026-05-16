@@ -77,6 +77,7 @@ export interface RoutingStep {
   quantity_on_plate: number
   parts_per_item: number
   estimated_print_time: number | null
+  include_in_planning: boolean
   filaments: RoutingStepFilament[]
 }
 
@@ -85,6 +86,7 @@ export interface Routing {
   item_id: number
   name: string
   is_default: boolean
+  include_in_summary: boolean
   sort_order: number
   steps: RoutingStep[]
 }
@@ -220,14 +222,14 @@ export const updateItemRouting = (itemId: number, data: { use_advanced_routing: 
   req<Item>(`/items/${itemId}`, { method: 'PUT', body: JSON.stringify(data) })
 export const createRouting = (itemId: number, data: { name?: string; is_default?: boolean }) =>
   req<Routing>(`/items/${itemId}/routings`, { method: 'POST', body: JSON.stringify(data) })
-export const updateRouting = (itemId: number, routingId: number, data: { name?: string; is_default?: boolean }) =>
+export const updateRouting = (itemId: number, routingId: number, data: { name?: string; is_default?: boolean; include_in_summary?: boolean }) =>
   req<Routing>(`/items/${itemId}/routings/${routingId}`, { method: 'PATCH', body: JSON.stringify(data) })
 export const deleteRouting = (itemId: number, routingId: number) =>
   req<void>(`/items/${itemId}/routings/${routingId}`, { method: 'DELETE' })
 
 export const createRoutingStep = (itemId: number, routingId: number, data: { description?: string; printer_type_id?: number | null; quantity_on_plate?: number; parts_per_item?: number; estimated_print_time?: number | null }) =>
   req<RoutingStep>(`/items/${itemId}/routings/${routingId}/steps`, { method: 'POST', body: JSON.stringify(data) })
-export const updateRoutingStep = (itemId: number, routingId: number, stepId: number, data: { description?: string; printer_type_id?: number | null; quantity_on_plate?: number; parts_per_item?: number; estimated_print_time?: number | null }) =>
+export const updateRoutingStep = (itemId: number, routingId: number, stepId: number, data: { description?: string; printer_type_id?: number | null; quantity_on_plate?: number; parts_per_item?: number; estimated_print_time?: number | null; include_in_planning?: boolean }) =>
   req<RoutingStep>(`/items/${itemId}/routings/${routingId}/steps/${stepId}`, { method: 'PATCH', body: JSON.stringify(data) })
 export const deleteRoutingStep = (itemId: number, routingId: number, stepId: number) =>
   req<void>(`/items/${itemId}/routings/${routingId}/steps/${stepId}`, { method: 'DELETE' })
@@ -558,6 +560,66 @@ export const getMailsailSpoolman = (id: number) =>
   req<{ configured: boolean | null; server_url: string | null }>(`/printers/${id}/mainsail-spoolman`)
 export const getPrinterHistory = (id: number, limit = 50) =>
   req<PrinterHistoryResponse>(`/printers/${id}/history?limit=${limit}`)
+
+export interface PrinterHistoryTotals {
+  total_jobs: number
+  total_print_time: number
+  total_filament_used: number
+  longest_print: number
+}
+
+export interface PrinterJobCounts {
+  completed: number
+  cancelled: number
+  error: number
+  unexpected: number
+}
+
+export interface PrinterExtruderStat {
+  name: string
+  index: number
+  switch_count: number
+  error_count: number
+  retry_count: number
+}
+
+export interface PrinterStats {
+  history: PrinterHistoryTotals | null
+  job_counts: PrinterJobCounts | null
+  extruders: PrinterExtruderStat[]
+}
+
+export const getPrinterStats = (id: number) =>
+  req<PrinterStats>(`/printers/${id}/stats`)
+
+export interface AfcLane {
+  name: string
+  map: string
+  extruder: string
+  color: string
+  material: string
+  weight: number
+  status: string
+  tool_loaded: boolean
+  loaded_to_hub: boolean
+  spool_id: number
+}
+
+export interface AfcLanesResponse {
+  lanes: AfcLane[]
+}
+
+export const getPrinterAfcLanes = (id: number) =>
+  req<AfcLanesResponse>(`/printers/${id}/afc-lanes`)
+export const sendAfcCommand = (id: number, gcode: string) =>
+  req<{ ok: boolean }>(`/printers/${id}/afc-command`, { method: 'POST', body: JSON.stringify({ gcode }) })
+export const checkScreencastAvailable = (id: number) =>
+  req<{ available: boolean }>(`/printers/${id}/screencast/available`)
+export const sendScreencastTouch = (id: number, a: string, x: number, y: number) =>
+  req<{ ok: boolean }>(`/printers/${id}/screencast/touch`, {
+    method: 'POST',
+    body: JSON.stringify({ a, x, y }),
+  })
 export const uploadPrinterImage = async (id: number, file: File): Promise<void> => {
   const form = new FormData()
   form.append('file', file)

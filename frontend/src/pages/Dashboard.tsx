@@ -1,6 +1,6 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueries } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { getOrders, getForecast, getPrinters, getPrinterStatus, getItems, getCustomers, getFilaments, PrinterStatus, Printer } from '../api/client'
+import { getOrders, getForecast, getPrinters, getPrinterStatus, getPrinterStats, getItems, getCustomers, getFilaments, PrinterStatus, Printer } from '../api/client'
 import StatusBadge from '../components/StatusBadge'
 import { SpoolIcon } from '../components/SpoolIcon'
 import { AlertTriangle, ClipboardList, Wifi, WifiOff, Printer as PrinterIcon, ShoppingCart, Clock, Box, Users, Disc2, LayoutDashboard } from 'lucide-react'
@@ -27,6 +27,17 @@ function dueDateLabel(dateNeeded: string | null): { label: string; cls: string }
   if (diffDays === 0) return { label: 'Due today',               cls: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' }
   if (diffDays <= 3)  return { label: `Due in ${diffDays}d`,     cls: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' }
   return null
+}
+
+function formatDuration(seconds: number): string {
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  return h > 0 ? `${h}h ${m}m` : `${m}m`
+}
+
+function formatFilament(mm: number): string {
+  if (mm >= 1_000_000) return `${(mm / 1_000_000).toFixed(2)} km`
+  return `${(mm / 1000).toFixed(1)} m`
 }
 
 // ---- Printer status card ----
@@ -127,6 +138,34 @@ export default function Dashboard() {
   const { data: orders } = useQuery({ queryKey: ['orders'], queryFn: () => getOrders() })
   const { data: forecast } = useQuery({ queryKey: ['forecast'], queryFn: () => getForecast(4, 4) })
   const { data: printers = [] } = useQuery({ queryKey: ['printers'], queryFn: getPrinters })
+  const printerStatsQueries = useQueries({
+    queries: printers.map(p => ({
+      queryKey: ['printer-stats', p.id],
+      queryFn: () => getPrinterStats(p.id),
+      staleTime: 300_000,
+      retry: false,
+    })),
+  })
+  const fleetStats = printerStatsQueries.reduce(
+    (acc, q) => {
+      const h = q.data?.history
+      const jc = q.data?.job_counts
+      if (h) {
+        acc.total_jobs += h.total_jobs
+        acc.total_print_time += h.total_print_time
+        acc.total_filament_used += h.total_filament_used
+        acc.longest_print = Math.max(acc.longest_print, h.longest_print)
+      }
+      if (jc) {
+        acc.completed += jc.completed
+        acc.cancelled += jc.cancelled
+        acc.errors += jc.error
+      }
+      return acc
+    },
+    { total_jobs: 0, total_print_time: 0, total_filament_used: 0, longest_print: 0, completed: 0, cancelled: 0, errors: 0 },
+  )
+  const fleetHasData = printerStatsQueries.some(q => q.data?.history)
   const { data: items = [] } = useQuery({ queryKey: ['items'], queryFn: getItems })
   const { data: customers = [] } = useQuery({ queryKey: ['customers'], queryFn: getCustomers })
   const { data: filaments = [] } = useQuery({ queryKey: ['filaments'], queryFn: getFilaments })
@@ -203,6 +242,31 @@ export default function Dashboard() {
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {printers.map(p => <PrinterCard key={p.id} printer={p} />)}
+          </div>
+        </div>
+      )}
+
+      {/* Fleet stats */}
+      {fleetHasData && (
+        <div>
+          <h2 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3 flex items-center gap-1.5">
+            <PrinterIcon size={13} /> Fleet Stats
+          </h2>
+          <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
+            {[
+              { label: 'Total Jobs',    value: fleetStats.total_jobs.toLocaleString() },
+              { label: 'Print Time',    value: formatDuration(fleetStats.total_print_time) },
+              { label: 'Filament Used', value: formatFilament(fleetStats.total_filament_used) },
+              { label: 'Longest Print', value: formatDuration(fleetStats.longest_print) },
+              { label: 'Completed',     value: fleetStats.completed.toLocaleString(),  color: 'text-green-600 dark:text-green-400' },
+              { label: 'Cancelled',     value: fleetStats.cancelled.toLocaleString(),  color: 'text-gray-500 dark:text-gray-400' },
+              { label: 'Errors',        value: fleetStats.errors.toLocaleString(),     color: fleetStats.errors > 0 ? 'text-red-500 dark:text-red-400' : undefined },
+            ].map(({ label, value, color }) => (
+              <div key={label} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-3 py-2.5 text-center">
+                <p className={`text-sm font-bold text-gray-800 dark:text-gray-100 ${color ?? ''}`}>{value}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{label}</p>
+              </div>
+            ))}
           </div>
         </div>
       )}

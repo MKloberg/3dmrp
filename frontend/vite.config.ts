@@ -1,7 +1,20 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { execSync } from 'child_process'
+import pkg from './package.json'
+
+function getAppVersion(): string {
+  try {
+    return execSync('git describe --tags --abbrev=0').toString().trim().replace(/^v/, '')
+  } catch {
+    return pkg.version
+  }
+}
 
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(getAppVersion()),
+  },
   plugins: [react()],
   server: {
     proxy: {

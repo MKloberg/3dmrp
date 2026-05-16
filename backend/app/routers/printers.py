@@ -1,6 +1,8 @@
 import os
 import math
 import shutil
+import asyncio
+from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import Response, FileResponse
 from sqlalchemy.orm import Session
@@ -441,8 +443,79 @@ async def get_thumbnail(printer_id: int, path: str, db: Session = Depends(get_db
     return Response(content=resp.content, media_type=content_type)
 
 
+class AfcCommandRequest(BaseModel):
+    gcode: str
+
+
+class ScreencastTouchRequest(BaseModel):
+    a: str
+    x: int
+    y: int
+
+
 class SpoolmanSlotsSetRequest(BaseModel):
     slots: list[dict]
+
+
+@router.get("/{printer_id}/screencast/available")
+async def screencast_available(printer_id: int, db: Session = Depends(get_db)):
+    printer = db.query(Printer).filter(Printer.id == printer_id).first()
+    if not printer:
+        raise HTTPException(status_code=404, detail="Printer not found")
+    url = printer.url.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=1.5) as client:
+            resp = await client.get(f"{url}/screen/snapshot")
+            return {"available": resp.status_code == 200 and "image" in resp.headers.get("content-type", "")}
+    except Exception:
+        return {"available": False}
+
+
+@router.get("/{printer_id}/screencast/snapshot")
+async def screencast_snapshot(printer_id: int, db: Session = Depends(get_db)):
+    printer = db.query(Printer).filter(Printer.id == printer_id).first()
+    if not printer:
+        raise HTTPException(status_code=404, detail="Printer not found")
+    url = printer.url.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(f"{url}/screen/snapshot")
+            resp.raise_for_status()
+    except Exception:
+        raise HTTPException(status_code=502, detail="Screencast unavailable")
+    return Response(content=resp.content, media_type="image/png")
+
+
+@router.post("/{printer_id}/screencast/touch")
+async def screencast_touch(printer_id: int, data: ScreencastTouchRequest, db: Session = Depends(get_db)):
+    printer = db.query(Printer).filter(Printer.id == printer_id).first()
+    if not printer:
+        raise HTTPException(status_code=404, detail="Printer not found")
+    url = printer.url.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            await client.post(
+                f"{url}/screen/touch",
+                params={"a": data.a, "x": data.x, "y": data.y},
+            )
+    except Exception:
+        pass  # fire-and-forget; touch latency matters more than error reporting
+    return {"ok": True}
+
+
+@router.post("/{printer_id}/afc-command")
+async def send_afc_command(printer_id: int, data: AfcCommandRequest, db: Session = Depends(get_db)):
+    printer = db.query(Printer).filter(Printer.id == printer_id).first()
+    if not printer:
+        raise HTTPException(status_code=404, detail="Printer not found")
+    url = printer.url.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(f"{url}/printer/gcode/script", json={"script": data.gcode})
+            resp.raise_for_status()
+    except (httpx.RequestError, httpx.HTTPStatusError) as exc:
+        raise HTTPException(status_code=502, detail=f"Could not send command: {exc}")
+    return {"ok": True}
 
 
 @router.get("/{printer_id}/spoolman-slots")
@@ -472,6 +545,112 @@ async def get_spoolman_slots(printer_id: int, count: int = 1, db: Session = Depe
                 r["spool_id"] = None
 
     return results
+
+
+@router.get("/{printer_id}/afc-lanes")
+async def get_afc_lanes(printer_id: int, db: Session = Depends(get_db)):
+    printer = db.query(Printer).filter(Printer.id == printer_id).first()
+    if not printer:
+        raise HTTPException(status_code=404, detail="Printer not found")
+
+    url = printer.url.rstrip("/")
+    lanes = []
+    try:
+        query = "AFC_lane%20E0&AFC_lane%20E1&AFC_lane%20E2&AFC_lane%20E3"
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{url}/printer/objects/query?{query}")
+            resp.raise_for_status()
+            status = resp.json().get("result", {}).get("status", {})
+            for i in range(4):
+                key = f"AFC_lane E{i}"
+                if key not in status:
+                    continue
+                lane = status[key]
+                material = lane.get("material", "") or ""
+                spool_id = int(lane.get("spool_id", 0))
+                # Skip lanes with no spool data — AFC configured but nothing loaded
+                if not material and spool_id == 0:
+                    continue
+                lanes.append({
+                    "name": lane.get("name", f"E{i}"),
+                    "map": lane.get("map", f"T{i}"),
+                    "extruder": lane.get("extruder", ""),
+                    "color": lane.get("color", "#888888"),
+                    "material": material,
+                    "weight": float(lane.get("weight", 0)),
+                    "status": lane.get("status", "unknown"),
+                    "tool_loaded": bool(lane.get("tool_loaded", False)),
+                    "loaded_to_hub": bool(lane.get("loaded_to_hub", False)),
+                    "spool_id": spool_id,
+                })
+    except Exception:
+        pass
+
+    return {"lanes": lanes}
+
+
+@router.get("/{printer_id}/stats")
+async def get_printer_stats(printer_id: int, db: Session = Depends(get_db)):
+    printer = db.query(Printer).filter(Printer.id == printer_id).first()
+    if not printer:
+        raise HTTPException(status_code=404, detail="Printer not found")
+
+    url = printer.url.rstrip("/")
+    extruder_names = ["extruder", "extruder1", "extruder2", "extruder3"]
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        totals_resp, history_resp, extruder_resp = await asyncio.gather(
+            client.get(f"{url}/server/history/totals"),
+            client.get(f"{url}/server/history/list", params={"limit": 2000}),
+            client.get(f"{url}/printer/objects/query?{'&'.join(extruder_names)}"),
+            return_exceptions=True,
+        )
+
+    # History totals
+    history_totals = None
+    if not isinstance(totals_resp, Exception) and totals_resp.status_code == 200:
+        t = totals_resp.json().get("result", {}).get("job_totals", {})
+        history_totals = {
+            "total_jobs": int(t.get("total_jobs", 0)),
+            "total_print_time": float(t.get("total_print_time", 0.0)),
+            "total_filament_used": float(t.get("total_filament_used", 0.0)),
+            "longest_print": float(t.get("longest_print", 0.0)),
+        }
+
+    # Job outcome counts from history list
+    job_counts = None
+    if not isinstance(history_resp, Exception) and history_resp.status_code == 200:
+        jobs = history_resp.json().get("result", {}).get("jobs", [])
+        counts: dict[str, int] = {"completed": 0, "cancelled": 0, "error": 0, "unexpected": 0}
+        unexpected_statuses = {"klippy_shutdown", "klippy_disconnect", "server_exit"}
+        for j in jobs:
+            s = j.get("status", "")
+            if s == "completed":
+                counts["completed"] += 1
+            elif s == "cancelled":
+                counts["cancelled"] += 1
+            elif s == "error":
+                counts["error"] += 1
+            elif s in unexpected_statuses:
+                counts["unexpected"] += 1
+        job_counts = counts
+
+    # Per-extruder stats
+    extruders = []
+    if not isinstance(extruder_resp, Exception) and extruder_resp.status_code == 200:
+        status = extruder_resp.json().get("result", {}).get("status", {})
+        for i, name in enumerate(extruder_names):
+            if name in status:
+                e = status[name]
+                extruders.append({
+                    "name": name,
+                    "index": i,
+                    "switch_count": e.get("switch_count", 0),
+                    "error_count": e.get("error_count", 0),
+                    "retry_count": e.get("retry_count", 0),
+                })
+
+    return {"history": history_totals, "job_counts": job_counts, "extruders": extruders}
 
 
 @router.post("/{printer_id}/spoolman-slots")
