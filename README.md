@@ -21,7 +21,7 @@ Live overview of your shop at a glance.
 - Active orders sorted by urgency with due-date badges
 - Filament stock alerts with one-click purchase links
 
-![Dashboard](docs/screenshots/dashboard.png)
+![Dashboard](docs/screenshots/dashboard.png?v=2)
 <!-- SCREENSHOT PLACEHOLDER: Full dashboard showing the Fleet Stats row beneath the printer cards. Make sure at least one printer is printing so the live status card shows a progress bar. -->
 
 ---
