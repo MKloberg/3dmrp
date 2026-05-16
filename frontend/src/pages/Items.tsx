@@ -13,10 +13,11 @@ import {
   createRoutingStep, updateRoutingStep, deleteRoutingStep,
   addRoutingStepFilament, updateRoutingStepFilament, deleteRoutingStepFilament,
   getGcodeFiles, getGcodeFileMetadata, sendGcodeToPrinter, checkGcodeItemFolders, renameGcodeItemFolders,
-  getPrinterStatus, getMailsailSpoolman, getSettings,
+  getPrinterStatus, getMailsailSpoolman, getSettings, getPrinterAfcLanes, getSpoolmanStock,
   createPostProcessingCost, updatePostProcessingCost, deletePostProcessingCost,
   setSlicerFile, deleteSlicerFile, openInSlicer,
   Item, FilamentSpec, Tag, PrinterType, Printer, Routing, RoutingStepFilament, SlicerFile,
+  AfcLane, AfcLanesResponse, SpoolmanSpool,
 } from '../api/client'
 import Modal from '../components/Modal'
 import ConfirmModal from '../components/ConfirmModal'
@@ -301,6 +302,33 @@ function FilamentCheckModal({ printer, stepFilaments, filamentWeights, analyzeOn
     queryKey: ['mainsail-spoolman', printer.id],
     queryFn: () => getMailsailSpoolman(printer.id),
   })
+  const { data: afcData } = useQuery({
+    queryKey: ['printer-afc-lanes', printer.id],
+    queryFn: () => getPrinterAfcLanes(printer.id),
+    staleTime: 10_000,
+    retry: false,
+  })
+  const { data: spoolStock } = useQuery({
+    queryKey: ['spoolman-stock'],
+    queryFn: getSpoolmanStock,
+    staleTime: 30_000,
+    retry: false,
+  })
+
+  const afcActive = (afcData?.lanes?.length ?? 0) > 0
+  const afcSlotMap = useMemo(() => {
+    const map = new Map<number, AfcLane>()
+    if (afcData?.lanes) {
+      for (const lane of afcData.lanes) {
+        map.set(parseInt(lane.map.replace('T', ''), 10) + 1, lane)
+      }
+    }
+    return map
+  }, [afcData])
+  const spoolMap = useMemo(() => {
+    const spools = spoolStock?.spools ?? []
+    return new Map<number, SpoolmanSpool>(spools.map(s => [s.id, s]))
+  }, [spoolStock])
 
   const livePrinters = qc.getQueryData<Printer[]>(['printers']) ?? []
   const livePrinter = livePrinters.find(p => p.id === printer.id) ?? printer
@@ -310,6 +338,7 @@ function FilamentCheckModal({ printer, stepFilaments, filamentWeights, analyzeOn
     setRefreshingSlots(true)
     await Promise.all([
       qc.refetchQueries({ queryKey: ['printers'] }),
+      qc.refetchQueries({ queryKey: ['printer-afc-lanes', printer.id] }),
       refetchStatus(),
     ])
     setRefreshingSlots(false)
@@ -318,7 +347,12 @@ function FilamentCheckModal({ printer, stepFilaments, filamentWeights, analyzeOn
   const stateColor = STATE_COLORS[status?.state ?? 'offline'] ?? 'bg-gray-400'
 
   const allMatch = stepFilaments.every((req, idx) => {
-    const slot = livePrinter.slots.find(s => s.slot_number === idx + 1)
+    const slotNumber = idx + 1
+    if (afcActive) {
+      const lane = afcSlotMap.get(slotNumber)
+      return lane != null && lane.material.toLowerCase() === req.material.toLowerCase()
+    }
+    const slot = livePrinter.slots.find(s => s.slot_number === slotNumber)
     return slot?.filament_spec_id === req.id
   })
   const headerBg = allMatch
@@ -404,26 +438,53 @@ function FilamentCheckModal({ printer, stepFilaments, filamentWeights, analyzeOn
           <tbody className="divide-y dark:divide-gray-700">
             {stepFilaments.map((req, idx) => {
               const slotNumber = idx + 1
-              const slot = livePrinter.slots.find(s => s.slot_number === slotNumber)
-              const loaded = slot?.filament_spec
-              const matches = slot?.filament_spec_id === req.id
               const gcodeGrams = filamentWeights[idx]
+              let loadedCell: React.ReactNode
+              let matches: boolean
+
+              if (afcActive) {
+                const lane = afcSlotMap.get(slotNumber)
+                if (lane) {
+                  const spool = lane.spool_id > 0 ? spoolMap.get(lane.spool_id) : undefined
+                  const rawHex = spool?.filament.color_hex ?? lane.color
+                  const colorHex = rawHex ? (rawHex.startsWith('#') ? rawHex : `#${rawHex}`) : '#888888'
+                  const label = spool
+                    ? [spool.filament.vendor?.name, spool.filament.name].filter(Boolean).join(' ') || lane.material
+                    : lane.material
+                  matches = lane.material.toLowerCase() === req.material.toLowerCase()
+                  loadedCell = (
+                    <div className="flex items-center gap-2">
+                      <FilamentDot hex={colorHex} />
+                      <span className="text-gray-700 dark:text-gray-200">{label}</span>
+                      <span className="text-xs text-gray-400 ml-1">(AFC)</span>
+                      <span className="text-green-500 ml-auto">✓</span>
+                    </div>
+                  )
+                } else {
+                  matches = false
+                  loadedCell = <span className="text-red-400 italic">Not in AFC</span>
+                }
+              } else {
+                const slot = livePrinter.slots.find(s => s.slot_number === slotNumber)
+                const loaded = slot?.filament_spec
+                matches = slot?.filament_spec_id === req.id
+                loadedCell = loaded ? (
+                  <div className="flex items-center gap-2">
+                    <FilamentDot hex={loaded.color_hex} />
+                    <span className="text-gray-700 dark:text-gray-200">{loaded.brand ? `${loaded.brand} ` : ''}{loaded.material} {loaded.color_name}</span>
+                    <span className="text-green-500 ml-auto">✓</span>
+                  </div>
+                ) : (
+                  <span className="text-red-400 italic">Unknown</span>
+                )
+              }
+
               return (
                 <tr key={req.id}>
                   <td className="py-2 pr-4 text-xs text-gray-400 tabular-nums">
                     #{slotNumber}
                   </td>
-                  <td className="py-2 pr-4">
-                    {loaded ? (
-                      <div className="flex items-center gap-2">
-                        <FilamentDot hex={loaded.color_hex} />
-                        <span className="text-gray-700 dark:text-gray-200">{loaded.brand ? `${loaded.brand} ` : ''}{loaded.material} {loaded.color_name}</span>
-                        <span className="text-green-500 ml-auto">✓</span>
-                      </div>
-                    ) : (
-                      <span className="text-red-400 italic">Unknown</span>
-                    )}
-                  </td>
+                  <td className="py-2 pr-4">{loadedCell}</td>
                   <td className="py-2 pr-4">
                     <div className="flex items-center gap-2">
                       <FilamentDot hex={req.color_hex} />
@@ -605,6 +666,7 @@ function GcodePanel({ itemId, itemName, slicerName, printerTypeName, printerType
   onUpdateFromGcode: (data: { weights: { filId: number; grams: number }[]; printTime?: number }) => Promise<void>
 }) {
   const storageKey = `gcode-sel:${stepId}`
+  const qc = useQueryClient()
 
   const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ['gcode-files', itemName, slicerName, printerTypeName],
@@ -691,8 +753,22 @@ function GcodePanel({ itemId, itemName, slicerName, printerTypeName, printerType
     }
     if (startPrint && printer) {
       if (stepFilaments.length > 0) {
-        const loadedIds = new Set(printer.slots.map(s => s.filament_spec_id).filter(Boolean) ?? [])
-        const missing = stepFilaments.filter(f => !loadedIds.has(f.filament_spec.id))
+        const afcData = qc.getQueryData<AfcLanesResponse>(['printer-afc-lanes', printerId])
+        const afcActive = (afcData?.lanes?.length ?? 0) > 0
+        let missing: RoutingStepFilament[]
+        if (afcActive) {
+          const afcSlotMap = new Map<number, AfcLane>()
+          for (const lane of afcData!.lanes) {
+            afcSlotMap.set(parseInt(lane.map.replace('T', ''), 10) + 1, lane)
+          }
+          missing = stepFilaments.filter((f, idx) => {
+            const lane = afcSlotMap.get(idx + 1)
+            return !lane || lane.material.toLowerCase() !== f.filament_spec.material.toLowerCase()
+          })
+        } else {
+          const loadedIds = new Set(printer.slots.map(s => s.filament_spec_id).filter(Boolean) ?? [])
+          missing = stepFilaments.filter(f => !loadedIds.has(f.filament_spec.id))
+        }
         if (missing.length > 0) {
           setFilamentWarning({ printer, analyze: false, gcodeMatchesSpec })
           return
