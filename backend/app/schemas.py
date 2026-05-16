@@ -229,6 +229,29 @@ class ItemOut(ItemBase):
     model_config = {"from_attributes": True}
 
 
+class CustomerOrderItemOut(BaseModel):
+    id: int
+    name: str
+    images: List[ModelImageOut] = []
+
+    model_config = {"from_attributes": True}
+
+
+class CustomerOrderOut(BaseModel):
+    id: int
+    item_id: int
+    customer_id: Optional[int] = None
+    quantity: int
+    customer_name: str = ""
+    customer_notes: str = ""
+    date_ordered: datetime
+    date_needed: Optional[datetime] = None
+    status: OrderStatus
+    item: Optional[CustomerOrderItemOut] = None
+
+    model_config = {"from_attributes": True}
+
+
 class CustomerBase(BaseModel):
     given_name: str = ""
     family_name: str = ""
@@ -457,7 +480,7 @@ class ContributingOrder(BaseModel):
 class ForecastItem(BaseModel):
     filament_spec: FilamentSpecOut
     demand_grams_per_week: float
-    forecast_weeks: int
+    forecast_days: int
     total_demand_grams: float
     spoolman_stock_grams: float
     shortfall_grams: float
@@ -466,8 +489,8 @@ class ForecastItem(BaseModel):
 
 
 class ForecastResponse(BaseModel):
-    forecast_weeks: int
-    lookback_weeks: int
+    forecast_days: int
+    lookback_days: int
     items: List[ForecastItem]
     spoolman_url: Optional[str]
     spoolman_connected: bool

@@ -15,7 +15,7 @@ import {
   getGcodeFiles, getGcodeFileMetadata, sendGcodeToPrinter, checkGcodeItemFolders, renameGcodeItemFolders,
   getPrinterStatus, getMailsailSpoolman, getSettings, getPrinterAfcLanes, getSpoolmanStock,
   createPostProcessingCost, updatePostProcessingCost, deletePostProcessingCost,
-  setSlicerFile, deleteSlicerFile, openInSlicer,
+  setSlicerFile, deleteSlicerFile, openInSlicer, pickModelFile,
   Item, FilamentSpec, Tag, PrinterType, Printer, Routing, RoutingStepFilament, SlicerFile,
   AfcLane, AfcLanesResponse, SpoolmanSpool,
 } from '../api/client'
@@ -23,7 +23,8 @@ import Modal from '../components/Modal'
 import ConfirmModal from '../components/ConfirmModal'
 import PrintSpoolWizard from '../components/PrintSpoolWizard'
 import { SpoolIcon } from '../components/SpoolIcon'
-import { Plus, Trash2, ChevronDown, ChevronRight, Pencil, Check, X, Upload, ShoppingCart, GripVertical, Tag as TagIcon, Crop as CropIcon, Download, Route, Send, RefreshCw, Clock, Box, Share2, DollarSign, ClipboardList as BomIcon, FolderOpen } from 'lucide-react'
+import { useCurrency } from '../lib/currency'
+import { Plus, Trash2, ChevronDown, ChevronRight, Pencil, Check, X, Upload, ShoppingCart, GripVertical, Tag as TagIcon, Crop as CropIcon, Download, Route, Send, RefreshCw, Clock, Box, Share2, ClipboardList as BomIcon, FolderOpen } from 'lucide-react'
 
 function smoothScrollTo(container: HTMLElement, target: number, duration = 700) {
   const start = container.scrollTop
@@ -179,6 +180,340 @@ const STATE_COLORS: Record<string, string> = {
   standby:  'bg-gray-400',
 }
 
+function PrintWizard({
+  printer, mode, itemId, routingId, stepId, stepFilaments, filamentWeights, stepPrintTime, gcodePrintTime, onUpdateBom, onPrint, onClose,
+}: {
+  printer: Printer
+  mode: 'analyze' | 'send' | 'send_and_start'
+  itemId: number
+  routingId: number
+  stepId: number
+  stepFilaments: RoutingStepFilament[]
+  filamentWeights: number[]
+  stepPrintTime: number | null
+  gcodePrintTime: number | null
+  onUpdateBom: (data: { weights: { filId: number; grams: number }[]; printTime?: number }) => Promise<void>
+  onPrint: (startPrint: boolean) => void
+  onClose: () => void
+}) {
+  const [step, setStep] = useState(1)
+  const [updating, setUpdating] = useState(false)
+  const qc = useQueryClient()
+
+  useEffect(() => {
+    if (step !== 2) return
+    const id = setInterval(() => {
+      qc.refetchQueries({ queryKey: ['printer-afc-lanes', printer.id] })
+      qc.refetchQueries({ queryKey: ['printers'] })
+    }, 3000)
+    return () => clearInterval(id)
+  }, [step, printer.id, qc])
+
+  const { data: afcData } = useQuery({
+    queryKey: ['printer-afc-lanes', printer.id],
+    queryFn: () => getPrinterAfcLanes(printer.id),
+    retry: false,
+    staleTime: 0,
+  })
+  const { data: spoolStock } = useQuery({
+    queryKey: ['spoolman-stock'],
+    queryFn: getSpoolmanStock,
+    staleTime: 0,
+    retry: false,
+  })
+  const afcActive = (afcData?.lanes?.length ?? 0) > 0
+  const afcSlotMap = useMemo(() => {
+    const map = new Map<number, AfcLane>()
+    for (const lane of afcData?.lanes ?? [])
+      map.set(parseInt(lane.map.replace('T', ''), 10) + 1, lane)
+    return map
+  }, [afcData])
+  const spoolMapById = useMemo(() => {
+    const spools = spoolStock?.spools ?? []
+    return new Map<number, SpoolmanSpool>(spools.map(s => [s.id, s]))
+  }, [spoolStock])
+  const livePrinter = (qc.getQueryData<Printer[]>(['printers']) ?? []).find(p => p.id === printer.id) ?? printer
+
+  function getLoadedForSlot(slotNum: number): { colorHex: string; label: string; material: string; spoolId: number | null } | null {
+    if (afcActive) {
+      const lane = afcSlotMap.get(slotNum)
+      if (!lane) return null
+      const spool = lane.spool_id > 0 ? spoolMapById.get(lane.spool_id) : undefined
+      const rawHex = spool?.filament.color_hex ?? lane.color
+      const colorHex = rawHex ? (rawHex.startsWith('#') ? rawHex : `#${rawHex}`) : '#888888'
+      const label = spool
+        ? [spool.filament.vendor?.name, spool.filament.name].filter(Boolean).join(' ') || lane.material
+        : lane.material
+      return { colorHex, label, material: lane.material, spoolId: lane.spool_id > 0 ? lane.spool_id : null }
+    }
+    const slot = livePrinter.slots.find(s => s.slot_number === slotNum)
+    if (!slot?.filament_spec) return null
+    const spec = slot.filament_spec
+    return {
+      colorHex: spec.color_hex,
+      label: [spec.brand, spec.material, spec.color_name].filter(Boolean).join(' '),
+      material: spec.material,
+      spoolId: null,
+    }
+  }
+
+  // ── Step 1: G-Code vs BOM ────────────────────────────────────────────────
+  const slotCount = Math.max(stepFilaments.length, filamentWeights.length)
+  const step1Rows = Array.from({ length: slotCount }, (_, idx) => {
+    const slotNum = idx + 1
+    const bom = stepFilaments[idx] as RoutingStepFilament | undefined
+    const gcodeGrams = filamentWeights[idx] ?? null
+    const weightMatch = bom != null && gcodeGrams != null && Math.abs(bom.grams - gcodeGrams) <= 0.05
+    return { slotNum, bom, gcodeGrams, weightMatch }
+  })
+  const missingFromBom = step1Rows.filter(r => r.bom == null && r.gcodeGrams != null)
+  const weightDiffs = step1Rows.filter(r => r.bom != null && r.gcodeGrams != null && !r.weightMatch)
+  const timeDiffers = gcodePrintTime != null && (stepPrintTime == null || Math.abs(stepPrintTime - gcodePrintTime) > 60)
+  // All G-Code slots must have BOM entries AND weights must match
+  const step1Match = filamentWeights.length === 0
+    || (missingFromBom.length === 0 && weightDiffs.length === 0 && !timeDiffers)
+  const hasWeightDiff = weightDiffs.length > 0 || timeDiffers
+
+  async function handleUpdateBom() {
+    setUpdating(true)
+    try {
+      await onUpdateBom({
+        weights: weightDiffs.map(r => ({ filId: r.bom!.id, grams: r.gcodeGrams! })),
+        printTime: timeDiffers ? gcodePrintTime! : undefined,
+      })
+    } catch (_) { /* proceed */ }
+    setUpdating(false)
+  }
+
+  // ── Step 2: Loaded vs BOM ────────────────────────────────────────────────
+  const step2Rows = stepFilaments.map((bom, idx) => {
+    const slotNum = idx + 1
+    const loaded = getLoadedForSlot(slotNum)
+    const matches = loaded != null && loaded.material.toLowerCase() === bom.filament_spec.material.toLowerCase()
+    const suggestions = (spoolStock?.spools ?? [])
+      .filter(s => s.filament.material.toLowerCase() === bom.filament_spec.material.toLowerCase())
+      .filter(s => (s.remaining_weight ?? 0) >= bom.grams * 0.9)
+      .sort((a, b) => (a.remaining_weight ?? 0) - (b.remaining_weight ?? 0))
+      .slice(0, 3)
+    return { slotNum, bom, loaded, matches, suggestions }
+  })
+  const step2AllMatch = step2Rows.length > 0 && step2Rows.every(r => r.matches)
+
+  const modeLabel = mode === 'send_and_start' ? 'Send & Start' : mode === 'send' ? 'Send' : 'Analyze'
+
+  return (
+    <Modal title={`${modeLabel} — ${printer.name}`} onClose={onClose} wide>
+      <div className="space-y-4">
+
+        {/* Step indicator */}
+        <div className="flex items-center gap-2">
+          {([1, 2] as const).map((s, i) => (
+            <div key={s} className="flex items-center gap-2 flex-1">
+              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                step > s ? 'bg-green-500 text-white' : step === s ? 'bg-brand-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-500'
+              }`}>
+                {step > s ? <Check size={12} strokeWidth={3} /> : s}
+              </div>
+              <span className={`text-xs font-medium ${step === s ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400'}`}>
+                {s === 1 ? 'G-Code vs. BOM' : 'Filament Check'}
+              </span>
+              {i < 1 && <div className={`flex-1 h-px ${step > s ? 'bg-green-500' : 'bg-gray-200 dark:bg-gray-700'}`} />}
+            </div>
+          ))}
+        </div>
+
+        {/* ── Step 1 ── */}
+        {step === 1 && (
+          <div className="space-y-3">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="border-b dark:border-gray-600">
+                  <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 pr-3 w-10">Slot</th>
+                  <th className="text-right text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 pr-6 w-20 whitespace-nowrap">G-Code (g)</th>
+                  <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2">BOM Spec</th>
+                  <th className="w-6 pb-2" />
+                </tr>
+              </thead>
+              <tbody className="divide-y dark:divide-gray-700">
+                {step1Rows.map(r => (
+                  <tr key={r.slotNum}>
+                    <td className="py-2.5 pr-3 text-xs text-gray-400 tabular-nums align-middle">#{r.slotNum}</td>
+                    <td className="py-2.5 pr-6 text-right align-middle">
+                      {r.gcodeGrams != null
+                        ? <span className="text-xs text-gray-700 dark:text-gray-200 tabular-nums">{r.gcodeGrams.toFixed(1)}</span>
+                        : <span className="text-xs text-gray-400">—</span>}
+                    </td>
+                    <td className="py-2.5 align-middle">
+                      {r.bom ? (
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-1.5">
+                            <FilamentDot hex={r.bom.filament_spec.color_hex} />
+                            <span className={`text-xs ${r.weightMatch ? 'text-gray-700 dark:text-gray-200' : 'text-red-500 font-medium'}`}>
+                              {r.bom.filament_spec.brand ? `${r.bom.filament_spec.brand} ` : ''}{r.bom.filament_spec.material} {r.bom.filament_spec.color_name}
+                            </span>
+                          </div>
+                          <div className={`text-xs tabular-nums pl-4 ${r.weightMatch ? 'text-gray-500' : 'text-red-400'}`}>
+                            {r.bom.grams.toFixed(1)} g
+                            {!r.weightMatch && r.gcodeGrams != null && (
+                              <span className="ml-1.5 text-gray-400">→ <span className="font-semibold text-gray-700 dark:text-gray-300">{r.gcodeGrams.toFixed(1)} g</span></span>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-400 italic">Not in BOM</span>
+                      )}
+                    </td>
+                    <td className="py-2.5 pl-2 align-middle">
+                      {r.bom == null ? null : r.weightMatch
+                        ? <Check size={14} className="text-green-500" strokeWidth={3} />
+                        : <X size={14} className="text-red-400" strokeWidth={3} />}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {timeDiffers && (
+              <div className="flex items-center justify-between text-xs border-t dark:border-gray-700 pt-2.5">
+                <span className="font-semibold text-gray-500 dark:text-gray-400">Estimated Print Time</span>
+                <div className="flex items-center gap-3">
+                  <span className="text-gray-400">{stepPrintTime != null ? formatPrintTime(stepPrintTime) : '—'}</span>
+                  <span className="text-gray-400">→</span>
+                  <span className="font-semibold text-gray-800 dark:text-gray-100">{formatPrintTime(gcodePrintTime!)}</span>
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between pt-2 border-t dark:border-gray-700">
+              <div>
+                {missingFromBom.length > 0 ? (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    {`Slot${missingFromBom.length > 1 ? 's' : ''} ${missingFromBom.map(r => `#${r.slotNum}`).join(', ')} ${missingFromBom.length > 1 ? 'have' : 'has'} no BOM entry — add filaments to this item's BOM to continue.`}
+                  </p>
+                ) : hasWeightDiff ? (
+                  <button onClick={handleUpdateBom} disabled={updating}
+                    className="px-3 py-1.5 text-xs bg-orange-500 hover:bg-orange-600 text-white rounded-lg disabled:opacity-50">
+                    {updating ? 'Updating…' : 'Update BOM to match G-Code'}
+                  </button>
+                ) : step1Match ? (
+                  <div className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400 font-medium">
+                    <Check size={13} strokeWidth={3} /> BOM matches G-Code
+                  </div>
+                ) : null}
+              </div>
+              <button onClick={() => setStep(2)} disabled={!step1Match}
+                className="px-4 py-1.5 text-sm bg-brand-600 hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg">
+                Next →
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 2 ── */}
+        {step === 2 && (
+          <div className="space-y-3">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="border-b dark:border-gray-600">
+                  <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 pr-3 w-10">Slot</th>
+                  <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 pr-4">Loaded</th>
+                  <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 pr-4">BOM Spec</th>
+                  <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2">Suggestions</th>
+                  <th className="w-6 pb-2" />
+                </tr>
+              </thead>
+              <tbody className="divide-y dark:divide-gray-700">
+                {step2Rows.map(r => (
+                  <tr key={r.slotNum}>
+                    <td className="py-2.5 pr-3 text-xs text-gray-400 tabular-nums align-top">#{r.slotNum}</td>
+                    <td className="py-2.5 pr-4 align-top">
+                      {r.loaded ? (
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0 border border-black/10 dark:border-white/10" style={{ backgroundColor: r.loaded.colorHex }} />
+                            <span className="text-xs text-gray-700 dark:text-gray-200">{r.loaded.label}</span>
+                          </div>
+                          {r.loaded.spoolId != null && (
+                            <div className="text-xs font-bold text-brand-600 dark:text-brand-400 pl-4">#{r.loaded.spoolId}</div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-red-400 italic">Empty</span>
+                      )}
+                    </td>
+                    <td className="py-2.5 pr-4 align-top">
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-1.5">
+                          <FilamentDot hex={r.bom.filament_spec.color_hex} />
+                          <span className="text-xs text-gray-700 dark:text-gray-200">
+                            {r.bom.filament_spec.brand ? `${r.bom.filament_spec.brand} ` : ''}{r.bom.filament_spec.material} {r.bom.filament_spec.color_name}
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-500 tabular-nums pl-4">{r.bom.grams.toFixed(1)} g needed</div>
+                      </div>
+                    </td>
+                    <td className="py-2.5 pr-2 align-top">
+                      {r.matches ? (
+                        <span className="text-xs text-green-600 dark:text-green-400 font-medium">Ready</span>
+                      ) : r.suggestions.length > 0 ? (
+                        <div className="space-y-0.5">
+                          {r.suggestions.map(s => (
+                            <div key={s.id} className="text-xs flex items-center gap-1.5">
+                              <span className="font-bold text-brand-600 dark:text-brand-400">#{s.id}</span>
+                              <span className="text-gray-400">{s.remaining_weight?.toFixed(0)}g left</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-400 italic">None found</span>
+                      )}
+                    </td>
+                    <td className="py-2.5 pl-1 align-top">
+                      {r.matches
+                        ? <Check size={14} className="text-green-500 mt-0.5" strokeWidth={3} />
+                        : <X size={14} className="text-red-400 mt-0.5" strokeWidth={3} />}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            {step2AllMatch ? (
+              <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+                <Check size={15} className="text-green-600 dark:text-green-400" strokeWidth={3} />
+                <span className="text-sm font-semibold text-green-700 dark:text-green-300">Ready to print — all filaments match!</span>
+              </div>
+            ) : (
+              <p className="text-xs text-gray-500 dark:text-gray-400 italic">
+                Load the correct filament spools into the printer. This view updates every 3 seconds.
+              </p>
+            )}
+
+            <div className="flex items-center justify-between pt-2 border-t dark:border-gray-700">
+              <button onClick={() => setStep(1)}
+                className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200">
+                ← Back
+              </button>
+              {mode !== 'analyze' ? (
+                <button onClick={() => onPrint(mode === 'send_and_start')} disabled={!step2AllMatch}
+                  className="px-5 py-2 text-sm bg-green-600 hover:bg-green-700 disabled:bg-gray-200 dark:disabled:bg-gray-700 disabled:text-gray-400 dark:disabled:text-gray-500 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors">
+                  {mode === 'send_and_start' ? '▶ Send & Start Print' : '↑ Send G-Code'}
+                </button>
+              ) : (
+                <button onClick={onClose} className="px-4 py-2 text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-lg">
+                  Close
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+      </div>
+    </Modal>
+  )
+}
+
+// ── legacy stubs kept for reference – no longer rendered ─────────────────────
 function GcodeMismatchModal({ stepFilaments, filamentWeights, stepPrintTime, gcodePrintTime, onUpdate, onSkip, onUpdateDone }: {
   stepFilaments: RoutingStepFilament[]
   filamentWeights: number[]
@@ -346,7 +681,7 @@ function FilamentCheckModal({ printer, stepFilaments, filamentWeights, analyzeOn
 
   const stateColor = STATE_COLORS[status?.state ?? 'offline'] ?? 'bg-gray-400'
 
-  const allMatch = stepFilaments.every((req, idx) => {
+  const allMatch = stepFilaments.length > 0 && stepFilaments.every((req, idx) => {
     const slotNumber = idx + 1
     if (afcActive) {
       const lane = afcSlotMap.get(slotNumber)
@@ -355,7 +690,9 @@ function FilamentCheckModal({ printer, stepFilaments, filamentWeights, analyzeOn
     const slot = livePrinter.slots.find(s => s.slot_number === slotNumber)
     return slot?.filament_spec_id === req.id
   })
-  const headerBg = allMatch
+  const headerBg = stepFilaments.length === 0
+    ? 'bg-gray-50 dark:bg-gray-800/40 border border-gray-200 dark:border-gray-700'
+    : allMatch
     ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
     : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800'
 
@@ -436,7 +773,8 @@ function FilamentCheckModal({ printer, stepFilaments, filamentWeights, analyzeOn
             </tr>
           </thead>
           <tbody className="divide-y dark:divide-gray-700">
-            {stepFilaments.map((req, idx) => {
+            {Array.from({ length: Math.max(stepFilaments.length, filamentWeights.length) }, (_, idx) => {
+              const req = stepFilaments[idx] as FilamentSpec | undefined
               const slotNumber = idx + 1
               const gcodeGrams = filamentWeights[idx]
               let loadedCell: React.ReactNode
@@ -451,13 +789,12 @@ function FilamentCheckModal({ printer, stepFilaments, filamentWeights, analyzeOn
                   const label = spool
                     ? [spool.filament.vendor?.name, spool.filament.name].filter(Boolean).join(' ') || lane.material
                     : lane.material
-                  matches = lane.material.toLowerCase() === req.material.toLowerCase()
+                  matches = req != null && lane.material.toLowerCase() === req.material.toLowerCase()
                   loadedCell = (
                     <div className="flex items-center gap-2">
                       <FilamentDot hex={colorHex} />
                       <span className="text-gray-700 dark:text-gray-200">{label}</span>
-                      <span className="text-xs text-gray-400 ml-1">(AFC)</span>
-                      <span className="text-green-500 ml-auto">✓</span>
+                      {matches && <span className="text-green-500 ml-auto">✓</span>}
                     </div>
                   )
                 } else {
@@ -467,12 +804,12 @@ function FilamentCheckModal({ printer, stepFilaments, filamentWeights, analyzeOn
               } else {
                 const slot = livePrinter.slots.find(s => s.slot_number === slotNumber)
                 const loaded = slot?.filament_spec
-                matches = slot?.filament_spec_id === req.id
+                matches = req != null && slot?.filament_spec_id === req.id
                 loadedCell = loaded ? (
                   <div className="flex items-center gap-2">
                     <FilamentDot hex={loaded.color_hex} />
                     <span className="text-gray-700 dark:text-gray-200">{loaded.brand ? `${loaded.brand} ` : ''}{loaded.material} {loaded.color_name}</span>
-                    <span className="text-green-500 ml-auto">✓</span>
+                    {matches && <span className="text-green-500 ml-auto">✓</span>}
                   </div>
                 ) : (
                   <span className="text-red-400 italic">Unknown</span>
@@ -480,18 +817,22 @@ function FilamentCheckModal({ printer, stepFilaments, filamentWeights, analyzeOn
               }
 
               return (
-                <tr key={req.id}>
+                <tr key={slotNumber}>
                   <td className="py-2 pr-4 text-xs text-gray-400 tabular-nums">
                     #{slotNumber}
                   </td>
                   <td className="py-2 pr-4">{loadedCell}</td>
                   <td className="py-2 pr-4">
-                    <div className="flex items-center gap-2">
-                      <FilamentDot hex={req.color_hex} />
-                      <span className={matches ? 'text-gray-700 dark:text-gray-200' : 'text-red-500 font-medium'}>
-                        {req.brand ? `${req.brand} ` : ''}{req.material} {req.color_name}
-                      </span>
-                    </div>
+                    {req ? (
+                      <div className="flex items-center gap-2">
+                        <FilamentDot hex={req.color_hex} />
+                        <span className={matches ? 'text-gray-700 dark:text-gray-200' : 'text-red-500 font-medium'}>
+                          {req.brand ? `${req.brand} ` : ''}{req.material} {req.color_name}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-gray-400 italic">—</span>
+                    )}
                   </td>
                   {filamentWeights.length > 0 && (
                     <td className="py-2 text-right text-xs tabular-nums text-gray-500 dark:text-gray-400 whitespace-nowrap">
@@ -653,8 +994,9 @@ function PrinterStatusRow({ printer, anySending, uploadSending, uploadSent, uplo
   )
 }
 
-function GcodePanel({ itemId, itemName, slicerName, printerTypeName, printerTypeId, stepId, stepPrintTime, printers, stepFilaments, onUpdateFromGcode }: {
+function GcodePanel({ itemId, routingId, itemName, slicerName, printerTypeName, printerTypeId, stepId, stepPrintTime, printers, stepFilaments, onUpdateFromGcode }: {
   itemId: number
+  routingId: number
   itemName: string
   slicerName: string
   printerTypeName: string
@@ -696,10 +1038,37 @@ function GcodePanel({ itemId, itemName, slicerName, printerTypeName, printerType
   const [sendError, setSendError] = useState<{ printerId: number; message: string } | null>(null)
   const [progress, setProgress] = useState(0)
   const sending = sendingPrinterId !== null
-  const [filamentWarning, setFilamentWarning] = useState<{ printer: Printer; analyze: boolean; gcodeMatchesSpec: boolean } | null>(null)
-  const [pendingSend, setPendingSend] = useState<{ printerId: number; startPrint: boolean; analyze: boolean; gcodeMatchesSpec: boolean } | null>(null)
-  const [showWeightMismatch, setShowWeightMismatch] = useState(false)
-  const [printWizard, setPrintWizard] = useState<{ printer: Printer } | null>(null)
+  const [wizardState, setWizardState] = useState<{ printer: Printer; mode: 'analyze' | 'send' | 'send_and_start' } | null>(null)
+  const [showThumbModal, setShowThumbModal] = useState(false)
+  const [zoom, setZoom] = useState(150)
+  const [offsetX, setOffsetX] = useState(0)
+  const [offsetY, setOffsetY] = useState(0)
+  // Drag state kept in a ref to avoid re-renders during pointer move
+  const dragRef = useRef<{ startX: number; startY: number; ox: number; oy: number } | null>(null)
+
+  useEffect(() => {
+    if (!showThumbModal) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowThumbModal(false) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [showThumbModal])
+
+  // Reset position when file changes
+  useEffect(() => { setOffsetX(0); setOffsetY(0) }, [activeFile])
+
+  function onDragPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    e.currentTarget.setPointerCapture(e.pointerId)
+    dragRef.current = { startX: e.clientX, startY: e.clientY, ox: offsetX, oy: offsetY }
+  }
+  function onDragPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!dragRef.current) return
+    setOffsetX(dragRef.current.ox + (e.clientX - dragRef.current.startX))
+    setOffsetY(dragRef.current.oy + (e.clientY - dragRef.current.startY))
+  }
+  function onDragPointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    e.currentTarget.releasePointerCapture(e.pointerId)
+    dragRef.current = null
+  }
 
   useEffect(() => {
     if (!sending) return
@@ -745,68 +1114,13 @@ function GcodePanel({ itemId, itemName, slicerName, printerTypeName, printerType
     }
   }
 
-  function continueAfterWeightCheck(printerId: number, startPrint: boolean, analyze: boolean, gcodeMatchesSpec: boolean) {
+  const handleSend = (printerId: number, startPrint: boolean) => {
     const printer = matchingPrinters.find(p => p.id === printerId)
-    if (analyze) {
-      if (printer) setFilamentWarning({ printer, analyze: true, gcodeMatchesSpec })
-      return
-    }
-    if (startPrint && printer) {
-      if (stepFilaments.length > 0) {
-        const afcData = qc.getQueryData<AfcLanesResponse>(['printer-afc-lanes', printerId])
-        const afcActive = (afcData?.lanes?.length ?? 0) > 0
-        let missing: RoutingStepFilament[]
-        if (afcActive) {
-          const afcSlotMap = new Map<number, AfcLane>()
-          for (const lane of afcData!.lanes) {
-            afcSlotMap.set(parseInt(lane.map.replace('T', ''), 10) + 1, lane)
-          }
-          missing = stepFilaments.filter((f, idx) => {
-            const lane = afcSlotMap.get(idx + 1)
-            return !lane || lane.material.toLowerCase() !== f.filament_spec.material.toLowerCase()
-          })
-        } else {
-          const loadedIds = new Set(printer.slots.map(s => s.filament_spec_id).filter(Boolean) ?? [])
-          missing = stepFilaments.filter(f => !loadedIds.has(f.filament_spec.id))
-        }
-        if (missing.length > 0) {
-          setFilamentWarning({ printer, analyze: false, gcodeMatchesSpec })
-          return
-        }
-      }
-      setPrintWizard({ printer })
-      return
-    }
-    doSend(printerId, startPrint)
+    if (printer) setWizardState({ printer, mode: startPrint ? 'send_and_start' : 'send' })
   }
-
-  function checkAndQueue(printerId: number, startPrint: boolean, analyze: boolean) {
-    const weights = metadata?.filament_weights ?? []
-    const gcodePrintTime = metadata?.estimated_time ?? null
-    const hasWeightDiffs = weights.length > 0 && stepFilaments.some((sf, idx) => {
-      const g = weights[idx]
-      return g != null && Math.abs(sf.grams - g) > 0.05
-    })
-    const hasTimeDiff = gcodePrintTime != null &&
-      (stepPrintTime == null || Math.abs(stepPrintTime - gcodePrintTime) > 60)
-    const gcodeMatchesSpec = !hasWeightDiffs && !hasTimeDiff
-    if (!gcodeMatchesSpec) {
-      setPendingSend({ printerId, startPrint, analyze, gcodeMatchesSpec: false })
-      setShowWeightMismatch(true)
-      return
-    }
-    continueAfterWeightCheck(printerId, startPrint, analyze, true)
-  }
-
-  const handleSend = (printerId: number, startPrint: boolean) => checkAndQueue(printerId, startPrint, false)
-  const handleAnalyze = (printerId: number) => checkAndQueue(printerId, false, true)
-
-  function resolveWeightMismatch() {
-    setShowWeightMismatch(false)
-    if (pendingSend) {
-      continueAfterWeightCheck(pendingSend.printerId, pendingSend.startPrint, pendingSend.analyze, pendingSend.gcodeMatchesSpec)
-      setPendingSend(null)
-    }
+  const handleAnalyze = (printerId: number) => {
+    const printer = matchingPrinters.find(p => p.id === printerId)
+    if (printer) setWizardState({ printer, mode: 'analyze' })
   }
 
   const header = (
@@ -829,30 +1143,59 @@ function GcodePanel({ itemId, itemName, slicerName, printerTypeName, printerType
     </p></div>
   )
 
+  const thumbnailUrl = activeFile
+    ? `/api/gcode/thumbnail?item_name=${encodeURIComponent(itemName)}&slicer_name=${encodeURIComponent(slicerName)}&printer_type_name=${encodeURIComponent(printerTypeName)}&filename=${encodeURIComponent(activeFile)}`
+    : null
+
   return (
     <div className="space-y-1.5">
       {header}
-      <select
-        value={activeFile}
-        onChange={e => selectFile(e.target.value)}
-        className="w-full border rounded px-2 py-1 text-xs font-mono dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
-      >
-        {files.map(f => <option key={f} value={f}>{f}</option>)}
-      </select>
-      {metadata && !metadata.error && (metadata.filament_weight_total != null || metadata.estimated_time != null) && (
-        <div className="text-xs text-gray-400 flex flex-wrap gap-x-3 gap-y-0.5">
-          {metadata.filament_weight_total != null && (
-            <span>
-              {metadata.filament_weights.length > 1
-                ? metadata.filament_weights.map((w, i) => `#${i + 1}: ${w.toFixed(1)}g`).join(' · ') + ` = ${metadata.filament_weight_total.toFixed(1)}g`
-                : `${metadata.filament_weight_total.toFixed(1)}g`}
-            </span>
-          )}
-          {metadata.estimated_time != null && (
-            <span>{formatPrintTime(metadata.estimated_time)}</span>
+      <div className="flex gap-2 items-start">
+        {thumbnailUrl && (
+          <div
+            className="w-20 h-20 rounded border border-gray-200 dark:border-gray-600 shrink-0 overflow-hidden bg-gray-50 dark:bg-gray-700 cursor-pointer hover:opacity-80 transition-opacity flex items-center justify-center"
+            onClick={() => setShowThumbModal(true)}
+          >
+            <img
+              key={thumbnailUrl}
+              src={thumbnailUrl}
+              style={{
+                maxWidth: '100%',
+                maxHeight: '100%',
+                objectFit: 'contain',
+                // Scale offset from modal space (384px) to thumbnail space (80px)
+                transform: `translate(${offsetX * 80 / 384}px, ${offsetY * 80 / 384}px) scale(${zoom / 100})`,
+                transformOrigin: 'center center',
+              }}
+              onError={e => { (e.target as HTMLImageElement).closest('div')!.style.display = 'none' }}
+              alt="G-code preview"
+            />
+          </div>
+        )}
+        <div className="flex-1 min-w-0 space-y-1">
+          <select
+            value={activeFile}
+            onChange={e => selectFile(e.target.value)}
+            className="w-full border rounded px-2 py-1 text-xs font-mono dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
+          >
+            {files.map(f => <option key={f} value={f}>{f}</option>)}
+          </select>
+          {metadata && !metadata.error && (metadata.filament_weight_total != null || metadata.estimated_time != null) && (
+            <div className="text-xs text-gray-400 flex flex-wrap gap-x-3 gap-y-0.5">
+              {metadata.filament_weight_total != null && (
+                <span>
+                  {metadata.filament_weights.length > 1
+                    ? metadata.filament_weights.map((w, i) => `#${i + 1}: ${w.toFixed(1)}g`).join(' · ') + ` = ${metadata.filament_weight_total.toFixed(1)}g`
+                    : `${metadata.filament_weight_total.toFixed(1)}g`}
+                </span>
+              )}
+              {metadata.estimated_time != null && (
+                <span>{formatPrintTime(metadata.estimated_time)}</span>
+              )}
+            </div>
           )}
         </div>
-      )}
+      </div>
       {matchingPrinters.length === 0 ? (
         <p className="text-xs text-gray-400 italic">No printers of this type</p>
       ) : matchingPrinters.map(printer => (
@@ -868,44 +1211,78 @@ function GcodePanel({ itemId, itemName, slicerName, printerTypeName, printerType
           onAnalyze={handleAnalyze}
         />
       ))}
-      {showWeightMismatch && (
-        <GcodeMismatchModal
+      {wizardState && (
+        <PrintWizard
+          printer={wizardState.printer}
+          mode={wizardState.mode}
+          itemId={itemId}
+          routingId={routingId}
+          stepId={stepId}
           stepFilaments={stepFilaments}
           filamentWeights={metadata?.filament_weights ?? []}
           stepPrintTime={stepPrintTime}
           gcodePrintTime={metadata?.estimated_time ?? null}
-          onUpdate={onUpdateFromGcode}
-          onSkip={resolveWeightMismatch}
-          onUpdateDone={() => {
-            setShowWeightMismatch(false)
-            if (pendingSend) {
-              continueAfterWeightCheck(pendingSend.printerId, pendingSend.startPrint, pendingSend.analyze, true)
-              setPendingSend(null)
-            }
-          }}
+          onUpdateBom={onUpdateFromGcode}
+          onPrint={(startPrint) => { const p = wizardState.printer; setWizardState(null); doSend(p.id, startPrint) }}
+          onClose={() => setWizardState(null)}
         />
       )}
-      {filamentWarning && (
-        <FilamentCheckModal
-          printer={filamentWarning.printer}
-          stepFilaments={stepFilaments.map(f => f.filament_spec)}
-          filamentWeights={metadata?.filament_weights ?? []}
-          analyzeOnly={filamentWarning.analyze}
-          gcodeMatchesSpec={filamentWarning.gcodeMatchesSpec}
-          printTime={stepPrintTime}
-          onConfirm={() => { const p = filamentWarning.printer; setFilamentWarning(null); setPrintWizard({ printer: p }) }}
-          onCancel={() => setFilamentWarning(null)}
-        />
-      )}
-      {printWizard && (
-        <PrintSpoolWizard
-          printer={printWizard.printer}
-          itemId={itemId}
-          stepFilaments={stepFilaments.map(f => f.filament_spec)}
-          filamentWeights={metadata?.filament_weights ?? []}
-          onConfirm={() => { const p = printWizard.printer; setPrintWizard(null); doSend(p.id, true) }}
-          onCancel={() => setPrintWizard(null)}
-        />
+      {showThumbModal && thumbnailUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setShowThumbModal(false)}
+        >
+          <div
+            className="bg-gray-900 rounded-xl shadow-2xl flex flex-col gap-3 p-4 w-96"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-gray-400 truncate">{activeFile}</span>
+              <button onClick={() => setShowThumbModal(false)} className="text-gray-400 hover:text-white shrink-0 ml-2">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div
+              className="w-full aspect-square overflow-hidden rounded-lg bg-black flex items-center justify-center cursor-grab active:cursor-grabbing select-none"
+              onPointerDown={onDragPointerDown}
+              onPointerMove={onDragPointerMove}
+              onPointerUp={onDragPointerUp}
+              onPointerCancel={onDragPointerUp}
+            >
+              <img
+                key={thumbnailUrl}
+                src={thumbnailUrl}
+                draggable={false}
+                style={{
+                  maxWidth: '100%',
+                  maxHeight: '100%',
+                  objectFit: 'contain',
+                  transform: `translate(${offsetX}px, ${offsetY}px) scale(${zoom / 100})`,
+                  transformOrigin: 'center center',
+                  pointerEvents: 'none',
+                }}
+                alt="G-code preview"
+              />
+            </div>
+
+            <div className="flex items-center justify-center gap-2">
+              <button
+                onClick={() => setZoom(z => Math.max(10, z - 10))}
+                className="w-7 h-7 flex items-center justify-center rounded-full text-white/80 hover:text-white hover:bg-white/10 text-xl leading-none font-bold"
+              >−</button>
+              <button
+                title="Click to reset to 100%"
+                onClick={() => setZoom(100)}
+                className="w-14 text-center text-sm font-mono text-gray-300 hover:text-white"
+              >{zoom}%</button>
+              <button
+                onClick={() => setZoom(z => Math.min(400, z + 10))}
+                className="w-7 h-7 flex items-center justify-center rounded-full text-white/80 hover:text-white hover:bg-white/10 text-xl leading-none font-bold"
+              >+</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
@@ -921,6 +1298,7 @@ function SlicerFileRow({ itemId, printerType, slicerFile, onChanged }: {
   const [path, setPath] = useState(slicerFile?.file_path ?? '')
   const [opening, setOpening] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [picking, setPicking] = useState(false)
 
   async function handleSave() {
     if (!path.trim()) return
@@ -945,6 +1323,42 @@ function SlicerFileRow({ itemId, printerType, slicerFile, onChanged }: {
     try { await openInSlicer(itemId, printerType.id) } finally { setOpening(false) }
   }
 
+  // fillInput=true: just populate the text field (used when already in edit mode)
+  // fillInput=false: pick and save immediately
+  async function handleBrowse(fillInput = false, currentPath?: string) {
+    setPicking(true)
+    try {
+      const result = await pickModelFile(currentPath)
+      if (!result.path) return
+      if (fillInput) {
+        setPath(result.path)
+      } else {
+        setSaving(true)
+        try {
+          await setSlicerFile(itemId, printerType.id, result.path)
+          setPath(result.path)
+          onChanged()
+          setEditing(false)
+        } finally {
+          setSaving(false)
+        }
+      }
+    } finally {
+      setPicking(false)
+    }
+  }
+
+  const browseBtn = (fillInput: boolean, currentPath?: string) => (
+    <button
+      onClick={() => handleBrowse(fillInput, currentPath)}
+      disabled={picking || saving}
+      className="shrink-0 text-gray-400 hover:text-brand-600 disabled:opacity-40"
+      title="Browse for file"
+    >
+      {picking ? <span className="text-xs leading-none">…</span> : <FolderOpen size={13} />}
+    </button>
+  )
+
   return (
     <>
       <span className="text-xs text-gray-500 dark:text-gray-400">
@@ -961,6 +1375,7 @@ function SlicerFileRow({ itemId, printerType, slicerFile, onChanged }: {
               onChange={e => setPath(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') setEditing(false) }}
             />
+            {browseBtn(true, path || undefined)}
             <button onClick={handleSave} disabled={saving || !path.trim()} className="text-green-600 hover:text-green-700 disabled:opacity-40 shrink-0">
               <Check size={14} />
             </button>
@@ -970,7 +1385,7 @@ function SlicerFileRow({ itemId, printerType, slicerFile, onChanged }: {
           </>
         ) : slicerFile ? (
           <>
-            <span className="flex-1 text-xs font-mono text-gray-600 dark:text-gray-300 truncate" title={slicerFile.file_path}>
+            <span className="flex-1 min-w-0 text-xs font-mono text-gray-600 dark:text-gray-300 truncate" title={slicerFile.file_path}>
               {slicerFile.file_path}
             </span>
             <button
@@ -979,8 +1394,9 @@ function SlicerFileRow({ itemId, printerType, slicerFile, onChanged }: {
               className="shrink-0 flex items-center gap-1 text-xs text-brand-600 hover:text-brand-700 font-medium disabled:opacity-50"
               title={`Open in ${printerType.slicer?.name ?? 'slicer'}`}
             >
-              <FolderOpen size={13} /> {opening ? 'Opening…' : 'Open'}
+              {opening ? 'Opening…' : 'Open'}
             </button>
+            {browseBtn(false, slicerFile.file_path)}
             <button onClick={() => { setPath(slicerFile.file_path); setEditing(true) }} className="shrink-0 text-gray-400 hover:text-gray-600">
               <Pencil size={13} />
             </button>
@@ -989,12 +1405,21 @@ function SlicerFileRow({ itemId, printerType, slicerFile, onChanged }: {
             </button>
           </>
         ) : (
-          <button
-            onClick={() => setEditing(true)}
-            className="text-xs text-gray-400 hover:text-brand-600 flex items-center gap-1"
-          >
-            <Plus size={12} /> Set model file
-          </button>
+          <>
+            <button
+              onClick={() => handleBrowse(false)}
+              disabled={picking}
+              className="flex items-center gap-1 text-xs text-brand-600 hover:text-brand-700 font-medium disabled:opacity-40"
+            >
+              <FolderOpen size={12} />{picking ? 'Opening…' : 'Browse…'}
+            </button>
+            <button
+              onClick={() => setEditing(true)}
+              className="text-xs text-gray-400 hover:text-brand-600 flex items-center gap-1"
+            >
+              <Plus size={12} /> Type path
+            </button>
+          </>
         )}
       </div>
     </>
@@ -1174,6 +1599,7 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
   const globalHourlyRate = parseFloat(settings?.machine_hourly_rate ?? '2.50') || 2.50
   const electricityRate = parseFloat(settings?.electricity_cost_kwh ?? '0.1765') || 0.1765
   const globalMarkup = parseFloat(settings?.markup_multiplier ?? '1.2') || 1.2
+  const currSym = useCurrency()
 
   // --- Post-processing costs ---
   const [ppNewLabel, setPpNewLabel] = useState('')
@@ -1488,6 +1914,7 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                   <div className="pt-1 border-t border-gray-200 dark:border-gray-600 mt-1">
                     <GcodePanel
                       itemId={item.id}
+                      routingId={routing.id}
                       itemName={item.name}
                       slicerName={printerType.slicer.name}
                       printerTypeName={printerType.name}
@@ -1924,7 +2351,7 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
           onClick={() => setShowCostModal(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-gradient-to-r from-brand-500 to-brand-700 text-white hover:opacity-90 transition-opacity shadow-sm"
         >
-          <DollarSign size={12} /> Cost Accounting
+          <span className="text-xs font-bold leading-none">{currSym}</span> Cost Accounting
         </button>
         <button
           onClick={() => setShowBomModal(true)}
@@ -1940,7 +2367,7 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
           <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide flex items-center gap-1.5 mb-2">
             <FolderOpen size={11} /> Model Files
           </p>
-          <div className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1.5 items-center">
+          <div className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1.5 items-center">
             {printerTypes.filter(pt => pt.slicer).map(pt => {
               const sf: SlicerFile | undefined = item.slicer_files.find(f => f.printer_type_id === pt.id)
               return (
@@ -2100,7 +2527,7 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                     <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">No production steps defined. Showing filament costs only.</p>
                     <div className="flex justify-between text-sm border-t dark:border-gray-700 pt-3">
                       <span className="text-gray-600 dark:text-gray-400">Filament cost</span>
-                      <span className="font-semibold text-brand-600">{filamentTotal > 0 ? `$${filamentTotal.toFixed(2)}` : '—'}</span>
+                      <span className="font-semibold text-brand-600">{filamentTotal > 0 ? `${currSym}${filamentTotal.toFixed(2)}` : '—'}</span>
                     </div>
                   </div>
                 )
@@ -2148,13 +2575,13 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                               <tr key={step.id}>
                                 <td className="py-1.5 pr-2">
                                   <span className="font-medium"><span className="text-gray-400 mr-1">{stepIdx + 1}.</span>{step.description || `Step ${step.sort_order + 1}`}</span>
-                                  {printerType && <span className="text-xs text-gray-400 ml-1.5">({printerType.name}{printerType.hourly_rate != null ? ` · $${printerType.hourly_rate}/hr` : ''})</span>}
+                                  {printerType && <span className="text-xs text-gray-400 ml-1.5">({printerType.name}{printerType.hourly_rate != null ? ` · ${currSym}${printerType.hourly_rate}/hr` : ''})</span>}
                                 </td>
                                 <td className="text-right py-1.5 text-gray-500">{platesPerItem}×</td>
-                                <td className="text-right py-1.5">{filamentCost > 0 ? `$${filamentCost.toFixed(2)}` : <span className="text-gray-400">—</span>}</td>
-                                <td className="text-right py-1.5">{machineCost != null ? `$${machineCost.toFixed(2)}` : <span className="text-gray-400">—</span>}</td>
-                                <td className="text-right py-1.5">{energyCost != null ? `$${energyCost.toFixed(2)}` : <span className="text-gray-400">—</span>}</td>
-                                <td className="text-right py-1.5 font-semibold">{stepTotal > 0 ? `$${stepTotal.toFixed(2)}` : <span className="text-gray-400">—</span>}</td>
+                                <td className="text-right py-1.5">{filamentCost > 0 ? `${currSym}${filamentCost.toFixed(2)}` : <span className="text-gray-400">—</span>}</td>
+                                <td className="text-right py-1.5">{machineCost != null ? `${currSym}${machineCost.toFixed(2)}` : <span className="text-gray-400">—</span>}</td>
+                                <td className="text-right py-1.5">{energyCost != null ? `${currSym}${energyCost.toFixed(2)}` : <span className="text-gray-400">—</span>}</td>
+                                <td className="text-right py-1.5 font-semibold">{stepTotal > 0 ? `${currSym}${stepTotal.toFixed(2)}` : <span className="text-gray-400">—</span>}</td>
                               </tr>
                             )
                           })}
@@ -2177,7 +2604,7 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                         ) : (
                           <>
                             <span className="flex-1 text-sm">{pp.label}</span>
-                            <span className="text-sm font-mono">${pp.cost_per_item.toFixed(2)}</span>
+                            <span className="text-sm font-mono">{currSym}{pp.cost_per_item.toFixed(2)}</span>
                             <button onClick={() => { setPpEditId(pp.id); setPpEditLabel(pp.label); setPpEditCost(String(pp.cost_per_item)) }} className="text-gray-300 hover:text-gray-500 opacity-0 group-hover:opacity-100"><Pencil size={12} /></button>
                             <button onClick={() => ppDeleteMutation.mutate(pp.id)} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100"><Trash2 size={12} /></button>
                           </>
@@ -2187,7 +2614,7 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                     {/* Add row */}
                     <div className="flex items-center gap-2 pt-1">
                       <input className="flex-1 border rounded px-2 py-1 text-sm dark:bg-gray-700 dark:border-gray-600" placeholder="Add Post Processing Item" value={ppNewLabel} onChange={e => setPpNewLabel(e.target.value)} onKeyDown={e => e.key === 'Enter' && ppNewLabel.trim() && ppCreateMutation.mutate()} />
-                      <input className="w-24 border rounded px-2 py-1 text-sm text-right font-mono dark:bg-gray-700 dark:border-gray-600" placeholder="$/item" value={ppNewCost} onChange={e => setPpNewCost(e.target.value)} onKeyDown={e => e.key === 'Enter' && ppNewLabel.trim() && ppCreateMutation.mutate()} />
+                      <input className="w-24 border rounded px-2 py-1 text-sm text-right font-mono dark:bg-gray-700 dark:border-gray-600" placeholder={`${currSym}/item`} value={ppNewCost} onChange={e => setPpNewCost(e.target.value)} onKeyDown={e => e.key === 'Enter' && ppNewLabel.trim() && ppCreateMutation.mutate()} />
                       <button onClick={() => ppCreateMutation.mutate()} disabled={!ppNewLabel.trim() || ppCreateMutation.isPending} className="text-green-600 hover:text-green-700 disabled:opacity-40"><Plus size={14} /></button>
                     </div>
                   </div>
@@ -2199,18 +2626,18 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                       <>
                         <div className="border-t dark:border-gray-700 pt-3 flex justify-between items-center">
                           <span className="font-semibold">Total Cost per Item</span>
-                          <span className="font-bold text-lg text-brand-600">${totalCost.toFixed(2)}</span>
+                          <span className="font-bold text-lg text-brand-600">{currSym}{totalCost.toFixed(2)}</span>
                         </div>
                         <div className="flex items-center justify-between gap-3 py-2 border-b dark:border-gray-700">
                           <span className="text-sm text-gray-500 dark:text-gray-400">
                             Markup multiplier <span className="font-mono text-gray-700 dark:text-gray-300">{globalMarkup.toFixed(2)}×</span>
                             <Link to="/settings/general" className="ml-2 text-xs text-brand-500 hover:text-brand-700">edit in settings</Link>
                           </span>
-                          <span className="text-xs text-gray-400">{totalCost > 0 ? `$${totalCost.toFixed(2)} × ${globalMarkup.toFixed(2)}` : '—'}</span>
+                          <span className="text-xs text-gray-400">{totalCost > 0 ? `${currSym}${totalCost.toFixed(2)} × ${globalMarkup.toFixed(2)}` : '—'}</span>
                         </div>
                         <div className="flex items-center justify-between py-2">
                           <span className="font-semibold text-green-700 dark:text-green-400">Suggested MSRP</span>
-                          <span className="font-bold text-2xl text-green-600 dark:text-green-400">${msrp.toFixed(2)}</span>
+                          <span className="font-bold text-2xl text-green-600 dark:text-green-400">{currSym}{msrp.toFixed(2)}</span>
                         </div>
                       </>
                     )
@@ -2227,7 +2654,7 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                       <div>
                         <p className="text-xs font-semibold text-green-700 dark:text-green-400 mb-1">Post Processing</p>
                         <p className="text-xs text-green-800 dark:text-green-300 mb-1.5 leading-relaxed">
-                          These are fixed costs added per finished item to account for manual work done after printing, such as sanding, painting, or assembly. Each entry is a flat $/item amount that is always included regardless of print settings.
+                          These are fixed costs added per finished item to account for manual work done after printing, such as sanding, painting, or assembly. Each entry is a flat {currSym}/item amount that is always included regardless of print settings.
                         </p>
                         <table className="w-full text-xs">
                           <thead>
@@ -2240,19 +2667,19 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                             {item.post_processing_costs.map(pp => (
                               <tr key={pp.id} className="border-b border-green-100 dark:border-green-800/50 last:border-0">
                                 <td className="py-1 text-green-800 dark:text-green-300">{pp.label}</td>
-                                <td className="py-1 text-right font-mono text-green-800 dark:text-green-300">${pp.cost_per_item.toFixed(2)}</td>
+                                <td className="py-1 text-right font-mono text-green-800 dark:text-green-300">{currSym}{pp.cost_per_item.toFixed(2)}</td>
                               </tr>
                             ))}
                             <tr>
                               <td className="pt-1.5 font-semibold text-green-700 dark:text-green-400">Total post processing</td>
-                              <td className="pt-1.5 text-right font-mono font-semibold text-green-700 dark:text-green-400">${item.post_processing_costs.reduce((s, p) => s + p.cost_per_item, 0).toFixed(2)}</td>
+                              <td className="pt-1.5 text-right font-mono font-semibold text-green-700 dark:text-green-400">{currSym}{item.post_processing_costs.reduce((s, p) => s + p.cost_per_item, 0).toFixed(2)}</td>
                             </tr>
                           </tbody>
                         </table>
                       </div>
                     )}
                     <p className="text-xs text-green-600 dark:text-green-500">
-                      Using: ${globalHourlyRate.toFixed(2)}/hr machine rate · ${electricityRate.toFixed(4)}/kWh electricity · 150 W default power
+                      Using: {currSym}{globalHourlyRate.toFixed(2)}/hr machine rate · {currSym}{electricityRate.toFixed(4)}/kWh electricity · 150 W default power
                       {printerTypes.some(pt => pt.hourly_rate != null || pt.power_watts != null) ? ' · some printer types use custom values' : ''}
                     </p>
                   </div>
@@ -2299,7 +2726,7 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                                 </div>
                               </td>
                               <td className="text-right py-1.5">{req.grams}g</td>
-                              <td className="text-right py-1.5">{cost != null ? `$${cost.toFixed(2)}` : <span className="text-gray-400">—</span>}</td>
+                              <td className="text-right py-1.5">{cost != null ? `${currSym}${cost.toFixed(2)}` : <span className="text-gray-400">—</span>}</td>
                             </tr>
                           )
                         })}
@@ -2308,7 +2735,7 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                     {totalCost > 0 && (
                       <div className="border-t dark:border-gray-700 pt-3 flex justify-between mt-2">
                         <span className="font-semibold text-sm">Total filament cost</span>
-                        <span className="font-bold text-brand-600">${totalCost.toFixed(2)}</span>
+                        <span className="font-bold text-brand-600">{currSym}{totalCost.toFixed(2)}</span>
                       </div>
                     )}
                   </div>
@@ -2358,7 +2785,7 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                               </div>
                             </td>
                             <td className="text-right py-1.5">{totalGrams.toFixed(1)}g</td>
-                            <td className="text-right py-1.5">{cost != null ? `$${cost.toFixed(2)}` : <span className="text-gray-400">—</span>}</td>
+                            <td className="text-right py-1.5">{cost != null ? `${currSym}${cost.toFixed(2)}` : <span className="text-gray-400">—</span>}</td>
                           </tr>
                         )
                       })}
@@ -2367,7 +2794,7 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                   {totalCost > 0 && (
                     <div className="border-t dark:border-gray-700 pt-3 flex justify-between mt-2">
                       <span className="font-semibold text-sm">Total filament cost</span>
-                      <span className="font-bold text-brand-600">${totalCost.toFixed(2)}</span>
+                      <span className="font-bold text-brand-600">{currSym}{totalCost.toFixed(2)}</span>
                     </div>
                   )}
                 </div>

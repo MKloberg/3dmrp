@@ -1347,13 +1347,13 @@ function AfcLaneCard({ lane, spool, printerId, isPrinting }: { lane: AfcLane; sp
     }
   }, [lane.tool_loaded, pending])
 
-  // 60s safety timeout so the button never stays locked forever
+  // 120s safety timeout so the button never stays locked forever
   useEffect(() => {
     if (pending === null) return
     const t = setTimeout(() => {
       setPending(null)
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
-    }, 60_000)
+    }, 120_000)
     return () => clearTimeout(t)
   }, [pending])
 
@@ -1400,7 +1400,7 @@ function AfcLaneCard({ lane, spool, printerId, isPrinting }: { lane: AfcLane; sp
               className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full border border-red-300 dark:border-red-700 text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               <LogOut size={9} />
-              <span className="text-xs leading-none">{busy ? '…' : 'Unload'}</span>
+              <span className="text-xs leading-none">{pending === 'unload' || busy ? '…' : 'Unload'}</span>
             </button>
           ) : (
             <button
@@ -1410,7 +1410,7 @@ function AfcLaneCard({ lane, spool, printerId, isPrinting }: { lane: AfcLane; sp
               className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full border border-brand-300 dark:border-brand-700 text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               <LogIn size={9} />
-              <span className="text-xs leading-none">{busy ? '…' : 'Load'}</span>
+              <span className="text-xs leading-none">{pending === 'load' || busy ? '…' : 'Load'}</span>
             </button>
           )}
           {lane.tool_loaded && (

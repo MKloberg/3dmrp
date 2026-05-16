@@ -1,6 +1,8 @@
 import os
 import re
+import base64
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from ..database import get_db
@@ -150,6 +152,92 @@ def gcode_file_metadata(
         "estimated_time": estimated_time,
         "error": None,
     }
+
+
+@router.get("/thumbnail")
+def gcode_thumbnail(
+    item_name: str = Query(...),
+    slicer_name: str = Query(...),
+    printer_type_name: str = Query(...),
+    filename: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    """Extract and return the slicer-embedded preview thumbnail from a G-code file.
+
+    Supports PrusaSlicer / OrcaSlicer / SuperSlicer comment format:
+        ; thumbnail begin WxH SIZE
+        ; <base64_chunk>
+        ; thumbnail end
+    Also handles ; thumbnail_JPG begin ... for JPEG thumbnails.
+    """
+    root = _repo_root(db)
+    if not root:
+        return Response(status_code=404)
+
+    file_path = os.path.join(root, slicer_name, printer_type_name, item_name, filename)
+    if not os.path.isfile(file_path):
+        return Response(status_code=404)
+
+    thumbnails: list[tuple[int, int, bool, str]] = []  # (width, height, is_jpg, b64_data)
+    in_thumb = False
+    is_jpg = False
+    thumb_size: tuple[int, int] = (0, 0)
+    data_parts: list[str] = []
+    bytes_read = 0
+    max_bytes = 2 * 1024 * 1024  # thumbnails are always in the G-code header
+
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                bytes_read += len(line)
+                if bytes_read > max_bytes:
+                    break
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                if not stripped.startswith(";"):
+                    if not in_thumb:
+                        break  # Past header comments — no more thumbnails
+                    continue
+
+                m = re.match(r"^;\s*thumbnail(_JPG)?\s+begin\s+(\d+)x(\d+)", stripped, re.IGNORECASE)
+                if m:
+                    in_thumb = True
+                    is_jpg = bool(m.group(1))
+                    thumb_size = (int(m.group(2)), int(m.group(3)))
+                    data_parts = []
+                    continue
+
+                if in_thumb:
+                    if re.match(r"^;\s*thumbnail(?:_JPG)?\s+end", stripped, re.IGNORECASE):
+                        in_thumb = False
+                        if data_parts:
+                            thumbnails.append((thumb_size[0], thumb_size[1], is_jpg, "".join(data_parts)))
+                        data_parts = []
+                    else:
+                        data_parts.append(stripped[1:].strip())
+    except OSError:
+        pass
+
+    if not thumbnails:
+        return Response(status_code=404)
+
+    # Pick the smallest thumbnail that is at least 100 px wide (avoids tiny icons
+    # while keeping the payload small); fall back to the largest available.
+    thumbnails.sort(key=lambda t: t[0] * t[1])
+    chosen = next((t for t in thumbnails if t[0] >= 100), thumbnails[-1])
+
+    try:
+        img_data = base64.b64decode(chosen[3])
+    except Exception:
+        return Response(status_code=500)
+
+    content_type = "image/jpeg" if chosen[2] else "image/png"
+    return Response(
+        content=img_data,
+        media_type=content_type,
+        headers={"Cache-Control": "max-age=3600"},
+    )
 
 
 @router.get("/files")

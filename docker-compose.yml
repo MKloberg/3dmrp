@@ -1,6 +1,9 @@
 services:
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        CACHEBUST: ${CACHEBUST:-1}
     restart: unless-stopped
     ports:
       - "${PORT:-7891}:80"

@@ -234,14 +234,14 @@ function ReceiptWizard({
 }
 
 export default function Forecast() {
-  const [forecastWeeks, setForecastWeeks] = useState(4)
-  const [lookbackWeeks, setLookbackWeeks] = useState(4)
+  const [forecastDays, setForecastDays] = useState(28)
+  const [lookbackDays, setLookbackDays] = useState(28)
   const [showDetail, setShowDetail] = useState(false)
   const [wizard, setWizard] = useState<WizardState | null>(null)
 
   const { data, isLoading } = useQuery({
-    queryKey: ['forecast', forecastWeeks, lookbackWeeks],
-    queryFn: () => getForecast(forecastWeeks, lookbackWeeks),
+    queryKey: ['forecast', forecastDays, lookbackDays],
+    queryFn: () => getForecast(forecastDays, lookbackDays),
   })
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: getSettings })
   const amazonDomain = settings?.amazon_domain || 'amazon.com'
@@ -269,12 +269,16 @@ export default function Forecast() {
           </div>
           <div className="flex items-center gap-2 text-sm">
             <label className="text-gray-500 dark:text-gray-400">Lookback</label>
-            <select className="border rounded px-2 py-1 text-sm" value={lookbackWeeks} onChange={e => setLookbackWeeks(+e.target.value)}>
-              {[1, 2, 4, 8, 12].map(w => <option key={w} value={w}>{w}w</option>)}
+            <select className="border rounded px-2 py-1 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300" value={lookbackDays} onChange={e => setLookbackDays(+e.target.value)}>
+              {([1, 7, 14, 28, 56, 84] as const).map(d => (
+                <option key={d} value={d}>{d === 1 ? '1d' : `${d / 7}w`}</option>
+              ))}
             </select>
             <label className="text-gray-500 dark:text-gray-400">Forecast</label>
-            <select className="border rounded px-2 py-1 text-sm" value={forecastWeeks} onChange={e => setForecastWeeks(+e.target.value)}>
-              {[1, 2, 4, 8, 12, 26].map(w => <option key={w} value={w}>{w}w</option>)}
+            <select className="border rounded px-2 py-1 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300" value={forecastDays} onChange={e => setForecastDays(+e.target.value)}>
+              {([1, 7, 14, 28, 56, 84, 182] as const).map(d => (
+                <option key={d} value={d}>{d === 1 ? '1d' : `${d / 7}w`}</option>
+              ))}
             </select>
           </div>
         </div>
@@ -285,7 +289,7 @@ export default function Forecast() {
         <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-4">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-amber-800 dark:text-amber-200 flex items-center gap-1.5">
-              <ShoppingCart size={14} /> Purchase List ({forecastWeeks}-week window)
+              <ShoppingCart size={14} /> Purchase List ({forecastDays === 1 ? '1-day' : `${forecastDays / 7}-week`} window)
             </h2>
             <div className="flex items-center gap-3">
               <label className="flex items-center gap-1.5 cursor-pointer select-none text-xs text-amber-700 dark:text-amber-300">
@@ -390,7 +394,7 @@ export default function Forecast() {
               <tr>
                 <th className="px-4 py-2 text-left">Filament</th>
                 <th className="px-4 py-2 text-right">g/week</th>
-                <th className="px-4 py-2 text-right">{forecastWeeks}w demand</th>
+                <th className="px-4 py-2 text-right">{forecastDays === 1 ? '1d' : `${forecastDays / 7}w`} demand</th>
                 <th className="px-4 py-2 text-right">On hand</th>
                 <th className="px-4 py-2 text-right">Shortfall</th>
                 <th className="px-4 py-2 text-center">Status</th>

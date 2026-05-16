@@ -142,7 +142,7 @@ export interface ContributingOrder {
 export interface ForecastItem {
   filament_spec: FilamentSpec
   demand_grams_per_week: number
-  forecast_weeks: number
+  forecast_days: number
   total_demand_grams: number
   spoolman_stock_grams: number
   shortfall_grams: number
@@ -151,8 +151,8 @@ export interface ForecastItem {
 }
 
 export interface ForecastResponse {
-  forecast_weeks: number
-  lookback_weeks: number
+  forecast_days: number
+  lookback_days: number
   items: ForecastItem[]
   spoolman_url: string | null
   spoolman_connected: boolean
@@ -216,6 +216,11 @@ export const deleteSlicerFile = (itemId: number, printerTypeId: number) =>
   req<void>(`/items/${itemId}/slicer-files/${printerTypeId}`, { method: 'DELETE' })
 export const openInSlicer = (itemId: number, printerTypeId: number) =>
   req<void>(`/items/${itemId}/open-slicer/${printerTypeId}`, { method: 'POST' })
+export const pickModelFile = (currentPath?: string) =>
+  req<{ path: string | null }>('/files/pick', {
+    method: 'POST',
+    body: JSON.stringify({ current_path: currentPath ?? null }),
+  })
 
 // --- Routings ---
 export const updateItemRouting = (itemId: number, data: { use_advanced_routing: boolean }) =>
@@ -330,8 +335,8 @@ export const squareSync = () =>
   req<{ synced: number }>('/customers/square/sync', { method: 'POST' })
 
 // --- Forecast ---
-export const getForecast = (forecastWeeks = 4, lookbackWeeks = 4) =>
-  req<ForecastResponse>(`/forecast?forecast_weeks=${forecastWeeks}&lookback_weeks=${lookbackWeeks}`)
+export const getForecast = (forecastDays = 28, lookbackDays = 28) =>
+  req<ForecastResponse>(`/forecast?forecast_days=${forecastDays}&lookback_days=${lookbackDays}`)
 
 // --- Spoolman ---
 export interface SpoolmanVendor {

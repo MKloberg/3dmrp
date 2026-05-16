@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from .database import engine, Base
-from .routers import filaments, items, orders, spoolman, forecast, settings, printers, tags, customers, slicers, printer_types, gcode
+from .routers import filaments, items, orders, spoolman, forecast, settings, printers, tags, customers, slicers, printer_types, gcode, filepicker
 
 Base.metadata.create_all(bind=engine)
 
@@ -215,6 +215,7 @@ app.include_router(customers.router)
 app.include_router(slicers.router)
 app.include_router(printer_types.router)
 app.include_router(gcode.router)
+app.include_router(filepicker.router)
 
 
 @app.get("/api/health")

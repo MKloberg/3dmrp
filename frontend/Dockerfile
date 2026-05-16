@@ -1,9 +1,12 @@
 FROM node:20-alpine AS builder
 
 WORKDIR /app
-COPY package.json .
+COPY package.json package-lock.json* ./
 RUN npm install
 
+# CACHEBUST invalidates this layer (and all after) when changed, forcing a fresh source copy.
+# Pass via: $env:CACHEBUST = (Get-Date -UFormat %s); docker compose build frontend
+ARG CACHEBUST=1
 COPY . .
 RUN npm run build
 

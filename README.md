@@ -6,7 +6,9 @@ A self-hosted web app for managing 3D print items, filament inventory, orders, a
 
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-mkloberg-yellow?logo=buy-me-a-coffee&logoColor=white)](https://buymeacoffee.com/mkloberg)
 
-> **v0.3.0 note:** 3DMRP started as a production planning tool — a place to manage items, orders, and filament. It has quietly grown into something more: a **fleet command and control center** for Klipper/Moonraker printer farms. You can now monitor every printer's live status, load and unload filament lanes remotely, mirror and interact with the printer touchscreen, and see aggregated fleet statistics across your entire operation — all from a single browser tab. The MRP roots are still here; the scope is now bigger.
+> **v0.3.1:** G-Code thumbnail previews with zoom & drag, native Windows file picker for model files, redesigned Analyze wizard step 1, and AFC load/unload reliability improvements.
+>
+> **v0.3.0:** 3DMRP started as a production planning tool — a place to manage items, orders, and filament. It has quietly grown into something more: a **fleet command and control center** for Klipper/Moonraker printer farms. You can now monitor every printer's live status, load and unload filament lanes remotely, mirror and interact with the printer touchscreen, and see aggregated fleet statistics across your entire operation — all from a single browser tab. The MRP roots are still here; the scope is now bigger.
 
 ---
 
@@ -37,7 +39,7 @@ Store and manage your printable models.
 - Click any thumbnail to open a full-size lightbox with prev/next navigation, download, crop, and delete
 - Define filament requirements (material, color, grams) with drag-and-drop slot ordering
 - Tag items with color-coded categories and filter by tag
-- **Model Files** — associate a model file (`.3mf`, `.stl`, or any format your slicer accepts) per printer type, and launch the slicer directly from the browser with the file pre-loaded
+- **Model Files** — associate a model file (`.3mf`, `.stl`, or any format your slicer accepts) per printer type, and launch the slicer directly from the browser with the file pre-loaded. Click the **folder icon** to open a native Windows file browser filtered to `.3mf` / `.stl` — no typing required. The dialog remembers the last-used directory and opens at the existing file's location when editing
 - **STL Source URL** — store a link to the original STL source (Printables, Thingiverse, etc.); clickable directly from the item list
 
 ![Items](docs/screenshots/items.png)
@@ -61,13 +63,13 @@ Send G-Code files to printers directly from within each production step.
 - Files are served from the **G-Code Repository** (see Settings → Slicers) organized by slicer and printer type
 - Dropdown file selector per step — selection persists across sessions
 - G-Code files are parsed for embedded metadata: **per-slot filament weights** and **estimated print time** are read from the file and shown alongside the filename
+- **Slicer thumbnail preview** — the preview image embedded in the G-Code file by OrcaSlicer / PrusaSlicer / SuperSlicer is extracted and shown as a small inline thumbnail. Click it to open a zoom modal:
+  - Zoom in / out in 10% steps (10%–400% range); click the percentage label to reset to 150%
+  - Drag inside the modal to reposition the image — the offset is mirrored back to the inline thumbnail so both stay in sync
 - **Send** uploads the file to the printer via Moonraker; a progress bar tracks the upload
-- **Send & Start** uploads and immediately starts the print — but first shows a **Filament Check** modal:
-  - Printer image, name, and live job status at the top
-  - Slot-by-slot comparison table: what's loaded vs. what the step requires (with manufacturer and color names)
-  - If per-slot weights from the G-Code don't match the item's filament requirements, a **weight mismatch warning** is shown so you can catch configuration errors before committing the print
-  - Header turns green when all slots match, red when there's a mismatch
-  - Refresh button re-reads loaded filament state from the printer in real time
+- **Analyze / Send / Send & Start** each open a two-step wizard:
+  - **Step 1 — G-Code vs. BOM**: compares per-slot G-Code filament weights against the item's BOM spec. Weight mismatches and missing BOM entries are flagged. An "Update BOM to match G-Code" button syncs weights in one click. The printer's currently-loaded state is intentionally not shown here — this step is purely about the file and the spec
+  - **Step 2 — Filament Check**: slot-by-slot comparison of what is physically loaded in the printer vs. what the BOM requires. Refreshes every 3 seconds; turns green when all slots match. Analyze mode stops here; Send and Send & Start proceed to upload the file
 - Live printer status is shown inline for each printer: current state dot, active filename, and print progress bar
 
 ---
@@ -111,7 +113,8 @@ For printers running an Automated Filament Changer (AFC), 3DMRP shows a live lan
   - Load button triggers the lane's gcode mapping command (e.g. `T0`) and remains disabled until the printer confirms the filament is in the toolhead
   - Unload button sends `TOOL_UNLOAD` and waits for the printer to confirm the lane is clear
   - Both buttons are disabled while a print is in progress, and re-enable automatically when the print ends
-  - A 60-second safety timeout releases the lock if the printer never responds
+  - The button shows `…` for the full duration of the operation (typically 60–90 seconds), not just the brief HTTP acknowledgment
+  - A 120-second safety timeout releases the lock if the printer never responds
 - AFC lane color pills also appear in the printer card header and in the compact list view, giving an at-a-glance view of all loaded filaments
 
 ![AFC Lanes](docs/screenshots/printer-afc.png)
@@ -381,6 +384,40 @@ Set the Spoolman URL in **Settings → General** (e.g. `http://192.168.1.100:791
 - The **Mobile Filament Loader** looks up scanned spool QR codes against Spoolman and writes slot assignments back to Moonraker
 - The **Printers** page shows live Spoolman slot assignments per printer when Spoolman is active
 - AFC-equipped printers automatically enrich their lane data with Spoolman spool names, weights, and IDs
+
+---
+
+## What's new in v0.3.1
+
+### G-Code thumbnail preview with zoom & pan
+
+Production step G-Code panels now extract and display the slicer-embedded preview image from each `.gcode` file (OrcaSlicer, PrusaSlicer, and SuperSlicer are all supported). The thumbnail appears inline next to the file selector. Click it to open a zoom modal:
+
+- Zoom in / out in 10% steps; range is 10%–400%. Click the percentage label to reset to 150% (the default when a file is first selected)
+- Drag inside the modal to reposition the image when the subject isn't perfectly centered
+- Both zoom level and pan offset are mirrored back to the small inline thumbnail so the two always stay in sync
+
+### Native Windows file picker for Model Files
+
+Model file rows in the **Items → Model Files** section now have a folder icon that opens a native Windows `askopenfilename` dialog, filtered to `.3mf` and `.stl`. The dialog:
+
+- Remembers the last directory used across sessions
+- Opens at the currently-set file's directory (with the filename pre-selected) when editing an existing path
+- Falls back to the last-used directory when adding a new file
+
+### Analyze wizard — Step 1 redesigned
+
+Step 1 ("G-Code vs. BOM") of the Analyze / Send / Send & Start wizard now compares exactly two datasets: the per-slot weights parsed from the G-Code file, and the item's BOM spec. The printer's currently-loaded filament state is no longer shown in step 1 — that belongs in step 2 (Filament Check), where it has always been. The "Auto-add from loaded filaments" shortcut is replaced with a clear message pointing you to update the item's BOM when G-Code slots are missing.
+
+### AFC load/unload reliability
+
+- Safety timeout extended from 60 s to **120 s** — covers the full typical cycle on machines where a load or unload takes 60–90 seconds
+- Both **Load** and **Unload** buttons now show `…` for the entire operation duration, not just the brief moment while the HTTP command is in flight
+
+### Bug fixes
+
+- Forecast page failed to load after the day-based parameter migration (Python `NameError` on every request); fixed
+- Docker frontend builds now always pick up the latest source files via a `CACHEBUST` build argument — `build-frontend.ps1` handles this automatically so stale JS is never served from the Docker layer cache
 
 ---
 

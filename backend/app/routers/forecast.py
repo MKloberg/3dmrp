@@ -59,11 +59,11 @@ async def _fetch_spoolman_stock(url: str) -> tuple[bool, Dict[int, float]]:
 
 @router.get("", response_model=ForecastResponse)
 async def get_forecast(
-    forecast_weeks: int = Query(4, ge=1, le=52),
-    lookback_weeks: int = Query(4, ge=1, le=52),
+    forecast_days: int = Query(28, ge=1, le=365),
+    lookback_days: int = Query(28, ge=1, le=365),
     db: Session = Depends(get_db),
 ):
-    cutoff = datetime.utcnow() - timedelta(weeks=lookback_weeks)
+    cutoff = datetime.utcnow() - timedelta(days=lookback_days)
 
     # Historical rate from recently completed orders
     completed_orders = (
@@ -116,8 +116,8 @@ async def get_forecast(
             continue
 
         used = grams_used.get(spec.id, 0.0)
-        per_week = used / lookback_weeks
-        rate_demand = per_week * forecast_weeks
+        per_week = used / (lookback_days / 7)
+        rate_demand = per_week * (forecast_days / 7)
         committed = committed_grams.get(spec.id, 0.0)
 
         total_demand = max(rate_demand, committed)
@@ -135,7 +135,7 @@ async def get_forecast(
         items.append(ForecastItem(
             filament_spec=spec,
             demand_grams_per_week=round(per_week, 1),
-            forecast_weeks=forecast_weeks,
+            forecast_days=forecast_days,
             total_demand_grams=round(total_demand, 1),
             spoolman_stock_grams=round(on_hand, 1),
             shortfall_grams=round(shortfall, 1),
@@ -146,8 +146,8 @@ async def get_forecast(
     items.sort(key=lambda x: (-x.shortfall_grams, x.filament_spec.material))
 
     return ForecastResponse(
-        forecast_weeks=forecast_weeks,
-        lookback_weeks=lookback_weeks,
+        forecast_days=forecast_days,
+        lookback_days=lookback_days,
         items=items,
         spoolman_url=spoolman_url or None,
         spoolman_connected=connected,
