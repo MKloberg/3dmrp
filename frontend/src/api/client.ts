@@ -61,6 +61,12 @@ export interface SlicerFile {
   file_path: string
 }
 
+export interface StepSlicerFile {
+  id: number
+  routing_step_id: number
+  file_path: string
+}
+
 export interface RoutingStepFilament {
   id: number
   filament_spec_id: number
@@ -78,7 +84,9 @@ export interface RoutingStep {
   parts_per_item: number
   estimated_print_time: number | null
   include_in_planning: boolean
+  gcode_file: string | null
   filaments: RoutingStepFilament[]
+  slicer_file: StepSlicerFile | null
 }
 
 export interface Routing {
@@ -216,6 +224,13 @@ export const deleteSlicerFile = (itemId: number, printerTypeId: number) =>
   req<void>(`/items/${itemId}/slicer-files/${printerTypeId}`, { method: 'DELETE' })
 export const openInSlicer = (itemId: number, printerTypeId: number) =>
   req<void>(`/items/${itemId}/open-slicer/${printerTypeId}`, { method: 'POST' })
+
+export const setStepSlicerFile = (itemId: number, routingId: number, stepId: number, filePath: string) =>
+  req<StepSlicerFile>(`/items/${itemId}/routings/${routingId}/steps/${stepId}/slicer-file`, { method: 'PUT', body: JSON.stringify({ file_path: filePath }) })
+export const deleteStepSlicerFile = (itemId: number, routingId: number, stepId: number) =>
+  req<void>(`/items/${itemId}/routings/${routingId}/steps/${stepId}/slicer-file`, { method: 'DELETE' })
+export const openStepInSlicer = (itemId: number, routingId: number, stepId: number) =>
+  req<void>(`/items/${itemId}/routings/${routingId}/steps/${stepId}/open-slicer`, { method: 'POST' })
 export const pickModelFile = (currentPath?: string) =>
   req<{ path: string | null }>('/files/pick', {
     method: 'POST',
@@ -234,7 +249,7 @@ export const deleteRouting = (itemId: number, routingId: number) =>
 
 export const createRoutingStep = (itemId: number, routingId: number, data: { description?: string; printer_type_id?: number | null; quantity_on_plate?: number; parts_per_item?: number; estimated_print_time?: number | null }) =>
   req<RoutingStep>(`/items/${itemId}/routings/${routingId}/steps`, { method: 'POST', body: JSON.stringify(data) })
-export const updateRoutingStep = (itemId: number, routingId: number, stepId: number, data: { description?: string; printer_type_id?: number | null; quantity_on_plate?: number; parts_per_item?: number; estimated_print_time?: number | null; include_in_planning?: boolean }) =>
+export const updateRoutingStep = (itemId: number, routingId: number, stepId: number, data: { description?: string; printer_type_id?: number | null; quantity_on_plate?: number; parts_per_item?: number; estimated_print_time?: number | null; include_in_planning?: boolean; gcode_file?: string | null }) =>
   req<RoutingStep>(`/items/${itemId}/routings/${routingId}/steps/${stepId}`, { method: 'PATCH', body: JSON.stringify(data) })
 export const deleteRoutingStep = (itemId: number, routingId: number, stepId: number) =>
   req<void>(`/items/${itemId}/routings/${routingId}/steps/${stepId}`, { method: 'DELETE' })
@@ -454,16 +469,40 @@ export interface PrinterType {
   slot_count: number
   hourly_rate: number | null
   power_watts: number | null
+  has_afc: boolean
+  has_nfc_detect: boolean
+  has_mainsail_spoolman: boolean
   created_at: string
 }
 
+export interface PrinterCapabilityProbeResult {
+  has_afc: boolean
+  has_nfc_detect: boolean
+  has_mainsail_spoolman: boolean
+}
+
+export interface PrinterCapabilityMismatch {
+  capability: string
+  expected: boolean
+  actual: boolean
+  message: string
+}
+
 export const getPrinterTypes = () => req<PrinterType[]>('/printer-types')
-export const createPrinterType = (data: { name: string; slicer_id: number | null; slot_count: number; hourly_rate?: number | null; power_watts?: number | null }) =>
+export const createPrinterType = (data: { name: string; slicer_id: number | null; slot_count: number; hourly_rate?: number | null; power_watts?: number | null; has_afc?: boolean; has_nfc_detect?: boolean; has_mainsail_spoolman?: boolean }) =>
   req<PrinterType>('/printer-types', { method: 'POST', body: JSON.stringify(data) })
-export const updatePrinterType = (id: number, data: { name?: string; slicer_id?: number | null; slot_count?: number; hourly_rate?: number | null; power_watts?: number | null }) =>
+export const updatePrinterType = (id: number, data: { name?: string; slicer_id?: number | null; slot_count?: number; hourly_rate?: number | null; power_watts?: number | null; has_afc?: boolean; has_nfc_detect?: boolean; has_mainsail_spoolman?: boolean }) =>
   req<PrinterType>(`/printer-types/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
 export const deletePrinterType = (id: number) =>
   req<void>(`/printer-types/${id}`, { method: 'DELETE' })
+export const probePrinterType = (typeId: number, printerId?: number, probeUrl?: string) => {
+  const params = new URLSearchParams()
+  if (printerId != null) params.set('printer_id', String(printerId))
+  if (probeUrl) params.set('probe_url', probeUrl)
+  return req<PrinterCapabilityProbeResult>(`/printer-types/${typeId}/probe?${params}`, { method: 'POST' })
+}
+export const getPrinterCapabilitiesCheck = (printerId: number) =>
+  req<PrinterCapabilityMismatch[]>(`/printers/${printerId}/capabilities-check`)
 
 // --- Printers ---
 export interface PrinterSlot {
@@ -498,6 +537,7 @@ export interface PrinterStatus {
   extruder_target: number | null
   bed_temp: number | null
   bed_target: number | null
+  active_extruder: string | null
 }
 
 export interface MoonrakerJob {
@@ -547,6 +587,7 @@ export interface WebcamInfo {
 export interface FilamentDetectSlot {
   slot_index: number
   detected: boolean
+  filament_present: boolean | null
   vendor: string
   material: string
   sub_type: string
@@ -649,8 +690,15 @@ export const sendGcodeToPrinter = (printerId: number, filePath: string, startPri
     method: 'POST',
     body: JSON.stringify({ file_path: filePath, start_print: startPrint }),
   })
+export interface GcodeSlotInfo {
+  color_hex: string | null
+  material: string | null
+  brand: string | null
+  preset_name: string | null
+}
 export interface GcodeFileMetadata {
   filament_weights: number[]
+  filament_slots: GcodeSlotInfo[]
   filament_weight_total: number | null
   estimated_time: number | null
   error: string | null
@@ -676,6 +724,81 @@ export const testSpoolman = (url: string) =>
   req<{ connected: boolean; version?: string; error?: string }>('/settings/spoolman/test', {
     method: 'POST',
     body: JSON.stringify({ url }),
+  })
+
+// --- NFC Sessions ---
+export interface NfcSession {
+  status: 'pending' | 'tag_a_done' | 'completed'
+  spool_id: number
+  spool_label: string
+  slot: string
+  mode: string
+  filament_type: string | null
+  color_hex: string | null
+  brand: string | null
+  subtype: string | null
+  min_temp: number | null
+  max_temp: number | null
+  bed_temp: number | null
+  card_uid: string | null
+  wrote_tag: boolean | null
+  card_uid_b: string | null
+  wrote_tag_b: boolean | null
+}
+
+export interface CreateNfcSessionData {
+  spool_id: number
+  spool_label: string
+  slot: string
+  mode: string
+  filament_type?: string
+  color_hex?: string
+  brand?: string
+  subtype?: string
+  min_temp?: number
+  max_temp?: number
+  bed_temp?: number
+}
+
+export const createNfcSession = (data: CreateNfcSessionData) =>
+  req<{ token: string; expires_at: number }>('/nfc-sessions', { method: 'POST', body: JSON.stringify(data) })
+
+export const getNfcSession = (token: string) =>
+  req<NfcSession>(`/nfc-sessions/${token}`)
+
+export const postNfcTagA = (token: string, result: { card_uid: string; wrote_tag: boolean }) =>
+  req<{ ok: boolean }>(`/nfc-sessions/${token}/tag-a`, { method: 'POST', body: JSON.stringify(result) })
+
+export const postNfcResult = (token: string, result: { card_uid: string; wrote_tag: boolean; card_uid_b?: string; wrote_tag_b?: boolean }) =>
+  req<{ ok: boolean }>(`/nfc-sessions/${token}/result`, { method: 'POST', body: JSON.stringify(result) })
+
+// --- Spoolman Wizard Extensions ---
+export interface CreateFilamentData {
+  name: string
+  material: string
+  color_hex?: string
+  vendor_name?: string
+  weight?: number
+  diameter?: number
+  density?: number
+  price?: number
+  settings_extruder_temp?: number
+  settings_bed_temp?: number
+}
+
+export const createSpoolmanFilament = (data: CreateFilamentData) =>
+  req<SpoolmanFilament>('/spoolman/filaments', { method: 'POST', body: JSON.stringify(data) })
+
+export const createSpoolmanSpoolsWizard = (data: { filament_id: number; count: number; price?: number; location?: string; comment?: string }) =>
+  req<{ spools: SpoolmanSpool[]; spoolman_url: string }>('/spoolman/create-spools-wizard', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+
+export const patchSpoolmanLotNr = (spoolId: number, cardUids: string[]) =>
+  req<{ id: number }>(`/spoolman/spools/${spoolId}/lot-nr`, {
+    method: 'PATCH',
+    body: JSON.stringify({ card_uids: cardUids }),
   })
 
 export async function restoreDatabase(file: File): Promise<void> {

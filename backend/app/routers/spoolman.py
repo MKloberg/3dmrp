@@ -2,7 +2,7 @@ import re
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 
 from ..database import get_db
@@ -173,6 +173,120 @@ async def sync_spoolman_filaments(db: Session = Depends(get_db)) -> Dict[str, An
 
     db.commit()
     return {"updated": updated}
+
+
+class CreateFilamentRequest(BaseModel):
+    name: str
+    material: str
+    color_hex: Optional[str] = None
+    vendor_name: Optional[str] = None
+    weight: Optional[float] = None
+    diameter: Optional[float] = 1.75
+    density: Optional[float] = None
+    price: Optional[float] = None
+    settings_extruder_temp: Optional[int] = None
+    settings_bed_temp: Optional[int] = None
+
+
+@router.post("/filaments")
+async def create_spoolman_filament(body: CreateFilamentRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    url = get_setting(db, "spoolman_url")
+    if not url:
+        raise HTTPException(status_code=400, detail="Spoolman URL not configured")
+    base = url.rstrip("/")
+    payload: Dict[str, Any] = {"name": body.name, "material": body.material}
+    if body.color_hex:
+        payload["color_hex"] = body.color_hex.lstrip("#")
+    if body.weight is not None:
+        payload["weight"] = body.weight
+    if body.diameter is not None:
+        payload["diameter"] = body.diameter
+    if body.density is not None:
+        payload["density"] = body.density
+    if body.price is not None:
+        payload["price"] = body.price
+    if body.settings_extruder_temp is not None:
+        payload["settings_extruder_temp"] = body.settings_extruder_temp
+    if body.settings_bed_temp is not None:
+        payload["settings_bed_temp"] = body.settings_bed_temp
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            if body.vendor_name:
+                vresp = await client.get(f"{base}/api/v1/vendor")
+                vendors = vresp.json() if vresp.status_code == 200 else []
+                existing = next((v for v in vendors if v.get("name", "").lower() == body.vendor_name.lower()), None)
+                if existing:
+                    payload["vendor_id"] = existing["id"]
+                else:
+                    vcresp = await client.post(f"{base}/api/v1/vendor", json={"name": body.vendor_name})
+                    if vcresp.status_code in (200, 201):
+                        payload["vendor_id"] = vcresp.json().get("id")
+            resp = await client.post(f"{base}/api/v1/filament", json=payload)
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Spoolman error: {e.response.text}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Spoolman: {e}")
+
+
+class CreateSpoolsWizardRequest(BaseModel):
+    filament_id: int
+    count: int
+    price: Optional[float] = None
+    location: Optional[str] = None
+    comment: Optional[str] = None
+
+
+@router.post("/create-spools-wizard")
+async def create_spools_wizard(body: CreateSpoolsWizardRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    url = get_setting(db, "spoolman_url")
+    if not url:
+        raise HTTPException(status_code=400, detail="Spoolman URL not configured")
+    base = url.rstrip("/")
+    spool_payload: Dict[str, Any] = {"filament_id": body.filament_id}
+    if body.price is not None:
+        spool_payload["price"] = body.price
+    if body.location:
+        spool_payload["location"] = body.location
+    if body.comment:
+        spool_payload["comment"] = body.comment
+    created = []
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            for _ in range(body.count):
+                resp = await client.post(f"{base}/api/v1/spool", json=spool_payload)
+                resp.raise_for_status()
+                created.append(resp.json())
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Spoolman error: {e.response.text}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Spoolman: {e}")
+    return {"spools": created, "spoolman_url": base}
+
+
+class PatchLotNrRequest(BaseModel):
+    card_uids: List[str]
+
+
+@router.patch("/spools/{spool_id}/lot-nr")
+async def patch_spool_lot_nr(spool_id: int, body: PatchLotNrRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    url = get_setting(db, "spoolman_url")
+    if not url:
+        raise HTTPException(status_code=400, detail="Spoolman URL not configured")
+    lot_nr = ",".join(f"card_uid:{uid.replace(':', '').lower()}" for uid in body.card_uids)
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.patch(
+                f"{url.rstrip('/')}/api/v1/spool/{spool_id}",
+                json={"lot_nr": lot_nr},
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Spoolman error: {e.response.text}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Spoolman: {e}")
 
 
 class DeductItem(BaseModel):
