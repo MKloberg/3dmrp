@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from ..database import get_db
-from ..models import Setting
+from ..models import Setting, ModelSlicerFile, RoutingStepSlicerFile
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -41,9 +41,21 @@ def pick_file(body: PickRequest = PickRequest(), db: Session = Depends(get_db)):
             initial_dir = None
             initial_file = None
 
+    row = db.query(Setting).filter(Setting.key == _LAST_DIR_KEY).first()
+
     if initial_dir is None:
-        row = db.query(Setting).filter(Setting.key == _LAST_DIR_KEY).first()
         initial_dir = row.value if row and row.value and os.path.isdir(row.value) else None
+
+    # Seed from any existing model file path when no last-dir is known
+    if initial_dir is None:
+        candidate = (
+            db.query(ModelSlicerFile.file_path).filter(ModelSlicerFile.file_path != "").first()
+            or db.query(RoutingStepSlicerFile.file_path).filter(RoutingStepSlicerFile.file_path != "").first()
+        )
+        if candidate:
+            d = os.path.dirname(os.path.normpath(candidate[0]))
+            if os.path.isdir(d):
+                initial_dir = d
 
     root = tk.Tk()
     root.withdraw()

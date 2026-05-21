@@ -1,6 +1,8 @@
 import os
 import shutil
 import socket
+import subprocess
+import webbrowser
 from datetime import datetime
 from typing import Dict
 
@@ -19,7 +21,8 @@ _SQLITE_MAGIC = b"SQLite format 3\x00"
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
-SETTING_KEYS = {"spoolman_url", "amazon_domain", "gcode_repo_path", "square_api_token", "mobile_protocol", "currency"}
+SETTING_KEYS = {"spoolman_url", "amazon_domain", "gcode_repo_path", "square_api_token", "mobile_protocol", "currency",
+                "ui_printers_view", "ui_spool_inventory_view", "ui_printer_label_size_index", "label_printer_name"}
 
 
 def get_setting(db: Session, key: str) -> str:
@@ -48,6 +51,18 @@ def get_settings(db: Session = Depends(get_db)) -> Dict[str, str]:
     for key in SETTING_KEYS:
         result[key] = rows.get(key, os.getenv(key.upper(), ""))
     return result
+
+
+@router.get("/open-browser")
+async def open_browser(url: str):
+    if not (url.startswith("http://localhost") or url.startswith("http://127.0.0.1")):
+        raise HTTPException(status_code=400, detail="Only localhost URLs allowed")
+    try:
+        # cmd /c start activates the new window via ShellExecuteEx; webbrowser.open does not
+        subprocess.Popen(["cmd", "/c", "start", "", url])
+    except Exception:
+        webbrowser.open(url)
+    return {"ok": True}
 
 
 @router.put("/{key}")
@@ -107,3 +122,5 @@ async def test_spoolman(body: Dict[str, str]) -> Dict[str, object]:
         return {"connected": False, "error": "Cannot connect — check the URL and that Spoolman is running"}
     except Exception as e:
         return {"connected": False, "error": str(e)}
+
+

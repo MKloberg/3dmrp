@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { getOrders, createOrder, updateOrder, deleteOrder, getItems, updateItem, getCustomers, Order } from '../api/client'
 import Modal from '../components/Modal'
 import StatusBadge from '../components/StatusBadge'
@@ -12,6 +12,8 @@ type Status = typeof STATUSES[number]
 export default function Orders() {
   const qc = useQueryClient()
   const navigate = useNavigate()
+  const { hash } = useLocation()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [filterStatus, setFilterStatus] = useState<string>('')
   const { data: orders = [] } = useQuery({
     queryKey: ['orders', filterStatus],
@@ -19,6 +21,22 @@ export default function Orders() {
   })
   const { data: items = [] } = useQuery({ queryKey: ['items'], queryFn: getItems })
   const { data: customers = [] } = useQuery({ queryKey: ['customers'], queryFn: getCustomers })
+
+  useEffect(() => {
+    if (!hash || orders.length === 0) return
+    const el = document.getElementById(hash.slice(1))
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [hash, orders])
+
+  useEffect(() => {
+    const openId = searchParams.get('open')
+    if (!openId || orders.length === 0) return
+    const order = orders.find(o => String(o.id) === openId)
+    if (order) {
+      openEdit(order)
+      setSearchParams(p => { p.delete('open'); return p }, { replace: true })
+    }
+  }, [searchParams, orders])
 
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<Order | null>(null)
@@ -151,7 +169,7 @@ export default function Orders() {
                 const firstImage = order.item.images[0]
                 const customerLabel = orderCustomerLabel(order)
                 return (
-                  <tr key={order.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
+                  <tr key={order.id} id={`order-${order.id}`} className={`hover:bg-gray-50 dark:hover:bg-gray-700/30 ${hash === `#order-${order.id}` ? 'bg-brand-50 dark:bg-brand-900/20' : ''}`}>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         {firstImage ? (

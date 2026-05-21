@@ -10,6 +10,7 @@ import Modal from '../components/Modal'
 import { useNavigate } from 'react-router-dom'
 import { Plus, Pencil, Trash2, Download, ChevronDown, ChevronRight, ShoppingCart, ExternalLink, RefreshCw, Disc2, Info } from 'lucide-react'
 import { SpoolIcon } from '../components/SpoolIcon'
+import { useCurrency } from '../lib/currency'
 
 const MATERIALS = ['PLA', 'PETG', 'ABS', 'ASA', 'TPU', 'Nylon', 'Resin', 'Other']
 
@@ -66,6 +67,7 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
 
 function FilamentDetail({ f }: { f: FilamentSpec }) {
   const hasExtra = f.extra && Object.keys(f.extra).length > 0
+  const currSym = useCurrency()
   return (
     <div className="px-4 pb-4 pt-1">
       <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-3">
@@ -75,7 +77,7 @@ function FilamentDetail({ f }: { f: FilamentSpec }) {
         <Field label="Density" value={f.density ? `${f.density} g/cm³` : null} />
         <Field label="Spool weight" value={f.weight ? `${f.weight} g` : null} />
         <Field label="Empty spool" value={f.spool_weight ? `${f.spool_weight} g` : null} />
-        <Field label="Price" value={f.price != null ? `$${f.price.toFixed(2)}` : null} />
+        <Field label="Price" value={f.price != null ? `${currSym}${f.price.toFixed(2)}` : null} />
         <Field label="Extruder temp" value={f.settings_extruder_temp ? `${f.settings_extruder_temp} °C` : null} />
         <Field label="Bed temp" value={f.settings_bed_temp ? `${f.settings_bed_temp} °C` : null} />
         <Field label="Article #" value={f.article_number} />
@@ -126,6 +128,7 @@ function FilamentForm({
 }) {
   const set = (patch: Partial<FilamentSpecInput>) => setForm(f => ({ ...f, ...patch }))
   const num = (v: string) => v === '' ? null : Number(v)
+  const currSym = useCurrency()
 
   return (
     <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
@@ -158,7 +161,7 @@ function FilamentForm({
           </div>
         </div>
         <div>
-          <label className="text-xs text-gray-500 block mb-1">Price ($)</label>
+          <label className="text-xs text-gray-500 block mb-1">Price ({currSym})</label>
           <input type="number" min="0" step="0.01" className="w-full border rounded-lg px-3 py-2 text-sm"
             value={form.price ?? ''} onChange={e => set({ price: num(e.target.value) })} />
         </div>

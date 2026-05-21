@@ -18,13 +18,28 @@ import FilamentInventory from './pages/reports/FilamentInventory'
 import SpoolInventory from './pages/filaments/SpoolInventory'
 import MobileLanding from './pages/mobile/MobileLanding'
 import MobilePrinterLoad from './pages/mobile/MobilePrinterLoad'
+import MobileNfcScan from './pages/mobile/MobileNfcScan'
+import MobileApp from './pages/mobile/MobileApp'
+import SpoolLabelPage from './pages/print/SpoolLabelPage'
+import { MobileSessionProvider } from './contexts/MobileSessionContext'
+
+function DesktopLayout() {
+  return (
+    <MobileSessionProvider>
+      <Layout />
+    </MobileSessionProvider>
+  )
+}
 
 export default function App() {
   return (
     <Routes>
       <Route path="mobile" element={<MobileLanding />} />
       <Route path="mobile/printer/:printerName" element={<MobilePrinterLoad />} />
-      <Route element={<Layout />}>
+      <Route path="mobile/nfc/:token" element={<MobileNfcScan />} />
+      <Route path="mobile/app/:token" element={<MobileApp />} />
+      <Route path="print/spool/:id" element={<SpoolLabelPage />} />
+      <Route element={<DesktopLayout />}>
         <Route index element={<Dashboard />} />
         <Route path="items" element={<Items />} />
         <Route path="orders" element={<Orders />} />

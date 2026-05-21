@@ -7,13 +7,94 @@ import {
   getFilaments, createItem, addFilamentReq, copyThumbnailToItem, uploadPrinterImage,
   setPrinterSlot, deletePrinterSlot, setPrinterType, getPrinterStats, getPrinterAfcLanes, sendAfcCommand,
   checkScreencastAvailable, sendScreencastTouch,
-  getPrinterTypes,
-  Printer, MoonrakerJob, FilamentSpec, PrinterStatus, WebcamInfo, FilamentDetectSlot, PrinterType, AfcLane, SpoolmanSpool,
+  getPrinterTypes, getPrinterCapabilitiesCheck, getSettings, setSetting,
+  Printer, MoonrakerJob, FilamentSpec, PrinterStatus, WebcamInfo, FilamentDetectSlot, PrinterType, AfcLane, SpoolmanSpool, PrinterCapabilityMismatch,
 } from '../api/client'
 import Modal from '../components/Modal'
 import { SpoolIcon } from '../components/SpoolIcon'
-import { Plus, Trash2, Printer as PrinterIcon, ChevronDown, ChevronRight, Upload, X, Cpu, Video, RefreshCw, Pencil, Check, ExternalLink, QrCode, Info, Copy, LayoutList, LayoutGrid, LogIn, LogOut, Tablet } from 'lucide-react'
+import { Plus, Trash2, Printer as PrinterIcon, ChevronDown, ChevronRight, Upload, X, Cpu, Video, RefreshCw, Pencil, Check, ExternalLink, QrCode, Info, Copy, LayoutList, LayoutGrid, LogIn, LogOut, Tablet, AlertTriangle } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
+import { usePrinterWebSocket } from '../hooks/usePrinterWebSocket'
+import { useWsMode } from '../hooks/useWsMode'
+
+function PrinterCapabilityWarning({ printer }: { printer: Printer }) {
+  const qc = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const [reprobing, setReprobing] = useState(false)
+
+  const hasCapFlags = printer.printer_type && (
+    printer.printer_type.has_afc || printer.printer_type.has_nfc_detect || printer.printer_type.has_mainsail_spoolman
+  )
+
+  const { data: mismatches = [] } = useQuery({
+    queryKey: ['capability-check', printer.id],
+    queryFn: () => getPrinterCapabilitiesCheck(printer.id),
+    enabled: !!hasCapFlags,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+
+  async function reprobe() {
+    setReprobing(true)
+    try {
+      await qc.refetchQueries({ queryKey: ['capability-check', printer.id] })
+    } finally {
+      setReprobing(false)
+    }
+  }
+
+  if (!hasCapFlags || mismatches.length === 0) return null
+
+  return (
+    <>
+      <button
+        onClick={e => { e.stopPropagation(); setOpen(true) }}
+        title={`${mismatches.length} capability issue${mismatches.length > 1 ? 's' : ''}`}
+        className="text-amber-500 hover:text-amber-600 shrink-0"
+      >
+        <AlertTriangle size={20} />
+      </button>
+
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setOpen(false)}>
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="relative bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md p-5 space-y-4"
+            onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                <AlertTriangle size={16} className="text-amber-500" />
+                {printer.name} — Out of Spec
+              </h3>
+              <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={15} /></button>
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              This printer does not match the expected capabilities for <strong>{printer.printer_type?.name}</strong>.
+            </p>
+            <div className="space-y-2">
+              {(mismatches as PrinterCapabilityMismatch[]).map(m => (
+                <div key={m.capability} className="flex items-start gap-2 px-3 py-2.5 rounded-lg border bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800">
+                  <AlertTriangle size={13} className="text-amber-500 shrink-0 mt-0.5" />
+                  <p className="text-xs text-amber-700 dark:text-amber-300">{m.message}</p>
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button onClick={reprobe} disabled={reprobing}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50">
+                <RefreshCw size={11} className={reprobing ? 'animate-spin' : ''} />
+                {reprobing ? 'Checking…' : 'Re-check'}
+              </button>
+              <button onClick={() => setOpen(false)}
+                className="px-3 py-1.5 text-xs bg-brand-600 hover:bg-brand-700 text-white rounded-lg">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
 
 function smoothScrollTo(container: HTMLElement, target: number, duration = 700) {
   const start = container.scrollTop
@@ -255,10 +336,13 @@ const STATE_STYLES: Record<string, { dot: string; label: string; text: string }>
 }
 
 function PrinterStatusDisplay({ printerId }: { printerId: number }) {
+  const wsMode = useWsMode()
+  const { data: wsConnected } = useQuery<boolean>({ queryKey: ['ws-connected', printerId], queryFn: () => false, staleTime: Infinity })
+  const wsActive = wsConnected && wsMode !== 'off'
   const { data: status } = useQuery<PrinterStatus>({
     queryKey: ['printer-status', printerId],
     queryFn: () => getPrinterStatus(printerId),
-    refetchInterval: 10000,
+    refetchInterval: wsActive ? 30_000 : 10_000,
     retry: false,
   })
 
@@ -1131,11 +1215,16 @@ const LABEL_SIZES = [
 function PrinterStickerModal({ printer, onClose }: { printer: Printer; onClose: () => void }) {
   const qrRef = useRef<HTMLDivElement>(null)
   const [copied, setCopied] = useState(false)
-  const [sizeIndex, setSizeIndex] = useState(() => {
-    const saved = localStorage.getItem('printerLabelSizeIndex')
-    const n = saved !== null ? Number(saved) : 0
-    return n >= 0 && n < LABEL_SIZES.length ? n : 0
-  })
+  const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: getSettings })
+  const [sizeIndex, setSizeIndex] = useState(0)
+  const sizeIndexSynced = useRef(false)
+  useEffect(() => {
+    if (settings && !sizeIndexSynced.current) {
+      sizeIndexSynced.current = true
+      const n = Number(settings.ui_printer_label_size_index ?? 0)
+      if (n >= 0 && n < LABEL_SIZES.length) setSizeIndex(n)
+    }
+  }, [settings])
 
   function handlePrint() {
     const svgEl = qrRef.current?.querySelector('svg')
@@ -1263,7 +1352,7 @@ function PrinterStickerModal({ printer, onClose }: { printer: Printer; onClose: 
           <label className="text-xs text-gray-500 dark:text-gray-400 shrink-0">Label size</label>
           <select
             value={sizeIndex}
-            onChange={e => { const i = Number(e.target.value); setSizeIndex(i); localStorage.setItem('printerLabelSizeIndex', String(i)) }}
+            onChange={e => { const i = Number(e.target.value); setSizeIndex(i); setSetting('ui_printer_label_size_index', String(i)) }}
             className="flex-1 border rounded-lg px-2 py-1.5 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300"
           >
             {LABEL_SIZES.map((s, i) => (
@@ -1298,10 +1387,13 @@ function formatWeight(grams: number): string {
 }
 
 function useAfcLanes(printerId: number) {
+  const wsMode = useWsMode()
+  const { data: wsConnected } = useQuery<boolean>({ queryKey: ['ws-connected', printerId], queryFn: () => false, staleTime: Infinity })
+  const wsActive = wsConnected && wsMode !== 'off'
   return useQuery({
     queryKey: ['printer-afc-lanes', printerId],
     queryFn: () => getPrinterAfcLanes(printerId),
-    refetchInterval: 15_000,
+    refetchInterval: wsActive ? 30_000 : 15_000,
     retry: false,
     staleTime: 10_000,
   })
@@ -1329,7 +1421,25 @@ function spoolLabel(spool: SpoolmanSpool | undefined, lane: AfcLane): string {
   return [spool.filament.vendor?.name, spool.filament.name].filter(Boolean).join(' ')
 }
 
-function AfcLaneCard({ lane, spool, printerId, isPrinting }: { lane: AfcLane; spool?: SpoolmanSpool; printerId: number; isPrinting: boolean }) {
+function FilamentPill({ lane }: { lane: AfcLane }) {
+  const loaded = lane.tool_loaded || lane.loaded_to_hub
+  return loaded
+    ? <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400">Loaded</span>
+    : <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500">Unloaded</span>
+}
+
+function DockingPill({ isActive }: { isActive: boolean }) {
+  return isActive
+    ? (
+      <span className="animate-pulse inline-flex items-center text-xs font-semibold px-2 py-0.5 rounded-full bg-green-500 dark:bg-green-600 text-white">
+        Active
+      </span>
+    ) : (
+      <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500">Docked</span>
+    )
+}
+
+function AfcLaneCard({ lane, spool, printerId, isPrinting, activeExtruder }: { lane: AfcLane; spool?: SpoolmanSpool; printerId: number; isPrinting: boolean; activeExtruder: string | null }) {
   const qc = useQueryClient()
   const [busy, setBusy] = useState(false)
   const [pending, setPending] = useState<'load' | 'unload' | null>(null)
@@ -1380,54 +1490,33 @@ function AfcLaneCard({ lane, spool, printerId, isPrinting }: { lane: AfcLane; sp
   const pct = total && remaining ? Math.min(100, (remaining / total) * 100) : null
 
   return (
-    <div className={`rounded-lg border p-3 flex flex-col gap-1.5 ${
+    <div className={`rounded-lg border p-3 flex flex-col gap-2 ${
       lane.tool_loaded
         ? 'border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/20'
         : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/40'
     }`}>
+      {/* Top row: spool icon + slot label + status/action */}
       <div className="flex items-center gap-2">
-        <span
-          className="w-5 h-5 rounded-full border border-black/10 dark:border-white/10 shrink-0"
-          style={{ backgroundColor: color }}
-        />
-        <span className="text-xs font-bold text-gray-700 dark:text-gray-200">{lane.map}</span>
-        <div className="ml-auto flex items-center gap-1.5">
-          {lane.tool_loaded ? (
-            <button
-              disabled={actionDisabled}
-              onClick={() => handleAction('TOOL_UNLOAD', 'unload')}
-              title={isPrinting ? 'Disabled while printing' : 'Unload filament'}
-              className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full border border-red-300 dark:border-red-700 text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              <LogOut size={9} />
-              <span className="text-xs leading-none">{pending === 'unload' || busy ? '…' : 'Unload'}</span>
-            </button>
-          ) : (
-            <button
-              disabled={actionDisabled}
-              onClick={() => handleAction(lane.map, 'load')}
-              title={isPrinting ? 'Disabled while printing' : 'Load filament'}
-              className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full border border-brand-300 dark:border-brand-700 text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            >
-              <LogIn size={9} />
-              <span className="text-xs leading-none">{pending === 'load' || busy ? '…' : 'Load'}</span>
-            </button>
-          )}
-          {lane.tool_loaded && (
-            <span className="text-xs font-medium text-green-600 dark:text-green-400">Loaded</span>
-          )}
-          {!lane.tool_loaded && lane.loaded_to_hub && (
-            <span className="text-xs font-medium text-blue-500 dark:text-blue-400">At Hub</span>
-          )}
+        <SpoolIcon color={color} size={38} />
+        <div className="flex flex-col min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs font-bold text-gray-700 dark:text-gray-200">{lane.map}</span>
+            <FilamentPill lane={lane} />
+            {activeExtruder != null && <DockingPill isActive={activeExtruder === lane.extruder} />}
+          </div>
+          <span className="text-xs font-semibold text-gray-800 dark:text-gray-100 truncate">
+            {spool?.filament.material ?? lane.material}
+          </span>
         </div>
-      </div>
-      <div className="flex items-center justify-between gap-1">
-        <span className="text-sm font-bold text-gray-800 dark:text-gray-100">{spool?.filament.material ?? lane.material}</span>
         {lane.spool_id > 0 && (
-          <span className="text-sm font-bold text-brand-600 dark:text-brand-400 shrink-0">#{lane.spool_id}</span>
+          <span className="text-2xl font-bold text-brand-600 dark:text-brand-400 shrink-0">#{lane.spool_id}</span>
         )}
       </div>
-      <p className="text-xs text-gray-500 dark:text-gray-400 leading-tight">{label}</p>
+
+      {/* Label */}
+      <p className="text-xs text-gray-500 dark:text-gray-400 leading-tight truncate">{label}</p>
+
+      {/* Weight + progress */}
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs text-gray-400">{formatWeight(remaining)}</p>
         {pct !== null && (
@@ -1442,6 +1531,31 @@ function AfcLaneCard({ lane, spool, printerId, isPrinting }: { lane: AfcLane; sp
           />
         </div>
       )}
+
+      {/* Load / Unload button */}
+      <div className="pt-0.5">
+        {lane.tool_loaded ? (
+          <button
+            disabled={actionDisabled}
+            onClick={() => handleAction('TOOL_UNLOAD', 'unload')}
+            title={isPrinting ? 'Disabled while printing' : 'Unload filament'}
+            className="w-full flex items-center justify-center gap-1 px-2 py-1 rounded-md border border-red-300 dark:border-red-700 text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-xs"
+          >
+            <LogOut size={10} />
+            {pending === 'unload' || busy ? '…' : 'Unload'}
+          </button>
+        ) : (
+          <button
+            disabled={actionDisabled}
+            onClick={() => handleAction(lane.map, 'load')}
+            title={isPrinting ? 'Disabled while printing' : 'Load filament'}
+            className="w-full flex items-center justify-center gap-1 px-2 py-1 rounded-md border border-brand-300 dark:border-brand-700 text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-900/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-xs"
+          >
+            <LogIn size={10} />
+            {pending === 'load' || busy ? '…' : 'Load'}
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -1449,13 +1563,17 @@ function AfcLaneCard({ lane, spool, printerId, isPrinting }: { lane: AfcLane; sp
 function AfcLanesPanel({ printer }: { printer: Printer }) {
   const { data } = useAfcLanes(printer.id)
   const spoolMap = useSpoolMap()
+  const wsMode = useWsMode()
+  const { data: wsConnected } = useQuery<boolean>({ queryKey: ['ws-connected', printer.id], queryFn: () => false, staleTime: Infinity })
+  const wsActive = wsConnected && wsMode !== 'off'
   const { data: status } = useQuery<PrinterStatus>({
     queryKey: ['printer-status', printer.id],
     queryFn: () => getPrinterStatus(printer.id),
-    refetchInterval: 10000,
+    refetchInterval: wsActive ? 30_000 : 10_000,
     retry: false,
   })
   const isPrinting = status?.state === 'printing' || status?.state === 'paused'
+  const activeExtruder = status?.active_extruder ?? null
 
   if (!data || data.lanes.length === 0) return null
 
@@ -1463,7 +1581,6 @@ function AfcLanesPanel({ printer }: { printer: Printer }) {
     <div className="border-t dark:border-gray-700 px-4 py-3">
       <h3 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-3">
         AFC Lanes
-        {isPrinting && <span className="ml-2 text-yellow-500 normal-case font-normal">(printing — load/unload disabled)</span>}
       </h3>
       <div className={`grid gap-2 ${data.lanes.length === 4 ? 'grid-cols-4' : data.lanes.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
         {data.lanes.map(lane => (
@@ -1473,6 +1590,7 @@ function AfcLanesPanel({ printer }: { printer: Printer }) {
             spool={lane.spool_id ? spoolMap.get(lane.spool_id) : undefined}
             printerId={printer.id}
             isPrinting={isPrinting}
+            activeExtruder={activeExtruder}
           />
         ))}
       </div>
@@ -1661,6 +1779,8 @@ function PrinterRow({
           }
         </div>
 
+        <PrinterCapabilityWarning printer={printer} />
+
         {/* Name + type */}
         <div className="flex flex-col min-w-0 shrink-0">
           <div className="flex items-center gap-2">
@@ -1750,6 +1870,11 @@ function PrinterCard({
     retry: false,
   })
 
+  const wsMode = useWsMode()
+  usePrinterWebSocket(printer.id, printer.url, wsMode === 'active' && isOpen)
+  const { data: wsConnected } = useQuery<boolean>({ queryKey: ['ws-connected', printer.id], queryFn: () => false, staleTime: Infinity })
+  const showWsDot = wsConnected && wsMode !== 'off'
+
   return (
     <div id={`printer-${printer.id}`} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
       <div
@@ -1761,9 +1886,13 @@ function PrinterCard({
             ? <ChevronDown size={14} className="text-gray-400 shrink-0" />
             : <ChevronRight size={14} className="text-gray-400 shrink-0" />}
           <PrinterAvatar printer={printer} />
+          <PrinterCapabilityWarning printer={printer} />
           <div className="flex flex-col min-w-0 shrink-0">
             <div className="flex items-center gap-2">
               <span className="font-medium text-sm leading-tight">{printer.name}</span>
+              {showWsDot && (
+                <span title="Live WebSocket feed active" className="w-2 h-2 rounded-full bg-green-500 shrink-0" />
+              )}
               {spoolmanInfo && (
                 spoolmanInfo.configured === true ? (
                   <span
@@ -1863,11 +1992,7 @@ function PrinterCard({
   )
 }
 
-const PRINTERS_VIEW_KEY = 'printers-view'
 type PrintersView = 'list' | 'details'
-function loadPrintersView(): PrintersView {
-  try { return (localStorage.getItem(PRINTERS_VIEW_KEY) as PrintersView) || 'details' } catch { return 'details' }
-}
 
 export default function Printers() {
   const qc = useQueryClient()
@@ -1875,14 +2000,24 @@ export default function Printers() {
   const { data: printers = [] } = useQuery({ queryKey: ['printers'], queryFn: getPrinters })
   const { data: filaments = [] } = useQuery({ queryKey: ['filaments'], queryFn: getFilaments })
   const { data: printerTypes = [] } = useQuery({ queryKey: ['printer-types'], queryFn: getPrinterTypes })
+  const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: getSettings })
 
   const openPrinterId = (location.state as { openPrinterId?: number } | null)?.openPrinterId ?? null
   const [expanded, setExpanded] = useState<number | null>(openPrinterId)
-  const [view, setView] = useState<PrintersView>(loadPrintersView)
+  const [view, setView] = useState<PrintersView>('details')
+  const viewSynced = useRef(false)
+  useEffect(() => {
+    if (settings && !viewSynced.current) {
+      viewSynced.current = true
+      if (settings.ui_printers_view === 'list' || settings.ui_printers_view === 'details') {
+        setView(settings.ui_printers_view)
+      }
+    }
+  }, [settings])
 
   function changeView(v: PrintersView) {
     setView(v)
-    try { localStorage.setItem(PRINTERS_VIEW_KEY, v) } catch { /* ignore */ }
+    setSetting('ui_printers_view', v)
   }
 
   useEffect(() => {

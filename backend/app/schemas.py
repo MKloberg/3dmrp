@@ -127,11 +127,20 @@ class RoutingStepUpdate(BaseModel):
     parts_per_item: Optional[int] = None
     estimated_print_time: Optional[int] = None
     include_in_planning: Optional[bool] = None
+    gcode_file: Optional[str] = None
 
 
 class RoutingStepReorderItem(BaseModel):
     id: int
     sort_order: int
+
+
+class StepSlicerFileOut(BaseModel):
+    id: int
+    routing_step_id: int
+    file_path: str
+
+    model_config = {"from_attributes": True}
 
 
 class RoutingStepOut(BaseModel):
@@ -145,6 +154,8 @@ class RoutingStepOut(BaseModel):
     estimated_print_time: Optional[int] = None
     include_in_planning: bool = True
     filaments: List[RoutingStepFilamentOut] = []
+    slicer_file: Optional[StepSlicerFileOut] = None
+    gcode_file: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -350,6 +361,9 @@ class PrinterTypeBase(BaseModel):
     slot_count: int = 1
     hourly_rate: Optional[float] = None
     power_watts: Optional[float] = None
+    has_afc: bool = False
+    has_nfc_detect: bool = False
+    has_mainsail_spoolman: bool = False
 
 
 class PrinterTypeCreate(PrinterTypeBase):
@@ -362,6 +376,9 @@ class PrinterTypeUpdate(BaseModel):
     slot_count: Optional[int] = None
     hourly_rate: Optional[float] = None
     power_watts: Optional[float] = None
+    has_afc: Optional[bool] = None
+    has_nfc_detect: Optional[bool] = None
+    has_mainsail_spoolman: Optional[bool] = None
 
 
 class PrinterTypeOut(PrinterTypeBase):
@@ -370,6 +387,19 @@ class PrinterTypeOut(PrinterTypeBase):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class PrinterCapabilityProbeResult(BaseModel):
+    has_afc: bool
+    has_nfc_detect: bool
+    has_mainsail_spoolman: bool
+
+
+class PrinterCapabilityMismatch(BaseModel):
+    capability: str
+    expected: bool
+    actual: bool
+    message: str
 
 
 class PrinterBase(BaseModel):
@@ -438,6 +468,7 @@ class PrinterStatus(BaseModel):
     extruder_target: Optional[float] = None
     bed_temp: Optional[float] = None
     bed_target: Optional[float] = None
+    active_extruder: Optional[str] = None
 
 
 class MoonrakerJob(BaseModel):
@@ -459,6 +490,7 @@ class PrinterHistoryResponse(BaseModel):
 class FilamentDetectSlot(BaseModel):
     slot_index: int
     detected: bool
+    filament_present: Optional[bool] = None
     vendor: str
     material: str
     sub_type: str

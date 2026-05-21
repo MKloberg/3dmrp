@@ -8,6 +8,10 @@ import {
 } from 'lucide-react'
 import clsx from 'clsx'
 import { QRCodeSVG } from 'qrcode.react'
+import { usePrinterWebSocket } from '../hooks/usePrinterWebSocket'
+import { useWsMode } from '../hooks/useWsMode'
+import { getPrinters, getSpoolmanStock, getSettings, type Printer as PrinterType } from '../api/client'
+import { useMobileSession } from '../contexts/MobileSessionContext'
 
 type Child = { to: string; label: string; icon?: React.ElementType }
 type NavItemDef = {
@@ -140,6 +144,7 @@ function NavTreeItem({ item }: { item: NavItemDef }) {
 
 function MobileQrWidget() {
   const [expanded, setExpanded] = useState(false)
+  const { token, phoneConnected, phoneName } = useMobileSession()
 
   const { data: lanIpData } = useQuery({
     queryKey: ['lan-ip'],
@@ -154,15 +159,16 @@ function MobileQrWidget() {
   })
 
   const url = useMemo(() => {
+    if (!token) return null
     const ip = lanIpData?.ip ?? window.location.hostname
     const protocol = settings?.mobile_protocol || 'https'
     if (protocol === 'https') {
       const httpsPort = lanIpData?.https_port ?? '7892'
-      return `https://${ip}:${httpsPort}/mobile`
+      return `https://${ip}:${httpsPort}/mobile/app/${token}`
     }
     const httpPort = window.location.port
-    return `http://${ip}${httpPort ? `:${httpPort}` : ''}/mobile`
-  }, [lanIpData, settings])
+    return `http://${ip}${httpPort ? `:${httpPort}` : ''}/mobile/app/${token}`
+  }, [lanIpData, settings, token])
 
   return (
     <>
@@ -170,19 +176,30 @@ function MobileQrWidget() {
         onClick={() => setExpanded(true)}
         className="w-full flex flex-col items-center gap-2 py-4 hover:bg-gray-800 transition-colors rounded-lg mx-1"
         style={{ width: 'calc(100% - 8px)' }}
-        title="Open mobile filament loader"
+        title="Open 3DMRP mobile app"
       >
-        <QRCodeSVG
-          value={url}
-          size={96}
-          bgColor="transparent"
-          fgColor="#ffffff"
-          level="M"
-        />
-        <span className="text-xs text-gray-400 font-medium">Mobile</span>
+        {url ? (
+          <div className="relative">
+            <QRCodeSVG
+              value={url}
+              size={96}
+              bgColor="transparent"
+              fgColor="#ffffff"
+              level="M"
+            />
+            {phoneConnected && (
+              <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-green-400 border-2 border-gray-900" />
+            )}
+          </div>
+        ) : (
+          <div className="w-24 h-24 rounded bg-gray-800 animate-pulse" />
+        )}
+        <span className={`text-xs font-medium ${phoneConnected ? 'text-green-400' : 'text-gray-400'}`}>
+          {phoneConnected ? `${phoneName ?? 'Phone'} · Connected` : 'Mobile'}
+        </span>
       </button>
 
-      {expanded && (
+      {expanded && url && (
         <div
           className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-6"
           onClick={() => setExpanded(false)}
@@ -192,7 +209,15 @@ function MobileQrWidget() {
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-center justify-between w-full">
-              <p className="text-sm font-semibold text-gray-800">Mobile Filament Loader</p>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-semibold text-gray-800">3DMRP Mobile</p>
+                {phoneConnected && (
+                  <span className="flex items-center gap-1 text-xs text-green-600 font-medium">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                    {phoneName ? `${phoneName} · Connected` : 'Connected'}
+                  </span>
+                )}
+              </div>
               <button onClick={() => setExpanded(false)} className="text-gray-400 hover:text-gray-600">
                 <X size={18} />
               </button>
@@ -206,7 +231,7 @@ function MobileQrWidget() {
               includeMargin
             />
             <p className="text-xs text-gray-500 text-center leading-relaxed">
-              Scan with your phone to open the filament loading workflow. Works on iOS and Android.
+              Scan once to open the 3DMRP mobile app. Your phone stays connected for the whole session.
             </p>
             <p className="text-xs text-gray-400 font-mono break-all text-center">{url}</p>
           </div>
@@ -216,10 +241,53 @@ function MobileQrWidget() {
   )
 }
 
+function PrinterWsNode({ printer }: { printer: PrinterType }) {
+  usePrinterWebSocket(printer.id, printer.url, true)
+  return null
+}
+
+function PrinterWsManager() {
+  const wsMode = useWsMode()
+  const { data: printers = [] } = useQuery({
+    queryKey: ['printers'],
+    queryFn: getPrinters,
+    staleTime: 60_000,
+    enabled: wsMode === 'all',
+  })
+  if (wsMode !== 'all') return null
+  return <>{printers.map(p => <PrinterWsNode key={p.id} printer={p} />)}</>
+}
+
+function PrintLabelHandler() {
+  const { pendingPrint, clearPendingPrint } = useMobileSession()
+  const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: getSettings })
+
+  useEffect(() => {
+    if (!pendingPrint) return
+    const sizeIndex = Number(settings?.ui_printer_label_size_index ?? 0)
+    const labelPrinter = settings?.label_printer_name ?? ''
+    clearPendingPrint()
+
+    if (labelPrinter) {
+      fetch(`/api/print/spool/${pendingPrint.spool_id}?size=${sizeIndex}`, { method: 'POST' })
+        .catch(() => {
+          const url = `${window.location.origin}/print/spool/${pendingPrint.spool_id}?size=${sizeIndex}`
+          fetch(`/api/settings/open-browser?url=${encodeURIComponent(url)}`).catch(() => window.open(url, '_blank'))
+        })
+    } else {
+      const url = `${window.location.origin}/print/spool/${pendingPrint.spool_id}?size=${sizeIndex}`
+      fetch(`/api/settings/open-browser?url=${encodeURIComponent(url)}`).catch(() => window.open(url, '_blank'))
+    }
+  }, [pendingPrint]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  return null
+}
+
 export default function Layout() {
   const navigate = useNavigate()
   return (
     <div className="flex h-screen overflow-hidden">
+      <PrinterWsManager />
       <aside className="w-56 bg-gray-900 text-white flex flex-col shrink-0">
         <div className="px-4 py-3 border-b border-gray-700 shrink-0">
           <img src="/logo.png" alt="3DMRP" className="h-16 w-auto cursor-pointer" onClick={() => navigate('/')} />
@@ -239,6 +307,7 @@ export default function Layout() {
       <main className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900">
         <Outlet />
       </main>
+      <PrintLabelHandler />
     </div>
   )
 }

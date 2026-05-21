@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from .database import engine, Base
-from .routers import filaments, items, orders, spoolman, forecast, settings, printers, tags, customers, slicers, printer_types, gcode, filepicker
+from .routers import filaments, items, orders, spoolman, forecast, settings, printers, tags, customers, slicers, printer_types, gcode, filepicker, nfc_sessions, mobile_ws, print_labels
 
 Base.metadata.create_all(bind=engine)
 
@@ -144,6 +144,8 @@ with engine.connect() as conn:
         conn.execute(text("ALTER TABLE routing_steps ADD COLUMN estimated_print_time INTEGER"))
     if "include_in_planning" not in existing_steps:
         conn.execute(text("ALTER TABLE routing_steps ADD COLUMN include_in_planning BOOLEAN NOT NULL DEFAULT 1"))
+    if "gcode_file" not in existing_steps:
+        conn.execute(text("ALTER TABLE routing_steps ADD COLUMN gcode_file TEXT"))
 
     existing_routings = {row[1] for row in conn.execute(text("PRAGMA table_info(routings)"))}
     if "include_in_summary" not in existing_routings:
@@ -191,6 +193,14 @@ with engine.connect() as conn:
         conn.execute(text("DROP TABLE IF EXISTS model_slicer_files"))
         conn.execute(text("ALTER TABLE model_slicer_files_new RENAME TO model_slicer_files"))
 
+    existing_pt3 = {row[1] for row in conn.execute(text("PRAGMA table_info(printer_types)"))}
+    if "has_afc" not in existing_pt3:
+        conn.execute(text("ALTER TABLE printer_types ADD COLUMN has_afc BOOLEAN NOT NULL DEFAULT 0"))
+    if "has_nfc_detect" not in existing_pt3:
+        conn.execute(text("ALTER TABLE printer_types ADD COLUMN has_nfc_detect BOOLEAN NOT NULL DEFAULT 0"))
+    if "has_mainsail_spoolman" not in existing_pt3:
+        conn.execute(text("ALTER TABLE printer_types ADD COLUMN has_mainsail_spoolman BOOLEAN NOT NULL DEFAULT 0"))
+
     conn.commit()
 
 app = FastAPI(title="3DMRP", version="1.0.0")
@@ -216,6 +226,9 @@ app.include_router(slicers.router)
 app.include_router(printer_types.router)
 app.include_router(gcode.router)
 app.include_router(filepicker.router)
+app.include_router(nfc_sessions.router)
+app.include_router(mobile_ws.router)
+app.include_router(print_labels.router)
 
 
 @app.get("/api/health")

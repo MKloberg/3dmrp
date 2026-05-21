@@ -11,7 +11,7 @@ from typing import List
 from PIL import Image as PILImage
 
 from ..database import get_db
-from ..models import Item, ModelFilament, FilamentSpec, ModelImage, ModelSlicerFile, Printer, PrinterType, Routing, RoutingStep, RoutingStepFilament, PostProcessingCost
+from ..models import Item, ModelFilament, FilamentSpec, ModelImage, ModelSlicerFile, Printer, PrinterType, Routing, RoutingStep, RoutingStepFilament, RoutingStepSlicerFile, PostProcessingCost
 from ..schemas import (
     ItemCreate, ItemOut,
     ModelFilamentCreate, ModelFilamentUpdate, ModelFilamentOut,
@@ -21,6 +21,7 @@ from ..schemas import (
     RoutingCreate, RoutingUpdate, RoutingOut,
     RoutingStepCreate, RoutingStepUpdate, RoutingStepOut, RoutingStepReorderItem,
     RoutingStepFilamentCreate, RoutingStepFilamentUpdate, RoutingStepFilamentOut,
+    StepSlicerFileOut,
     PostProcessingCostCreate, PostProcessingCostUpdate, PostProcessingCostOut,
 )
 
@@ -281,10 +282,11 @@ def open_in_slicer(item_id: int, printer_type_id: int, db: Session = Depends(get
     ).first()
     if not sf:
         raise HTTPException(status_code=400, detail="No model file set for this item and printer type")
+    exe = printer_type.slicer.executable_path.strip().strip('"\'')
     try:
-        subprocess.Popen([printer_type.slicer.executable_path, sf.file_path])
+        subprocess.Popen([exe, sf.file_path])
     except FileNotFoundError:
-        raise HTTPException(status_code=400, detail=f"Slicer executable not found: {printer_type.slicer.executable_path}")
+        raise HTTPException(status_code=400, detail=f"Slicer executable not found: {exe}")
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -414,6 +416,53 @@ def delete_routing_step_filament(item_id: int, routing_id: int, step_id: int, fi
         raise HTTPException(status_code=404, detail="Filament not found")
     db.delete(fil)
     db.commit()
+
+
+# --- Routing step slicer files ---
+
+@router.put("/{item_id}/routings/{routing_id}/steps/{step_id}/slicer-file", response_model=StepSlicerFileOut)
+def set_step_slicer_file(item_id: int, routing_id: int, step_id: int, data: SlicerFileSet, db: Session = Depends(get_db)):
+    _get_routing_or_404(item_id, routing_id, db)
+    step = _get_step_or_404(routing_id, step_id, db)
+    sf = db.query(RoutingStepSlicerFile).filter(RoutingStepSlicerFile.routing_step_id == step_id).first()
+    if sf:
+        sf.file_path = data.file_path
+    else:
+        sf = RoutingStepSlicerFile(routing_step_id=step_id, file_path=data.file_path)
+        db.add(sf)
+    db.commit()
+    db.refresh(sf)
+    return sf
+
+
+@router.delete("/{item_id}/routings/{routing_id}/steps/{step_id}/slicer-file", status_code=204)
+def delete_step_slicer_file(item_id: int, routing_id: int, step_id: int, db: Session = Depends(get_db)):
+    _get_routing_or_404(item_id, routing_id, db)
+    _get_step_or_404(routing_id, step_id, db)
+    sf = db.query(RoutingStepSlicerFile).filter(RoutingStepSlicerFile.routing_step_id == step_id).first()
+    if not sf:
+        raise HTTPException(status_code=404, detail="No model file set for this step")
+    db.delete(sf)
+    db.commit()
+
+
+@router.post("/{item_id}/routings/{routing_id}/steps/{step_id}/open-slicer", status_code=204)
+def open_step_in_slicer(item_id: int, routing_id: int, step_id: int, db: Session = Depends(get_db)):
+    _get_routing_or_404(item_id, routing_id, db)
+    step = _get_step_or_404(routing_id, step_id, db)
+    sf = db.query(RoutingStepSlicerFile).filter(RoutingStepSlicerFile.routing_step_id == step_id).first()
+    if not sf:
+        raise HTTPException(status_code=400, detail="No model file set for this step")
+    printer_type = step.printer_type
+    if not printer_type or not printer_type.slicer or not printer_type.slicer.executable_path:
+        raise HTTPException(status_code=400, detail="No slicer executable configured for this step's printer type")
+    exe = printer_type.slicer.executable_path.strip().strip('"\'')
+    try:
+        subprocess.Popen([exe, sf.file_path])
+    except FileNotFoundError:
+        raise HTTPException(status_code=400, detail=f"Slicer executable not found: {exe}")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 # --- Post-processing costs ---

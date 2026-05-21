@@ -4,8 +4,8 @@ from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 
 from ..database import get_db
-from ..models import Customer, Order, Setting
-from ..schemas import CustomerCreate, CustomerUpdate, CustomerOut
+from ..models import Customer, Item, Order, Setting
+from ..schemas import CustomerCreate, CustomerUpdate, CustomerOut, CustomerOrderOut
 
 router = APIRouter(prefix="/api/customers", tags=["customers"])
 
@@ -66,15 +66,14 @@ def delete_customer(customer_id: int, db: Session = Depends(get_db)):
     db.commit()
 
 
-@router.get("/{customer_id}/orders")
+@router.get("/{customer_id}/orders", response_model=List[CustomerOrderOut])
 def get_customer_orders(customer_id: int, db: Session = Depends(get_db)):
-    from ..schemas import OrderOut
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
     orders = (
         db.query(Order)
-        .options(joinedload(Order.item))
+        .options(joinedload(Order.item).joinedload(Item.images))
         .filter(Order.customer_id == customer_id)
         .order_by(Order.date_ordered.desc())
         .all()

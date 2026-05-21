@@ -3,8 +3,61 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { getSettings, setSetting, testSpoolman } from '../../api/client'
 import { useTheme } from '../../lib/theme'
-import { CheckCircle, XCircle, Loader, Sun, Moon, ChevronLeft } from 'lucide-react'
+import { CURRENCY_SYMBOLS, CURRENCY_OPTIONS } from '../../lib/currency'
+import { CheckCircle, XCircle, Loader, Sun, Moon, ChevronLeft, Wifi } from 'lucide-react'
 import clsx from 'clsx'
+import type { WsMode } from '../../hooks/useWsMode'
+
+const WS_MODE_OPTIONS: { value: WsMode; label: string; desc: string }[] = [
+  { value: 'off', label: 'Off', desc: 'Poll only — no persistent connections.' },
+  { value: 'active', label: 'Active printers', desc: 'Subscribe while a printer card is expanded.' },
+  { value: 'all', label: 'All printers', desc: 'Subscribe to every printer continuously.' },
+]
+
+function WsModeSection() {
+  const qc = useQueryClient()
+  const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: getSettings, staleTime: 60_000 })
+  const currentMode = (settings?.printer_ws_mode as WsMode | undefined) ?? 'all'
+
+  const mutation = useMutation({
+    mutationFn: (mode: WsMode) => setSetting('printer_ws_mode', mode),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['settings'] }),
+  })
+
+  return (
+    <section className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4">
+      <div>
+        <h2 className="font-semibold text-gray-800 dark:text-gray-100 flex items-center gap-2">
+          <Wifi size={16} className="text-brand-600" /> Printer Live Updates
+        </h2>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+          Use Moonraker WebSocket subscriptions for real-time printer status instead of polling.
+        </p>
+      </div>
+      <div className="flex gap-3 flex-wrap">
+        {WS_MODE_OPTIONS.map(opt => (
+          <button
+            key={opt.value}
+            onClick={() => mutation.mutate(opt.value)}
+            disabled={mutation.isPending}
+            title={opt.desc}
+            className={clsx(
+              'px-4 py-2 rounded-lg border text-sm font-medium transition-colors',
+              currentMode === opt.value
+                ? 'bg-brand-600 border-brand-600 text-white'
+                : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+            )}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-gray-400 dark:text-gray-500">
+        {WS_MODE_OPTIONS.find(o => o.value === currentMode)?.desc}
+      </p>
+    </section>
+  )
+}
 
 export default function General() {
   const qc = useQueryClient()
@@ -31,6 +84,9 @@ export default function General() {
   const [markupMultiplier, setMarkupMultiplier] = useState('1.2')
   const [markupSaved, setMarkupSaved] = useState(false)
 
+  const [currency, setCurrency] = useState('USD')
+  const [currencySaved, setCurrencySaved] = useState(false)
+
   useEffect(() => {
     if (settings?.spoolman_url !== undefined) setSpoolmanUrl(settings.spoolman_url)
     if (settings?.square_api_token !== undefined) setSquareToken(settings.square_api_token)
@@ -38,6 +94,7 @@ export default function General() {
     if (settings?.machine_hourly_rate !== undefined) setMachineRate(settings.machine_hourly_rate)
     if (settings?.electricity_cost_kwh !== undefined) setElectricityCost(settings.electricity_cost_kwh)
     if (settings?.markup_multiplier !== undefined) setMarkupMultiplier(settings.markup_multiplier)
+    if (settings?.currency) setCurrency(settings.currency)
   }, [settings])
 
   const saveMutation = useMutation({
@@ -70,6 +127,11 @@ export default function General() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['settings'] }); setMarkupSaved(true); setTimeout(() => setMarkupSaved(false), 2000) },
   })
 
+  const saveCurrencyMutation = useMutation({
+    mutationFn: () => setSetting('currency', currency),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['settings'] }); setCurrencySaved(true); setTimeout(() => setCurrencySaved(false), 2000) },
+  })
+
   async function handleTest() {
     setTesting(true)
     setTestResult(null)
@@ -82,6 +144,8 @@ export default function General() {
   }
 
   if (isLoading) return <div className="p-6 text-sm text-gray-400">Loading…</div>
+
+  const currSym = CURRENCY_SYMBOLS[currency] ?? currency
 
   return (
     <div className="p-6 max-w-xl space-y-8">
@@ -123,6 +187,9 @@ export default function General() {
           </button>
         </div>
       </section>
+
+      {/* Printer WebSocket */}
+      <WsModeSection />
 
       {/* Spoolman */}
       <section className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4">
@@ -250,7 +317,7 @@ export default function General() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-500 dark:text-gray-400">$</span>
+          <span className="text-sm text-gray-500 dark:text-gray-400">{currSym}</span>
           <input
             type="number" min="0" step="0.01"
             className="w-32 border rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300"
@@ -279,7 +346,7 @@ export default function General() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-500 dark:text-gray-400">$</span>
+          <span className="text-sm text-gray-500 dark:text-gray-400">{currSym}</span>
           <input
             type="number" min="0" step="0.0001"
             className="w-32 border rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300"
@@ -295,6 +362,36 @@ export default function General() {
             className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 text-sm rounded-lg disabled:opacity-50"
           >
             {electricityCostSaved ? 'Saved!' : saveElectricityCostMutation.isPending ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </section>
+
+      {/* Currency */}
+      <section className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4">
+        <div>
+          <h2 className="font-semibold text-gray-800 dark:text-gray-100">Currency</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+            The currency symbol shown throughout the app for costs, pricing, and MSRP.
+          </p>
+        </div>
+        <div>
+          <select
+            className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300"
+            value={currency}
+            onChange={e => setCurrency(e.target.value)}
+          >
+            {CURRENCY_OPTIONS.map(o => (
+              <option key={o.code} value={o.code}>{o.label}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-center gap-3 pt-1">
+          <button
+            onClick={() => saveCurrencyMutation.mutate()}
+            disabled={saveCurrencyMutation.isPending}
+            className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 text-sm rounded-lg disabled:opacity-50"
+          >
+            {currencySaved ? 'Saved!' : saveCurrencyMutation.isPending ? 'Saving…' : 'Save'}
           </button>
         </div>
       </section>

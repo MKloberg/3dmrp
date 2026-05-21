@@ -97,7 +97,7 @@ export default function SpoolTagModal({ spool, onClose }: Props) {
           clearInterval(pollingRef.current!)
           pollingRef.current = null
 
-          const uids = [s.card_uid, ...(s.card_uid_b ? [s.card_uid_b] : [])]
+          const uids = [s.card_uid, ...(s.card_uid_b ? [s.card_uid_b] : [])].map(u => u.replace(/:/g, '').toLowerCase())
           setFinalUids(uids)
 
           const finalize = (uidsToWrite: string[]) =>

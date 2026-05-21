@@ -9,7 +9,7 @@ import Modal from '../components/Modal'
 import StatusBadge from '../components/StatusBadge'
 import { Plus, Trash2, Pencil, ChevronDown, ChevronRight, RefreshCw, Download, Users } from 'lucide-react'
 
-const CATEGORIES = ['Retail', 'Wholesale', 'VIP', 'One-time', 'Trade']
+const CATEGORIES = ['Retail', 'Wholesale', 'VIP', 'One-time', 'Trade', 'Consignment']
 
 const EMPTY_FORM: CustomerInput = {
   given_name: '', family_name: '', company_name: '',
@@ -140,7 +140,7 @@ function CustomerOrders({ customerId }: { customerId: number }) {
       {orders.map((order: Order) => (
         <div key={order.id} className="flex items-center justify-between text-sm py-1.5 border-b dark:border-gray-700 last:border-0">
           <div className="flex items-center gap-3 min-w-0">
-            {order.item.images[0] ? (
+            {order.item?.images?.[0] ? (
               <img
                 src={`/api/items/${order.item.id}/images/${order.item.images[0].id}`}
                 className="w-8 h-8 rounded object-cover border border-gray-200 dark:border-gray-600 shrink-0"
@@ -150,7 +150,7 @@ function CustomerOrders({ customerId }: { customerId: number }) {
               <div className="w-8 h-8 rounded bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 shrink-0" />
             )}
             <div className="min-w-0">
-              <p className="font-medium truncate">{order.item.name}</p>
+              <p className="font-medium truncate">{order.item?.name ?? '(deleted item)'}</p>
               <p className="text-xs text-gray-400">{new Date(order.date_ordered).toLocaleDateString()} · ×{order.quantity}</p>
             </div>
           </div>
@@ -283,6 +283,7 @@ export default function Customers() {
 
   const [search, setSearch] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
+  const [sortBy, setSortBy] = useState<'name_asc' | 'name_desc' | 'recent' | 'category' | 'company'>('name_asc')
   const [expanded, setExpanded] = useState<number | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<Customer | null>(null)
@@ -319,12 +320,28 @@ export default function Customers() {
     }
   }
 
-  const filtered = customers.filter(c => {
-    const name = `${c.given_name} ${c.family_name} ${c.company_name} ${c.email}`.toLowerCase()
-    const matchSearch = !search || name.includes(search.toLowerCase())
-    const matchCat = !filterCategory || c.category === filterCategory
-    return matchSearch && matchCat
-  })
+  const filtered = customers
+    .filter(c => {
+      const name = `${c.given_name} ${c.family_name} ${c.company_name} ${c.email}`.toLowerCase()
+      const matchSearch = !search || name.includes(search.toLowerCase())
+      const matchCat = !filterCategory || c.category === filterCategory
+      return matchSearch && matchCat
+    })
+    .slice()
+    .sort((a, b) => {
+      if (sortBy === 'name_asc') return a.display_name.localeCompare(b.display_name)
+      if (sortBy === 'name_desc') return b.display_name.localeCompare(a.display_name)
+      if (sortBy === 'recent') return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      if (sortBy === 'category') {
+        const cat = (a.category || 'zzz').localeCompare(b.category || 'zzz')
+        return cat !== 0 ? cat : a.display_name.localeCompare(b.display_name)
+      }
+      if (sortBy === 'company') {
+        const co = (a.company_name || 'zzz').localeCompare(b.company_name || 'zzz')
+        return co !== 0 ? co : a.display_name.localeCompare(b.display_name)
+      }
+      return 0
+    })
 
   const linkedToSquare = customers.filter(c => c.square_id).length
 
@@ -377,6 +394,17 @@ export default function Customers() {
         >
           <option value="">All categories</option>
           {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select
+          className="border rounded-lg px-3 py-1.5 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300"
+          value={sortBy}
+          onChange={e => setSortBy(e.target.value as typeof sortBy)}
+        >
+          <option value="name_asc">Name A–Z</option>
+          <option value="name_desc">Name Z–A</option>
+          <option value="recent">Recently added</option>
+          <option value="category">Category</option>
+          <option value="company">Company</option>
         </select>
         <span className="text-xs text-gray-400">{filtered.length} customer{filtered.length !== 1 ? 's' : ''}</span>
       </div>

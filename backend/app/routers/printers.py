@@ -11,7 +11,7 @@ import httpx
 
 from ..database import get_db
 from ..models import Printer, PrinterSlot, FilamentSpec
-from ..schemas import PrinterCreate, PrinterUpdate, PrinterOut, PrinterHistoryResponse, MoonrakerJob, PrinterSlotOut, PrinterSlotSet, PrinterSlicerConfig, PrinterStatus, WebcamInfo, FilamentDetectSlot
+from ..schemas import PrinterCreate, PrinterUpdate, PrinterOut, PrinterHistoryResponse, MoonrakerJob, PrinterSlotOut, PrinterSlotSet, PrinterSlicerConfig, PrinterStatus, WebcamInfo, FilamentDetectSlot, PrinterCapabilityMismatch
 from pydantic import BaseModel
 from typing import Optional
 
@@ -225,7 +225,7 @@ async def get_printer_status(printer_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Printer not found")
 
     url = printer.url.rstrip("/")
-    params = "print_stats=state,filename,print_duration&display_status=progress&extruder=temperature,target&heater_bed=temperature,target"
+    params = "print_stats=state,filename,print_duration&display_status=progress&extruder=temperature,target&heater_bed=temperature,target&toolhead=extruder"
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(f"{url}/printer/objects/query?{params}")
@@ -238,6 +238,7 @@ async def get_printer_status(printer_id: int, db: Session = Depends(get_db)):
     ds = status.get("display_status", {})
     ex = status.get("extruder", {})
     bed = status.get("heater_bed", {})
+    th = status.get("toolhead", {})
 
     state = ps.get("state", "standby")
     progress = ds.get("progress")
@@ -257,6 +258,7 @@ async def get_printer_status(printer_id: int, db: Session = Depends(get_db)):
         extruder_target=ex.get("target"),
         bed_temp=bed.get("temperature"),
         bed_target=bed.get("target"),
+        active_extruder=th.get("extruder") or None,
     )
 
 
@@ -280,20 +282,24 @@ async def get_filament_detect(printer_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Printer not found")
 
     url = printer.url.rstrip("/")
+    slot_count = printer.slot_count_override or (
+        printer.printer_type.slot_count if printer.printer_type else 4
+    )
+
+    sensor_qs = "&".join(
+        f"filament_motion_sensor e{i}_filament" for i in range(slot_count)
+    )
+    query_url = f"{url}/printer/objects/query?filament_detect&{sensor_qs}"
+
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(f"{url}/printer/objects/query?filament_detect")
+            resp = await client.get(query_url)
             resp.raise_for_status()
     except (httpx.RequestError, httpx.HTTPStatusError):
         raise HTTPException(status_code=502, detail="Could not reach printer")
 
-    info_list = (
-        resp.json()
-        .get("result", {})
-        .get("status", {})
-        .get("filament_detect", {})
-        .get("info", [])
-    )
+    status = resp.json().get("result", {}).get("status", {})
+    info_list = status.get("filament_detect", {}).get("info", [])
 
     all_specs = db.query(FilamentSpec).all()
 
@@ -304,6 +310,9 @@ async def get_filament_detect(printer_id: int, db: Session = Depends(get_db)):
         sub_type = info.get("SUB_TYPE", "") or ""
         detected = material != "NONE" and vendor != "NONE"
         color_hex = _rgb_int_to_hex(info.get("RGB_1", 0xFFFFFF))
+
+        sensor = status.get(f"filament_motion_sensor e{i}_filament")
+        filament_present = sensor.get("filament_detected") if sensor else None
 
         suggested_id = None
         if detected and all_specs:
@@ -316,6 +325,7 @@ async def get_filament_detect(printer_id: int, db: Session = Depends(get_db)):
         result.append(FilamentDetectSlot(
             slot_index=i,
             detected=detected,
+            filament_present=filament_present,
             vendor=vendor,
             material=material,
             sub_type=sub_type,
@@ -423,6 +433,99 @@ async def get_mainsail_spoolman(printer_id: int, db: Session = Depends(get_db)):
             return {"configured": True, "server_url": server_url}
     except (httpx.RequestError, httpx.HTTPStatusError):
         return {"configured": None, "server_url": None}
+
+
+@router.get("/{printer_id}/capabilities-check")
+async def check_printer_capabilities(printer_id: int, db: Session = Depends(get_db)):
+    printer = db.query(Printer).filter(Printer.id == printer_id).first()
+    if not printer:
+        raise HTTPException(status_code=404, detail="Printer not found")
+
+    pt = printer.printer_type
+    if not pt:
+        return []
+
+    url = printer.url.rstrip("/")
+    actual = {"has_afc": False, "has_nfc_detect": False, "has_mainsail_spoolman": False}
+
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            # Fetch registered objects once — used for AFC and NFC detection
+            all_objects: list = []
+            try:
+                list_resp = await client.get(f"{url}/printer/objects/list")
+                if list_resp.status_code == 200:
+                    all_objects = list_resp.json().get("result", {}).get("objects", [])
+            except Exception:
+                pass
+
+            # AFC — case-insensitive name match, exact-cased query, non-empty dict response
+            try:
+                afc_obj = next((o for o in all_objects if o.lower() == "afc"), None)
+                if afc_obj:
+                    afc_resp = await client.get(f"{url}/printer/objects/query?{afc_obj}")
+                    if afc_resp.status_code == 200:
+                        afc_status = afc_resp.json().get("result", {}).get("status", {})
+                        afc_data = afc_status.get(afc_obj)
+                        if isinstance(afc_data, dict) and afc_data:
+                            actual["has_afc"] = True
+            except Exception:
+                pass
+
+            # NFC — "nfc" in any object name, OR filament_detect with rich spool data (info[].MAIN_TYPE)
+            try:
+                if any("nfc" in o.lower() for o in all_objects):
+                    actual["has_nfc_detect"] = True
+                elif "filament_detect" in all_objects:
+                    fd_resp = await client.get(f"{url}/printer/objects/query?filament_detect")
+                    if fd_resp.status_code == 200:
+                        fd_status = fd_resp.json().get("result", {}).get("status", {})
+                        fd_data = fd_status.get("filament_detect", {})
+                        if isinstance(fd_data, dict) and isinstance(fd_data.get("info"), list) and fd_data["info"]:
+                            first = fd_data["info"][0]
+                            if isinstance(first, dict) and "MAIN_TYPE" in first:
+                                actual["has_nfc_detect"] = True
+            except Exception:
+                pass
+
+            # Mainsail Spoolman — spoolman component in Moonraker server/info
+            try:
+                info_resp = await client.get(f"{url}/server/info")
+                if info_resp.status_code == 200:
+                    components = info_resp.json().get("result", {}).get("components", [])
+                    actual["has_mainsail_spoolman"] = "spoolman" in components
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    messages = {
+        "has_afc": (
+            "AFC not detected — expected for this printer type. "
+            "Verify the AFC Lite firmware mod is installed and Moonraker is reachable."
+        ),
+        "has_nfc_detect": (
+            "NFC filament detection not available — expected for this printer type. "
+            "Verify the NFC-capable firmware is installed and the filament detect module is active."
+        ),
+        "has_mainsail_spoolman": (
+            "Spoolman not enabled in Mainsail — expected for this printer type. "
+            "Enable the Spoolman integration in Moonraker settings on this printer."
+        ),
+    }
+
+    mismatches = []
+    for cap in ("has_afc", "has_nfc_detect", "has_mainsail_spoolman"):
+        expected = getattr(pt, cap)
+        if expected and not actual[cap]:
+            mismatches.append(PrinterCapabilityMismatch(
+                capability=cap,
+                expected=True,
+                actual=False,
+                message=messages[cap],
+            ))
+
+    return mismatches
 
 
 @router.get("/{printer_id}/thumbnail")

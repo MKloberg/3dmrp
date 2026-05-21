@@ -287,7 +287,7 @@ export default function Dashboard() {
                 ? ([c.given_name, c.family_name].filter(Boolean).join(' ') || c.company_name)
                 : order.customer_name
               return (
-                <div key={order.id} className="flex items-center justify-between px-4 py-3 gap-4">
+                <div key={order.id} onClick={() => navigate(`/orders?open=${order.id}#order-${order.id}`)} className="flex items-center justify-between px-4 py-3 gap-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/30">
                   <div className="flex items-center gap-3 min-w-0">
                     {order.item.images[0] ? (
                       <img

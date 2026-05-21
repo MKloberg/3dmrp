@@ -4,6 +4,7 @@ services:
       context: ./frontend
       args:
         CACHEBUST: ${CACHEBUST:-1}
+        APP_VERSION: ${APP_VERSION:-}
     restart: unless-stopped
     ports:
       - "${PORT:-7891}:80"

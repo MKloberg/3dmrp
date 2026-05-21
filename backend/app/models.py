@@ -146,6 +146,9 @@ class PrinterType(Base):
     slot_count = Column(Integer, nullable=False, default=1)
     hourly_rate = Column(Float, nullable=True)
     power_watts = Column(Float, nullable=True)
+    has_afc = Column(Boolean, nullable=False, default=False)
+    has_nfc_detect = Column(Boolean, nullable=False, default=False)
+    has_mainsail_spoolman = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     slicer = relationship("Slicer", back_populates="printer_types")
@@ -272,10 +275,22 @@ class RoutingStep(Base):
     parts_per_item = Column(Integer, nullable=False, default=1)
     estimated_print_time = Column(Integer, nullable=True)  # seconds
     include_in_planning = Column(Boolean, nullable=False, default=True)
+    gcode_file = Column(String, nullable=True)
 
     routing = relationship("Routing", back_populates="steps")
     printer_type = relationship("PrinterType")
     filaments = relationship("RoutingStepFilament", back_populates="step", cascade="all, delete-orphan", order_by="RoutingStepFilament.id")
+    slicer_file = relationship("RoutingStepSlicerFile", back_populates="step", uselist=False, cascade="all, delete-orphan")
+
+
+class RoutingStepSlicerFile(Base):
+    __tablename__ = "routing_step_slicer_files"
+
+    id = Column(Integer, primary_key=True, index=True)
+    routing_step_id = Column(Integer, ForeignKey("routing_steps.id", ondelete="CASCADE"), nullable=False, unique=True)
+    file_path = Column(String, nullable=False)
+
+    step = relationship("RoutingStep", back_populates="slicer_file")
 
 
 class RoutingStepFilament(Base):

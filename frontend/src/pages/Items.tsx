@@ -13,18 +13,19 @@ import {
   createRoutingStep, updateRoutingStep, deleteRoutingStep,
   addRoutingStepFilament, updateRoutingStepFilament, deleteRoutingStepFilament,
   getGcodeFiles, getGcodeFileMetadata, sendGcodeToPrinter, checkGcodeItemFolders, renameGcodeItemFolders,
-  getPrinterStatus, getMailsailSpoolman, getSettings, getPrinterAfcLanes, getSpoolmanStock,
+  getPrinterStatus, getMailsailSpoolman, getSettings, getPrinterAfcLanes, getSpoolmanStock, getPrinterFilamentDetect,
   createPostProcessingCost, updatePostProcessingCost, deletePostProcessingCost,
   setSlicerFile, deleteSlicerFile, openInSlicer, pickModelFile,
-  Item, FilamentSpec, Tag, PrinterType, Printer, Routing, RoutingStepFilament, SlicerFile,
-  AfcLane, AfcLanesResponse, SpoolmanSpool,
+  setStepSlicerFile, deleteStepSlicerFile, openStepInSlicer,
+  Item, FilamentSpec, Tag, PrinterType, Printer, Routing, RoutingStepFilament, SlicerFile, StepSlicerFile,
+  AfcLane, AfcLanesResponse, SpoolmanSpool, GcodeSlotInfo, FilamentDetectSlot,
 } from '../api/client'
 import Modal from '../components/Modal'
 import ConfirmModal from '../components/ConfirmModal'
 import PrintSpoolWizard from '../components/PrintSpoolWizard'
 import { SpoolIcon } from '../components/SpoolIcon'
 import { useCurrency } from '../lib/currency'
-import { Plus, Trash2, ChevronDown, ChevronRight, Pencil, Check, X, Upload, ShoppingCart, GripVertical, Tag as TagIcon, Crop as CropIcon, Download, Route, Send, RefreshCw, Clock, Box, Share2, ClipboardList as BomIcon, FolderOpen } from 'lucide-react'
+import { Plus, Trash2, ChevronDown, ChevronRight, Pencil, Check, X, Upload, ShoppingCart, GripVertical, Tag as TagIcon, Crop as CropIcon, Download, Route, Send, RefreshCw, Clock, Box, Share2, ClipboardList as BomIcon, FolderOpen, FileText, AlertTriangle, Info } from 'lucide-react'
 
 function smoothScrollTo(container: HTMLElement, target: number, duration = 700) {
   const start = container.scrollTop
@@ -163,6 +164,29 @@ function ToggleSwitch({ checked, onChange, tooltip }: { checked: boolean; onChan
   )
 }
 
+const HEX_COLOR_PALETTE: [string, number, number, number][] = [
+  ['Black',     0,   0,   0], ['White',   255, 255, 255], ['Gray',    160, 160, 160],
+  ['Silver',  210, 210, 215], ['Red',     255,   0,   0], ['Dark Red', 140,   0,   0],
+  ['Orange',  255, 128,   0], ['Yellow',  255, 230,   0], ['Gold',    220, 180,   0],
+  ['Green',     0, 180,   0], ['Dark Green', 0, 100,  0], ['Lime',    160, 230,   0],
+  ['Teal',      0, 128, 128], ['Cyan',      0, 220, 220], ['Blue',      0,   0, 255],
+  ['Navy',      0,   0, 128], ['Purple',  128,   0, 180], ['Magenta', 220,   0, 180],
+  ['Pink',    255, 130, 180], ['Hot Pink', 255,  20, 147], ['Coral',   255, 100,  80],
+  ['Brown',   128, 128,  40], ['Dark Brown', 100, 50,  10], ['Beige',  230, 215, 180],
+  ['Cream',   255, 255, 220], ['Tan',     200, 170, 120],
+]
+function hexToColorName(hex: string | null): string {
+  if (!hex) return ''
+  const v = parseInt(hex.replace('#', ''), 16)
+  const r = (v >> 16) & 0xff, g = (v >> 8) & 0xff, b = v & 0xff
+  let best = '', bestDist = Infinity
+  for (const [name, pr, pg, pb] of HEX_COLOR_PALETTE) {
+    const d = Math.sqrt((r - pr) ** 2 + (g - pg) ** 2 + (b - pb) ** 2)
+    if (d < bestDist) { bestDist = d; best = name }
+  }
+  return best
+}
+
 function formatPrintTime(secs: number): string {
   const h = Math.floor(secs / 3600)
   const m = Math.floor((secs % 3600) / 60)
@@ -180,8 +204,25 @@ const STATE_COLORS: Record<string, string> = {
   standby:  'bg-gray-400',
 }
 
+const MATERIAL_GROUPS: string[][] = [
+  ['PLA', 'PLA+', 'PLA-CF', 'PLA-HF', 'PLA-SILK', 'PLA-MATTE', 'PLA-PLUS'],
+  ['PETG', 'PETG-CF', 'PETG+'],
+  ['ABS', 'ABS+', 'ASA'],
+  ['TPU', 'TPE'],
+  ['PA', 'PA-CF', 'PA12', 'PA12-CF', 'NYLON'],
+]
+function materialsCompatible(a: string, b: string): boolean {
+  const au = a.toUpperCase().trim(), bu = b.toUpperCase().trim()
+  if (au === bu) return true
+  return MATERIAL_GROUPS.some(g => g.includes(au) && g.includes(bu))
+}
+function normalizeHex(h: string | null | undefined): string | null {
+  if (!h) return null
+  return h.startsWith('#') ? h : `#${h}`
+}
+
 function PrintWizard({
-  printer, mode, itemId, routingId, stepId, stepFilaments, filamentWeights, stepPrintTime, gcodePrintTime, onUpdateBom, onPrint, onClose,
+  printer, mode, itemId, routingId, stepId, stepFilaments, filamentWeights, filamentSlots, stepPrintTime, gcodePrintTime, filaments, onUpdateBom, onPrint, onClose,
 }: {
   printer: Printer
   mode: 'analyze' | 'send' | 'send_and_start'
@@ -190,14 +231,18 @@ function PrintWizard({
   stepId: number
   stepFilaments: RoutingStepFilament[]
   filamentWeights: number[]
+  filamentSlots: GcodeSlotInfo[]
   stepPrintTime: number | null
   gcodePrintTime: number | null
-  onUpdateBom: (data: { weights: { filId: number; grams: number }[]; printTime?: number }) => Promise<void>
+  filaments: FilamentSpec[]
+  onUpdateBom: (data: { weights: { filId: number; grams: number }[]; adds?: { filament_spec_id: number; grams: number }[]; printTime?: number }) => Promise<void>
   onPrint: (startPrint: boolean) => void
   onClose: () => void
 }) {
   const [step, setStep] = useState(1)
   const [updating, setUpdating] = useState(false)
+  const [missingSelections, setMissingSelections] = useState<Record<number, string>>({})
+  const [safetyBuffer, setSafetyBuffer] = useState(3)
   const qc = useQueryClient()
 
   useEffect(() => {
@@ -205,6 +250,8 @@ function PrintWizard({
     const id = setInterval(() => {
       qc.refetchQueries({ queryKey: ['printer-afc-lanes', printer.id] })
       qc.refetchQueries({ queryKey: ['printers'] })
+      qc.refetchQueries({ queryKey: ['spoolman-stock'] })
+      qc.refetchQueries({ queryKey: ['filament-detect', printer.id] })
     }, 3000)
     return () => clearInterval(id)
   }, [step, printer.id, qc])
@@ -218,6 +265,18 @@ function PrintWizard({
   const { data: spoolStock } = useQuery({
     queryKey: ['spoolman-stock'],
     queryFn: getSpoolmanStock,
+    staleTime: 0,
+    retry: false,
+  })
+  const { data: mainsailSpoolman } = useQuery({
+    queryKey: ['mainsail-spoolman', printer.id],
+    queryFn: () => getMailsailSpoolman(printer.id),
+    staleTime: 60_000,
+    retry: false,
+  })
+  const { data: filamentDetect } = useQuery({
+    queryKey: ['filament-detect', printer.id],
+    queryFn: () => getPrinterFilamentDetect(printer.id),
     staleTime: 0,
     retry: false,
   })
@@ -246,6 +305,22 @@ function PrintWizard({
         : lane.material
       return { colorHex, label, material: lane.material, spoolId: lane.spool_id > 0 ? lane.spool_id : null }
     }
+    // Snapmaker NFC filament detect — live per-slot chip reading
+    if (filamentDetect?.length) {
+      const fd = filamentDetect.find((s: FilamentDetectSlot) => s.slot_index === slotNum - 1)
+      if (fd) {
+        if (fd.filament_present === false) return null
+        if (!fd.detected) {
+          return { colorHex: '#888888', label: 'Filament present — no NFC tag', material: '', spoolId: null }
+        }
+        const rawHex = fd.color_hex || '#888888'
+        const colorHex = rawHex.startsWith('#') ? rawHex : `#${rawHex}`
+        const vendor = fd.vendor !== 'NONE' ? fd.vendor : null
+        const material = fd.material !== 'NONE' ? fd.material : ''
+        const label = [vendor, material !== 'NONE' ? material : null, fd.sub_type || null].filter(Boolean).join(' ') || 'Unknown filament'
+        return { colorHex, label, material, spoolId: null }
+      }
+    }
     const slot = livePrinter.slots.find(s => s.slot_number === slotNum)
     if (!slot?.filament_spec) return null
     const spec = slot.filament_spec
@@ -269,9 +344,14 @@ function PrintWizard({
   const missingFromBom = step1Rows.filter(r => r.bom == null && r.gcodeGrams != null)
   const weightDiffs = step1Rows.filter(r => r.bom != null && r.gcodeGrams != null && !r.weightMatch)
   const timeDiffers = gcodePrintTime != null && (stepPrintTime == null || Math.abs(stepPrintTime - gcodePrintTime) > 60)
-  // All G-Code slots must have BOM entries AND weights must match
+  // Missing slots where user hasn't made a decision yet (neither selected a filament nor skipped)
+  const unhandledMissing = missingFromBom.filter(r => !(r.slotNum in missingSelections))
+  // Missing slots where user selected a filament (value is a numeric string, not 'skip')
+  const selectedAdds = missingFromBom
+    .filter(r => missingSelections[r.slotNum] && missingSelections[r.slotNum] !== 'skip')
+    .map(r => ({ filament_spec_id: Number(missingSelections[r.slotNum]), grams: r.gcodeGrams! }))
   const step1Match = filamentWeights.length === 0
-    || (missingFromBom.length === 0 && weightDiffs.length === 0 && !timeDiffers)
+    || (unhandledMissing.length === 0 && weightDiffs.length === 0 && !timeDiffers)
   const hasWeightDiff = weightDiffs.length > 0 || timeDiffers
 
   async function handleUpdateBom() {
@@ -279,25 +359,128 @@ function PrintWizard({
     try {
       await onUpdateBom({
         weights: weightDiffs.map(r => ({ filId: r.bom!.id, grams: r.gcodeGrams! })),
+        adds: selectedAdds.length > 0 ? selectedAdds : undefined,
         printTime: timeDiffers ? gcodePrintTime! : undefined,
       })
     } catch (_) { /* proceed */ }
     setUpdating(false)
   }
 
+  function colorDist(a: string | null, b: string): number {
+    if (!a) return Infinity
+    const parse = (h: string) => { const v = parseInt(h.replace('#', ''), 16); return [(v >> 16) & 0xff, (v >> 8) & 0xff, v & 0xff] }
+    const [r1, g1, b1] = parse(a); const [r2, g2, b2] = parse(b)
+    return Math.sqrt((r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2)
+  }
+
+  function handleAutoAssign() {
+    const assignments: Record<number, string> = {}
+    for (const r of missingFromBom) {
+      const slot = filamentSlots[r.slotNum - 1]
+      if (!slot?.material) continue
+
+      // Start with all filaments, narrow by material
+      let pool = filaments.filter(f => f.material.toUpperCase() === slot.material!.toUpperCase())
+      if (pool.length === 0) continue
+
+      // If a preset name exists, try to narrow further by substring match
+      if (slot.preset_name) {
+        const preset = slot.preset_name.toLowerCase()
+        const byPreset = pool.filter(f =>
+          `${f.brand ?? ''} ${f.material} ${f.color_name}`.toLowerCase().includes(preset) ||
+          preset.includes(`${f.brand ?? ''} ${f.material}`.toLowerCase().trim())
+        )
+        if (byPreset.length > 0) pool = byPreset
+      }
+
+      // Final tiebreak: closest color
+      let best: FilamentSpec | null = null
+      let bestDist = Infinity
+      for (const f of pool) {
+        const d = colorDist(slot.color_hex, f.color_hex)
+        if (d < bestDist) { bestDist = d; best = f }
+      }
+      if (best) assignments[r.slotNum] = String(best.id)
+    }
+    setMissingSelections(s => ({ ...s, ...assignments }))
+  }
+
+  // ── Step 1 confidence score ─────────────────────────────────────────────
+  const confScores = step1Rows
+    .filter(r => r.gcodeGrams != null)
+    .flatMap(r => {
+      const gcodeSlot = filamentSlots[r.slotNum - 1]
+      let catalogHex: string | null = null
+      if (r.bom) {
+        catalogHex = r.bom.filament_spec.color_hex
+      } else {
+        const sel = missingSelections[r.slotNum]
+        if (sel && sel !== 'skip') catalogHex = filaments.find(f => String(f.id) === sel)?.color_hex ?? null
+      }
+      if (!gcodeSlot?.color_hex || !catalogHex) return []
+      return [Math.max(0, 1 - colorDist(gcodeSlot.color_hex, catalogHex) / 441)]
+    })
+  const allColorOk = confScores.every(s => s >= 0.8)
+  const overallConf = confScores.length > 0 ? (allColorOk ? 1 : Math.min(...confScores)) : null
+  const confPct = overallConf != null ? Math.round(overallConf * 100) : null
+  const confHigh = confPct != null && confPct >= 80
+
   // ── Step 2: Loaded vs BOM ────────────────────────────────────────────────
+  type S2Match = 'match' | 'soft_mismatch' | 'color_mismatch' | 'hard_mismatch' | 'none'
   const step2Rows = stepFilaments.map((bom, idx) => {
     const slotNum = idx + 1
     const loaded = getLoadedForSlot(slotNum)
-    const matches = loaded != null && loaded.material.toLowerCase() === bom.filament_spec.material.toLowerCase()
-    const suggestions = (spoolStock?.spools ?? [])
-      .filter(s => s.filament.material.toLowerCase() === bom.filament_spec.material.toLowerCase())
-      .filter(s => (s.remaining_weight ?? 0) >= bom.grams * 0.9)
-      .sort((a, b) => (a.remaining_weight ?? 0) - (b.remaining_weight ?? 0))
-      .slice(0, 3)
-    return { slotNum, bom, loaded, matches, suggestions }
+    const bomMat = bom.filament_spec.material
+    const bomHex = normalizeHex(bom.filament_spec.color_hex)
+
+    let matchStatus: S2Match = 'none'
+    if (loaded) {
+      if (!materialsCompatible(loaded.material, bomMat)) {
+        matchStatus = 'hard_mismatch'
+      } else {
+        const loadedHex = normalizeHex(loaded.colorHex)
+        const colorScore = bomHex && loadedHex ? Math.max(0, 1 - colorDist(bomHex, loadedHex) / 441) : null
+        const colorOk = colorScore == null || colorScore >= 0.8
+        const exactMat = loaded.material.toUpperCase().trim() === bomMat.toUpperCase().trim()
+        matchStatus = colorOk && exactMat ? 'match' : colorOk ? 'soft_mismatch' : 'color_mismatch'
+      }
+    }
+
+    const needsSuggestions = matchStatus !== 'match' && matchStatus !== 'soft_mismatch'
+    const suggestions: SpoolmanSpool[] = []
+    if (needsSuggestions) {
+      const compatible = (spoolStock?.spools ?? []).filter(s =>
+        !s.archived &&
+        materialsCompatible(s.filament.material, bomMat) &&
+        (s.remaining_weight ?? 0) >= bom.grams + safetyBuffer
+      )
+      const byFilamentId = new Map<number, SpoolmanSpool[]>()
+      for (const s of compatible) {
+        const arr = byFilamentId.get(s.filament.id) ?? []; arr.push(s)
+        byFilamentId.set(s.filament.id, arr)
+      }
+      const reps: { spool: SpoolmanSpool; score: number }[] = []
+      for (const [, group] of byFilamentId) {
+        const best = group.slice().sort((a, b) => (a.remaining_weight ?? 0) - (b.remaining_weight ?? 0))[0]
+        const spoolHex = normalizeHex(best.filament.color_hex)
+        const colorScore = bomHex && spoolHex ? Math.max(0, 1 - colorDist(bomHex, spoolHex) / 441) : 0
+        const brandBonus = (bom.filament_spec.brand && best.filament.vendor?.name?.toLowerCase() === bom.filament_spec.brand.toLowerCase()) ? 0.05 : 0
+        const exactMatBonus = best.filament.material.toUpperCase().trim() === bomMat.toUpperCase().trim() ? 0.1 : 0
+        reps.push({ spool: best, score: colorScore + brandBonus + exactMatBonus })
+      }
+      reps.sort((a, b) => b.score - a.score)
+      suggestions.push(...reps.map(r => r.spool))
+    }
+
+    return { slotNum, bom, loaded, matchStatus, suggestions }
   })
-  const step2AllMatch = step2Rows.length > 0 && step2Rows.every(r => r.matches)
+  const step2AllMatch = step2Rows.length > 0 && step2Rows.every(r => r.matchStatus === 'match' || r.matchStatus === 'soft_mismatch')
+  const step2ConfScores = step2Rows.map(r =>
+    r.matchStatus === 'match' ? 1.0 :
+    r.matchStatus === 'soft_mismatch' ? 0.85 :
+    r.matchStatus === 'color_mismatch' ? 0.4 : 0.0
+  )
+  const step2ConfPct = step2ConfScores.length > 0 ? Math.round(Math.min(...step2ConfScores) * 100) : null
 
   const modeLabel = mode === 'send_and_start' ? 'Send & Start' : mode === 'send' ? 'Send' : 'Analyze'
 
@@ -325,23 +508,66 @@ function PrintWizard({
         {/* ── Step 1 ── */}
         {step === 1 && (
           <div className="space-y-3">
+            {filamentWeights.length > 0 && (
+              <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+                <div className="flex items-start gap-2 min-w-0">
+                  <Info size={13} className="text-green-600 dark:text-green-400 shrink-0 mt-0.5" />
+                  <p className="text-xs text-green-700 dark:text-green-300 leading-relaxed">
+                    Automatically matches G-Code filament slots to your catalog by material type and color proximity. Review assignments below before updating your BOM.
+                  </p>
+                </div>
+                {confPct != null && (
+                  <div className={`flex items-center gap-1.5 shrink-0 font-medium text-xs ${confHigh ? 'text-green-600 dark:text-green-400' : 'text-amber-500 dark:text-amber-400'}`}>
+                    {confHigh
+                      ? <Check size={14} strokeWidth={3} />
+                      : <AlertTriangle size={14} />}
+                    {confPct}%
+                  </div>
+                )}
+              </div>
+            )}
             <table className="w-full text-sm border-collapse">
               <thead>
                 <tr className="border-b dark:border-gray-600">
-                  <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 pr-3 w-10">Slot</th>
-                  <th className="text-right text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 pr-6 w-20 whitespace-nowrap">G-Code (g)</th>
-                  <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2">BOM Spec</th>
+                  <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 pr-3 w-8">Slot</th>
+                  <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 pr-4">G-Code</th>
+                  <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2">BOM Filaments</th>
                   <th className="w-6 pb-2" />
                 </tr>
               </thead>
               <tbody className="divide-y dark:divide-gray-700">
-                {step1Rows.map(r => (
+                {step1Rows.map(r => {
+                  const gcodeSlot = filamentSlots[r.slotNum - 1]
+                  const catalogHex = r.bom
+                    ? r.bom.filament_spec.color_hex
+                    : (() => { const sel = missingSelections[r.slotNum]; return (sel && sel !== 'skip') ? (filaments.find(f => String(f.id) === sel)?.color_hex ?? null) : null })()
+                  const colorOk = !gcodeSlot?.color_hex || !catalogHex || (1 - colorDist(gcodeSlot.color_hex, catalogHex) / 441) >= 0.8
+                  return (
                   <tr key={r.slotNum}>
                     <td className="py-2.5 pr-3 text-xs text-gray-400 tabular-nums align-middle">#{r.slotNum}</td>
-                    <td className="py-2.5 pr-6 text-right align-middle">
-                      {r.gcodeGrams != null
-                        ? <span className="text-xs text-gray-700 dark:text-gray-200 tabular-nums">{r.gcodeGrams.toFixed(1)}</span>
-                        : <span className="text-xs text-gray-400">—</span>}
+                    <td className="py-2.5 pr-4 align-middle">
+                      {gcodeSlot ? (
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-1.5">
+                            {gcodeSlot.color_hex && (
+                              <span className="w-2.5 h-2.5 rounded-full shrink-0 border border-black/10 dark:border-white/10" style={{ backgroundColor: gcodeSlot.color_hex }} />
+                            )}
+                            <span className="text-xs text-gray-700 dark:text-gray-200">
+                              {gcodeSlot.preset_name ?? (gcodeSlot.material ?? '—') + (gcodeSlot.brand ? ` · ${gcodeSlot.brand}` : '')}
+                              {gcodeSlot.color_hex && ` ${hexToColorName(gcodeSlot.color_hex)}`}
+                            </span>
+                          </div>
+                          {r.gcodeGrams != null && (
+                            <div className={`text-xs tabular-nums pl-4 ${r.bom && !r.weightMatch ? 'text-red-400 font-semibold' : 'text-gray-500'}`}>
+                              {r.gcodeGrams.toFixed(1)} g
+                            </div>
+                          )}
+                        </div>
+                      ) : r.gcodeGrams != null ? (
+                        <span className="text-xs text-gray-500 tabular-nums">{r.gcodeGrams.toFixed(1)} g</span>
+                      ) : (
+                        <span className="text-xs text-gray-400">—</span>
+                      )}
                     </td>
                     <td className="py-2.5 align-middle">
                       {r.bom ? (
@@ -360,16 +586,42 @@ function PrintWizard({
                           </div>
                         </div>
                       ) : (
-                        <span className="text-xs text-gray-400 italic">Not in BOM</span>
+                        <div className="space-y-1">
+                          <select
+                            className="w-full text-xs border rounded px-1.5 py-1 dark:bg-gray-700 dark:border-gray-600 border-amber-400 dark:border-amber-500"
+                            value={missingSelections[r.slotNum] ?? ''}
+                            onChange={e => setMissingSelections(s => ({ ...s, [r.slotNum]: e.target.value }))}
+                          >
+                            <option value="">— select filament to add —</option>
+                            <option value="skip">Skip (leave out of BOM)</option>
+                            {filaments.map(f => (
+                              <option key={f.id} value={f.id}>
+                                {f.material} — {f.color_name}{f.brand ? ` (${f.brand})` : ''}
+                              </option>
+                            ))}
+                          </select>
+                          {r.gcodeGrams != null && <div className="text-xs text-gray-400 pl-0.5">{r.gcodeGrams.toFixed(1)} g from G-Code</div>}
+                        </div>
                       )}
                     </td>
                     <td className="py-2.5 pl-2 align-middle">
-                      {r.bom == null ? null : r.weightMatch
-                        ? <Check size={14} className="text-green-500" strokeWidth={3} />
-                        : <X size={14} className="text-red-400" strokeWidth={3} />}
+                      {r.bom == null
+                        ? missingSelections[r.slotNum] === 'skip'
+                          ? <Check size={14} className="text-gray-400" strokeWidth={2} />
+                          : missingSelections[r.slotNum]
+                            ? colorOk
+                              ? <Check size={14} className="text-amber-500" strokeWidth={3} />
+                              : <AlertTriangle size={14} className="text-amber-500" />
+                            : null
+                        : !colorOk
+                          ? <AlertTriangle size={14} className="text-amber-500" />
+                          : r.weightMatch
+                            ? <Check size={14} className="text-green-500" strokeWidth={3} />
+                            : <X size={14} className="text-red-400" strokeWidth={3} />}
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
 
@@ -385,20 +637,40 @@ function PrintWizard({
             )}
 
             <div className="flex items-center justify-between pt-2 border-t dark:border-gray-700">
-              <div>
-                {missingFromBom.length > 0 ? (
+              <div className="flex items-center gap-2">
+                {unhandledMissing.length > 0 && filamentSlots.length > 0 && (
+                  <button onClick={handleAutoAssign}
+                    className="px-3 py-1.5 text-xs bg-brand-600 hover:bg-brand-700 text-white rounded-lg">
+                    Auto-assign
+                  </button>
+                )}
+                {unhandledMissing.length > 0 ? (
                   <p className="text-xs text-amber-600 dark:text-amber-400">
-                    {`Slot${missingFromBom.length > 1 ? 's' : ''} ${missingFromBom.map(r => `#${r.slotNum}`).join(', ')} ${missingFromBom.length > 1 ? 'have' : 'has'} no BOM entry — add filaments to this item's BOM to continue.`}
+                    {`Select a filament or skip slot${unhandledMissing.length > 1 ? 's' : ''} ${unhandledMissing.map(r => `#${r.slotNum}`).join(', ')} to continue.`}
                   </p>
-                ) : hasWeightDiff ? (
+                ) : (hasWeightDiff || selectedAdds.length > 0) ? (
                   <button onClick={handleUpdateBom} disabled={updating}
                     className="px-3 py-1.5 text-xs bg-orange-500 hover:bg-orange-600 text-white rounded-lg disabled:opacity-50">
-                    {updating ? 'Updating…' : 'Update BOM to match G-Code'}
+                    {updating ? 'Updating…' : 'Update BOM to match these assignments'}
                   </button>
                 ) : step1Match ? (
-                  <div className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400 font-medium">
-                    <Check size={13} strokeWidth={3} /> BOM matches G-Code
-                  </div>
+                  filamentWeights.length === 0 ? (
+                    <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 font-medium">
+                      <Check size={13} strokeWidth={3} /> BOM confirmed
+                    </div>
+                  ) : confPct === 100 ? (
+                    <div className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400 font-medium">
+                      <Check size={13} strokeWidth={3} /> BOM matches G-Code
+                    </div>
+                  ) : confPct != null && confPct >= 80 ? (
+                    <div className="flex items-center gap-1.5 text-xs text-yellow-600 dark:text-yellow-400 font-medium">
+                      <Check size={13} strokeWidth={3} /> Close match — verify highlighted slots
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 text-xs text-orange-500 dark:text-orange-400 font-medium">
+                      <AlertTriangle size={13} strokeWidth={2.5} /> Approximate match — verify before continuing
+                    </div>
+                  )
                 ) : null}
               </div>
               <button onClick={() => setStep(2)} disabled={!step1Match}
@@ -412,82 +684,159 @@ function PrintWizard({
         {/* ── Step 2 ── */}
         {step === 2 && (
           <div className="space-y-3">
+            {step2Rows.length > 0 && step2ConfPct != null && (
+              <div className={`flex items-center justify-between px-3 py-2.5 rounded-lg border ${
+                step2ConfPct === 100
+                  ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800'
+                  : step2ConfPct >= 80
+                  ? 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800'
+                  : 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800'
+              }`}>
+                <div className="flex items-start gap-2">
+                  <Info size={14} className={`mt-0.5 shrink-0 ${step2ConfPct === 100 ? 'text-green-600 dark:text-green-400' : step2ConfPct >= 80 ? 'text-yellow-600 dark:text-yellow-400' : 'text-orange-500 dark:text-orange-400'}`} />
+                  <span className={`text-xs ${step2ConfPct === 100 ? 'text-green-700 dark:text-green-300' : step2ConfPct >= 80 ? 'text-yellow-700 dark:text-yellow-300' : 'text-orange-700 dark:text-orange-300'}`}>
+                    {step2ConfPct === 100
+                      ? 'All slots are loaded with the correct filament.'
+                      : step2ConfPct >= 80
+                      ? 'All slots have compatible filament. Some use substitutes — highlighted in amber.'
+                      : step2ConfPct > 0
+                      ? 'Some slots have the wrong filament. Load the suggested spools from inventory.'
+                      : 'One or more slots are empty or have incompatible filament.'}
+                  </span>
+                </div>
+                <div className={`flex items-center gap-1 text-xs font-bold shrink-0 ml-3 ${step2ConfPct === 100 ? 'text-green-600 dark:text-green-400' : step2ConfPct >= 80 ? 'text-yellow-600 dark:text-yellow-400' : 'text-orange-500 dark:text-orange-400'}`}>
+                  {step2ConfPct >= 80 ? <Check size={13} strokeWidth={3} /> : <AlertTriangle size={13} strokeWidth={2.5} />}
+                  {step2ConfPct}%
+                </div>
+              </div>
+            )}
+
+            {((printer.printer_type?.has_afc && !afcActive) || !spoolStock?.connected || (printer.printer_type?.has_mainsail_spoolman && mainsailSpoolman?.configured === false)) && (
+              <div className="space-y-1.5">
+                {printer.printer_type?.has_afc && !afcActive && (
+                  <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg border bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800">
+                    <AlertTriangle size={14} className="text-amber-500 shrink-0 mt-0.5" />
+                    <p className="text-xs text-amber-700 dark:text-amber-300">AFC is not active on this printer — loaded slot status cannot be read automatically, and filament usage will not be deducted in Spoolman after printing. Verify the correct filament is loaded manually, and update spool weights in Spoolman after the print completes.</p>
+                  </div>
+                )}
+                {!spoolStock?.connected && (
+                  <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg border bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800">
+                    <AlertTriangle size={14} className="text-amber-500 shrink-0 mt-0.5" />
+                    <p className="text-xs text-amber-700 dark:text-amber-300">Spoolman is not connected — inventory suggestions are unavailable and filament usage will not be tracked automatically. Update spool weights manually after printing.</p>
+                  </div>
+                )}
+                {printer.printer_type?.has_mainsail_spoolman && mainsailSpoolman?.configured === false && (
+                  <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg border bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800">
+                    <AlertTriangle size={14} className="text-amber-500 shrink-0 mt-0.5" />
+                    <p className="text-xs text-amber-700 dark:text-amber-300">Spoolman is not enabled on this printer. Enable the Spoolman integration in Mainsail settings on this printer to allow automatic filament tracking and deduction during printing.</p>
+                  </div>
+                )}
+              </div>
+            )}
+
             <table className="w-full text-sm border-collapse">
               <thead>
                 <tr className="border-b dark:border-gray-600">
                   <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 pr-3 w-10">Slot</th>
-                  <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 pr-4">Loaded</th>
-                  <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 pr-4">BOM Spec</th>
-                  <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2">Suggestions</th>
-                  <th className="w-6 pb-2" />
+                  <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2 pr-6 w-2/5">BOM Filaments</th>
+                  <th className="text-left text-xs font-semibold text-gray-500 dark:text-gray-400 pb-2">Printer / Inventory</th>
                 </tr>
               </thead>
               <tbody className="divide-y dark:divide-gray-700">
-                {step2Rows.map(r => (
-                  <tr key={r.slotNum}>
-                    <td className="py-2.5 pr-3 text-xs text-gray-400 tabular-nums align-top">#{r.slotNum}</td>
-                    <td className="py-2.5 pr-4 align-top">
-                      {r.loaded ? (
+                {step2Rows.map(r => {
+                  const showSuggestions = r.matchStatus === 'color_mismatch' || r.matchStatus === 'hard_mismatch' || r.matchStatus === 'none'
+                  const statusIcon = r.matchStatus === 'match'
+                    ? <Check size={13} className="text-green-500 shrink-0 mt-0.5" strokeWidth={3} />
+                    : r.matchStatus === 'soft_mismatch'
+                    ? <Check size={13} className="text-yellow-500 shrink-0 mt-0.5" strokeWidth={3} />
+                    : r.matchStatus === 'color_mismatch'
+                    ? <AlertTriangle size={13} className="text-amber-500 shrink-0 mt-0.5" />
+                    : <X size={13} className="text-red-400 shrink-0 mt-0.5" strokeWidth={3} />
+                  return (
+                    <tr key={r.slotNum}>
+                      <td className="py-3 pr-3 text-xs text-gray-400 tabular-nums align-top">#{r.slotNum}</td>
+                      <td className="py-3 pr-6 align-top">
                         <div className="space-y-0.5">
                           <div className="flex items-center gap-1.5">
-                            <span className="w-2.5 h-2.5 rounded-full shrink-0 border border-black/10 dark:border-white/10" style={{ backgroundColor: r.loaded.colorHex }} />
-                            <span className="text-xs text-gray-700 dark:text-gray-200">{r.loaded.label}</span>
+                            <FilamentDot hex={r.bom.filament_spec.color_hex} />
+                            <span className="text-xs text-gray-700 dark:text-gray-200">
+                              {r.bom.filament_spec.brand ? `${r.bom.filament_spec.brand} ` : ''}{r.bom.filament_spec.material} {r.bom.filament_spec.color_name}
+                            </span>
                           </div>
-                          {r.loaded.spoolId != null && (
-                            <div className="text-xs font-bold text-brand-600 dark:text-brand-400 pl-4">#{r.loaded.spoolId}</div>
+                          <div className="text-xs text-gray-500 tabular-nums pl-4">{r.bom.grams.toFixed(1)} g needed</div>
+                        </div>
+                      </td>
+                      <td className="py-3 align-top">
+                        <div className="space-y-1.5">
+                          <div className="flex items-start gap-1.5">
+                            {statusIcon}
+                            <div className="space-y-0.5 min-w-0">
+                              {r.loaded ? (
+                                <>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="w-2.5 h-2.5 rounded-full shrink-0 border border-black/10 dark:border-white/10" style={{ backgroundColor: r.loaded.colorHex }} />
+                                    <span className={`text-xs ${r.matchStatus === 'match' ? 'text-gray-700 dark:text-gray-200' : r.matchStatus === 'soft_mismatch' ? 'text-yellow-700 dark:text-yellow-300' : 'text-amber-600 dark:text-amber-400'}`}>
+                                      {r.loaded.label}
+                                    </span>
+                                    {r.loaded.spoolId != null && (
+                                      <span className="text-xs font-bold text-brand-600 dark:text-brand-400">#{r.loaded.spoolId}</span>
+                                    )}
+                                  </div>
+                                  {r.matchStatus === 'soft_mismatch' && (
+                                    <div className="text-xs text-yellow-600 dark:text-yellow-400 pl-4">Compatible substitute ({r.loaded.material})</div>
+                                  )}
+                                  {r.matchStatus === 'color_mismatch' && (
+                                    <div className="text-xs text-amber-500 dark:text-amber-400 pl-4">Wrong color for this slot</div>
+                                  )}
+                                  {r.matchStatus === 'hard_mismatch' && (
+                                    <div className="text-xs text-red-400 pl-4">Incompatible material ({r.loaded.material})</div>
+                                  )}
+                                </>
+                              ) : (
+                                <span className="text-xs text-red-400 italic">Empty — slot not loaded</span>
+                              )}
+                            </div>
+                          </div>
+                          {showSuggestions && (
+                            <div className="pl-5 space-y-1">
+                              {r.suggestions.length > 0 ? (
+                                <>
+                                  <div className="text-xs text-gray-400 dark:text-gray-500 font-medium">Available in inventory:</div>
+                                  {r.suggestions.map(s => {
+                                    const hex = normalizeHex(s.filament.color_hex)
+                                    const name = [s.filament.vendor?.name, s.filament.name].filter(Boolean).join(' ') || s.filament.material
+                                    return (
+                                      <div key={s.id} className="flex items-center gap-1.5 flex-wrap">
+                                        <span className="w-2 h-2 rounded-full shrink-0 border border-black/10 dark:border-white/10" style={{ backgroundColor: hex ?? '#ccc' }} />
+                                        <span className="text-xs text-gray-600 dark:text-gray-300">{name}</span>
+                                        <span className="text-xs font-bold text-brand-600 dark:text-brand-400">#{s.id}</span>
+                                        <span className="text-xs text-gray-400">· {s.remaining_weight?.toFixed(0)}g left</span>
+                                      </div>
+                                    )
+                                  })}
+                                </>
+                              ) : (
+                                <span className="text-xs text-gray-400 italic">No suitable spools in inventory</span>
+                              )}
+                            </div>
                           )}
                         </div>
-                      ) : (
-                        <span className="text-xs text-red-400 italic">Empty</span>
-                      )}
-                    </td>
-                    <td className="py-2.5 pr-4 align-top">
-                      <div className="space-y-0.5">
-                        <div className="flex items-center gap-1.5">
-                          <FilamentDot hex={r.bom.filament_spec.color_hex} />
-                          <span className="text-xs text-gray-700 dark:text-gray-200">
-                            {r.bom.filament_spec.brand ? `${r.bom.filament_spec.brand} ` : ''}{r.bom.filament_spec.material} {r.bom.filament_spec.color_name}
-                          </span>
-                        </div>
-                        <div className="text-xs text-gray-500 tabular-nums pl-4">{r.bom.grams.toFixed(1)} g needed</div>
-                      </div>
-                    </td>
-                    <td className="py-2.5 pr-2 align-top">
-                      {r.matches ? (
-                        <span className="text-xs text-green-600 dark:text-green-400 font-medium">Ready</span>
-                      ) : r.suggestions.length > 0 ? (
-                        <div className="space-y-0.5">
-                          {r.suggestions.map(s => (
-                            <div key={s.id} className="text-xs flex items-center gap-1.5">
-                              <span className="font-bold text-brand-600 dark:text-brand-400">#{s.id}</span>
-                              <span className="text-gray-400">{s.remaining_weight?.toFixed(0)}g left</span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="text-xs text-gray-400 italic">None found</span>
-                      )}
-                    </td>
-                    <td className="py-2.5 pl-1 align-top">
-                      {r.matches
-                        ? <Check size={14} className="text-green-500 mt-0.5" strokeWidth={3} />
-                        : <X size={14} className="text-red-400 mt-0.5" strokeWidth={3} />}
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
 
-            {step2AllMatch ? (
-              <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
-                <Check size={15} className="text-green-600 dark:text-green-400" strokeWidth={3} />
-                <span className="text-sm font-semibold text-green-700 dark:text-green-300">Ready to print — all filaments match!</span>
-              </div>
-            ) : (
-              <p className="text-xs text-gray-500 dark:text-gray-400 italic">
-                Load the correct filament spools into the printer. This view updates every 3 seconds.
-              </p>
-            )}
+            <div className="flex items-center gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-700/40 rounded-lg border border-gray-200 dark:border-gray-600">
+              <span className="text-xs text-gray-500 dark:text-gray-400">Safety buffer when suggesting partial spools:</span>
+              <input
+                type="number" min={0} max={50} value={safetyBuffer}
+                onChange={e => setSafetyBuffer(Math.max(0, Number(e.target.value)))}
+                className="w-14 border rounded px-1.5 py-0.5 text-xs dark:bg-gray-700 dark:border-gray-600 text-center"
+              />
+              <span className="text-xs text-gray-500 dark:text-gray-400">g</span>
+            </div>
 
             <div className="flex items-center justify-between pt-2 border-t dark:border-gray-700">
               <button onClick={() => setStep(1)}
@@ -994,7 +1343,7 @@ function PrinterStatusRow({ printer, anySending, uploadSending, uploadSent, uplo
   )
 }
 
-function GcodePanel({ itemId, routingId, itemName, slicerName, printerTypeName, printerTypeId, stepId, stepPrintTime, printers, stepFilaments, onUpdateFromGcode }: {
+function GcodePanel({ itemId, routingId, itemName, slicerName, printerTypeName, printerTypeId, stepId, savedGcodeFile, stepPrintTime, printers, stepFilaments, filaments, onUpdateFromGcode, onGcodeFileChange }: {
   itemId: number
   routingId: number
   itemName: string
@@ -1002,12 +1351,14 @@ function GcodePanel({ itemId, routingId, itemName, slicerName, printerTypeName, 
   printerTypeName: string
   printerTypeId: number
   stepId: number
+  savedGcodeFile?: string | null
   stepPrintTime: number | null
   printers: Printer[]
   stepFilaments: RoutingStepFilament[]
-  onUpdateFromGcode: (data: { weights: { filId: number; grams: number }[]; printTime?: number }) => Promise<void>
+  filaments: FilamentSpec[]
+  onUpdateFromGcode: (data: { weights: { filId: number; grams: number }[]; adds?: { filament_spec_id: number; grams: number }[]; printTime?: number }) => Promise<void>
+  onGcodeFileChange?: (file: string) => void
 }) {
-  const storageKey = `gcode-sel:${stepId}`
   const qc = useQueryClient()
 
   const { data, isLoading, refetch, isFetching } = useQuery({
@@ -1016,16 +1367,16 @@ function GcodePanel({ itemId, routingId, itemName, slicerName, printerTypeName, 
     staleTime: 0,
   })
 
-  const [selected, setSelected] = useState<string>(() => localStorage.getItem(storageKey) ?? '')
+  const [selected, setSelected] = useState<string>(savedGcodeFile ?? '')
+
+  // Sync when savedGcodeFile arrives from the DB (covers the case where items were still
+  // loading on first render and selected was initialised to '')
+  useEffect(() => {
+    setSelected(prev => prev || savedGcodeFile || '')
+  }, [savedGcodeFile])
 
   const files = data?.files ?? []
   const activeFile = files.includes(selected) ? selected : (files[0] ?? '')
-  useEffect(() => {
-    if (files.length && activeFile && activeFile !== selected) {
-      setSelected(activeFile)
-      localStorage.setItem(storageKey, activeFile)
-    }
-  }, [activeFile, selected, files.length, storageKey])
 
   const { data: metadata } = useQuery({
     queryKey: ['gcode-metadata', itemName, slicerName, printerTypeName, activeFile],
@@ -1088,10 +1439,10 @@ function GcodePanel({ itemId, routingId, itemName, slicerName, printerTypeName, 
 
   function selectFile(f: string) {
     setSelected(f)
-    localStorage.setItem(storageKey, f)
     setSentPrinterId(null)
     setSendError(null)
     setProgress(0)
+    onGcodeFileChange?.(f)
   }
 
   const matchingPrinters = printers.filter(p => p.printer_type_id === printerTypeId)
@@ -1176,6 +1527,7 @@ function GcodePanel({ itemId, routingId, itemName, slicerName, printerTypeName, 
           <select
             value={activeFile}
             onChange={e => selectFile(e.target.value)}
+            onFocus={() => refetch()}
             className="w-full border rounded px-2 py-1 text-xs font-mono dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
           >
             {files.map(f => <option key={f} value={f}>{f}</option>)}
@@ -1220,8 +1572,10 @@ function GcodePanel({ itemId, routingId, itemName, slicerName, printerTypeName, 
           stepId={stepId}
           stepFilaments={stepFilaments}
           filamentWeights={metadata?.filament_weights ?? []}
+          filamentSlots={metadata?.filament_slots ?? []}
           stepPrintTime={stepPrintTime}
           gcodePrintTime={metadata?.estimated_time ?? null}
+          filaments={filaments}
           onUpdateBom={onUpdateFromGcode}
           onPrint={(startPrint) => { const p = wizardState.printer; setWizardState(null); doSend(p.id, startPrint) }}
           onClose={() => setWizardState(null)}
@@ -1297,6 +1651,7 @@ function SlicerFileRow({ itemId, printerType, slicerFile, onChanged }: {
   const [editing, setEditing] = useState(false)
   const [path, setPath] = useState(slicerFile?.file_path ?? '')
   const [opening, setOpening] = useState(false)
+  const [openError, setOpenError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [picking, setPicking] = useState(false)
 
@@ -1320,7 +1675,10 @@ function SlicerFileRow({ itemId, printerType, slicerFile, onChanged }: {
 
   async function handleOpen() {
     setOpening(true)
-    try { await openInSlicer(itemId, printerType.id) } finally { setOpening(false) }
+    setOpenError(null)
+    try { await openInSlicer(itemId, printerType.id) }
+    catch (e) { setOpenError(e instanceof Error ? e.message : 'Failed to open slicer') }
+    finally { setOpening(false) }
   }
 
   // fillInput=true: just populate the text field (used when already in edit mode)
@@ -1396,6 +1754,7 @@ function SlicerFileRow({ itemId, printerType, slicerFile, onChanged }: {
             >
               {opening ? 'Opening…' : 'Open'}
             </button>
+            {openError && <span className="text-xs text-red-500 truncate" title={openError}>Error</span>}
             {browseBtn(false, slicerFile.file_path)}
             <button onClick={() => { setPath(slicerFile.file_path); setEditing(true) }} className="shrink-0 text-gray-400 hover:text-gray-600">
               <Pencil size={13} />
@@ -1423,6 +1782,129 @@ function SlicerFileRow({ itemId, printerType, slicerFile, onChanged }: {
         )}
       </div>
     </>
+  )
+}
+
+function StepSlicerFileRow({ itemId, routingId, stepId, slicerFile, itemFallbackFile, hasSlicer, onChanged }: {
+  itemId: number
+  routingId: number
+  stepId: number
+  slicerFile: StepSlicerFile | null
+  itemFallbackFile: SlicerFile | undefined
+  hasSlicer: boolean
+  onChanged: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [path, setPath] = useState(slicerFile?.file_path ?? '')
+  const [saving, setSaving] = useState(false)
+  const [picking, setPicking] = useState(false)
+  const [opening, setOpening] = useState(false)
+  const [openError, setOpenError] = useState<string | null>(null)
+
+  async function handleSave() {
+    if (!path.trim()) return
+    setSaving(true)
+    try {
+      await setStepSlicerFile(itemId, routingId, stepId, path.trim())
+      onChanged()
+      setEditing(false)
+    } finally { setSaving(false) }
+  }
+
+  async function handleDelete() {
+    await deleteStepSlicerFile(itemId, routingId, stepId)
+    setPath('')
+    onChanged()
+  }
+
+  async function handleOpen() {
+    setOpening(true)
+    setOpenError(null)
+    try { await openStepInSlicer(itemId, routingId, stepId) }
+    catch (e) { setOpenError(e instanceof Error ? e.message : 'Failed to open slicer') }
+    finally { setOpening(false) }
+  }
+
+  async function handleBrowse(fillInput = false, currentPath?: string) {
+    setPicking(true)
+    try {
+      const result = await pickModelFile(currentPath)
+      if (!result.path) return
+      if (fillInput) {
+        setPath(result.path)
+      } else {
+        setSaving(true)
+        try {
+          await setStepSlicerFile(itemId, routingId, stepId, result.path)
+          setPath(result.path)
+          onChanged()
+          setEditing(false)
+        } finally { setSaving(false) }
+      }
+    } finally { setPicking(false) }
+  }
+
+  const browseBtn = (fillInput: boolean, currentPath?: string) => (
+    <button onClick={() => handleBrowse(fillInput, currentPath)} disabled={picking || saving}
+      className="shrink-0 text-gray-400 hover:text-brand-600 disabled:opacity-40" title="Browse for file">
+      {picking ? <span className="text-xs leading-none">…</span> : <FolderOpen size={13} />}
+    </button>
+  )
+
+  return (
+    <div className="pt-1 border-t border-gray-200 dark:border-gray-600 mt-1">
+      <div className="flex items-center gap-2 py-1">
+        <FileText size={12} className="text-gray-400 shrink-0" />
+        <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide shrink-0">Model File</span>
+      </div>
+      <div className="flex items-center gap-2 pb-1">
+      {editing ? (
+        <>
+          <input autoFocus
+            className="flex-1 border rounded px-2 py-1 text-xs font-mono dark:bg-gray-700 dark:border-gray-600"
+            placeholder="C:\path\to\model.3mf"
+            value={path}
+            onChange={e => setPath(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') setEditing(false) }}
+          />
+          {browseBtn(true, path || undefined)}
+          <button onClick={handleSave} disabled={saving || !path.trim()} className="text-green-600 hover:text-green-700 disabled:opacity-40 shrink-0"><Check size={14} /></button>
+          <button onClick={() => setEditing(false)} className="text-gray-400 hover:text-gray-600 shrink-0"><X size={14} /></button>
+        </>
+      ) : slicerFile ? (
+        <>
+          <span className="flex-1 min-w-0 text-xs font-mono text-gray-600 dark:text-gray-300 truncate" title={slicerFile.file_path}>
+            {slicerFile.file_path}
+          </span>
+          {hasSlicer && (
+            <button onClick={handleOpen} disabled={opening}
+              className="shrink-0 flex items-center gap-1 text-xs text-brand-600 hover:text-brand-700 font-medium disabled:opacity-50">
+              {opening ? 'Opening…' : 'Open'}
+            </button>
+          )}
+          {openError && <span className="text-xs text-red-500 truncate" title={openError}>Error</span>}
+          {browseBtn(false, slicerFile.file_path)}
+          <button onClick={() => { setPath(slicerFile.file_path); setEditing(true) }} className="shrink-0 text-gray-400 hover:text-gray-600"><Pencil size={13} /></button>
+          <button onClick={handleDelete} className="shrink-0 text-gray-400 hover:text-red-500"><Trash2 size={13} /></button>
+        </>
+      ) : (
+        <>
+          {itemFallbackFile ? (
+            <span className="text-xs text-gray-400 italic flex-1">↑ Using item file</span>
+          ) : (
+            <span className="text-xs text-gray-400 flex-1">No model file</span>
+          )}
+          <button onClick={() => handleBrowse(false)} disabled={picking}
+            className="flex items-center gap-1 text-xs text-brand-600 hover:text-brand-700 font-medium disabled:opacity-40">
+            <FolderOpen size={12} />{picking ? 'Opening…' : 'Browse…'}
+          </button>
+          <button onClick={() => setEditing(true)} className="text-xs text-gray-400 hover:text-brand-600 flex items-center gap-1">
+            <Plus size={12} /> Type path
+          </button>
+        </>
+      )}
+      </div>
+    </div>
   )
 }
 
@@ -1909,6 +2391,16 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                 ) : (
                   <button onClick={() => { setAddingStepFil({ routingId: routing.id, stepId: step.id }); setNewStepFilForm({ specId: '', grams: '' }) }} className="text-xs text-brand-600 hover:underline flex items-center gap-0.5"><Plus size={10} /> Add filament</button>
                 )}
+                {/* Model files (per step) */}
+                <StepSlicerFileRow
+                  itemId={item.id}
+                  routingId={routing.id}
+                  stepId={step.id}
+                  slicerFile={step.slicer_file}
+                  itemFallbackFile={item.slicer_files.find(sf => sf.printer_type_id === step.printer_type_id)}
+                  hasSlicer={!!printerType?.slicer?.executable_path}
+                  onChanged={() => qc.invalidateQueries({ queryKey: ['items'] })}
+                />
                 {/* G-Code files */}
                 {printerType?.slicer && (
                   <div className="pt-1 border-t border-gray-200 dark:border-gray-600 mt-1">
@@ -1920,10 +2412,21 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                       printerTypeName={printerType.name}
                       printerTypeId={printerType.id}
                       stepId={step.id}
+                      savedGcodeFile={step.gcode_file}
                       stepPrintTime={step.estimated_print_time}
                       printers={printers}
                       stepFilaments={step.filaments}
-                      onUpdateFromGcode={async ({ weights, printTime }) => {
+                      filaments={filaments}
+                      onGcodeFileChange={async (file) => {
+                        await updateRoutingStep(item.id, routing.id, step.id, { gcode_file: file })
+                        qc.invalidateQueries({ queryKey: ['items'] })
+                      }}
+                      onUpdateFromGcode={async ({ weights, adds, printTime }) => {
+                        if (adds && adds.length > 0) {
+                          for (const a of adds) {
+                            await addRoutingStepFilament(item.id, routing.id, step.id, a)
+                          }
+                        }
                         if (weights.length > 0) {
                           await Promise.all(weights.map(u => {
                             const sf = step.filaments.find(f => f.id === u.filId)
@@ -2907,6 +3410,8 @@ export default function Items() {
   const [showForm, setShowForm] = useState(false)
   const [showTagManager, setShowTagManager] = useState(false)
   const [filterTagIds, setFilterTagIds] = useState<Set<number>>(new Set())
+  const [search, setSearch] = useState('')
+  const [sortBy, setSortBy] = useState<'name_asc' | 'name_desc' | 'recent'>('name_asc')
   const [editing, setEditing] = useState<Item | null>(null)
   const [form, setForm] = useState({ name: '', sku: '', description: '', notes: '', stl_source_url: '' })
   const [gcodeRenamePrompt, setGcodeRenamePrompt] = useState<{ oldName: string; newName: string } | null>(null)
@@ -2929,9 +3434,20 @@ export default function Items() {
     })
   }
 
-  const visibleItems = filterTagIds.size === 0
-    ? items
-    : items.filter(m => [...filterTagIds].every(tid => m.tags.some(t => t.id === tid)))
+  const visibleItems = items
+    .filter(m => {
+      const matchTag = filterTagIds.size === 0 || [...filterTagIds].every(tid => m.tags.some(t => t.id === tid))
+      const q = search.trim().toLowerCase()
+      const matchSearch = !q || m.name.toLowerCase().includes(q) || m.sku.toLowerCase().includes(q)
+      return matchTag && matchSearch
+    })
+    .slice()
+    .sort((a, b) => {
+      if (sortBy === 'name_asc') return a.name.localeCompare(b.name)
+      if (sortBy === 'name_desc') return b.name.localeCompare(a.name)
+      if (sortBy === 'recent') return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      return 0
+    })
 
   const saveMutation = useMutation({
     mutationFn: () => editing
@@ -2991,6 +3507,26 @@ export default function Items() {
         </div>
       </div>
 
+      {/* Search + sort */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <input
+          className="border rounded-lg px-3 py-1.5 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300 w-64"
+          placeholder="Search name or SKU…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+        <select
+          className="border rounded-lg px-3 py-1.5 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-300"
+          value={sortBy}
+          onChange={e => setSortBy(e.target.value as typeof sortBy)}
+        >
+          <option value="name_asc">Name A–Z</option>
+          <option value="name_desc">Name Z–A</option>
+          <option value="recent">Recently added</option>
+        </select>
+        <span className="text-xs text-gray-400">{visibleItems.length} item{visibleItems.length !== 1 ? 's' : ''}</span>
+      </div>
+
       {/* Tag filter bar */}
       {allTags.length > 0 && (
         <div className="flex flex-wrap gap-2 items-center">
@@ -3017,7 +3553,7 @@ export default function Items() {
 
       {visibleItems.length === 0 && (
         <p className="text-sm text-gray-400 italic">
-          {items.length === 0 ? 'No items yet. Add your first item.' : 'No items match the selected tags.'}
+          {items.length === 0 ? 'No items yet. Add your first item.' : 'No items match your filters.'}
         </p>
       )}
 

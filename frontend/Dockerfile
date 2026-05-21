@@ -8,6 +8,9 @@ RUN npm install
 # Pass via: $env:CACHEBUST = (Get-Date -UFormat %s); docker compose build frontend
 ARG CACHEBUST=1
 COPY . .
+# APP_VERSION is injected from the host where git is available so the sidebar shows the right tag.
+ARG APP_VERSION
+ENV APP_VERSION=$APP_VERSION
 RUN npm run build
 
 FROM nginx:alpine

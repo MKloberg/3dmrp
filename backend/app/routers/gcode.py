@@ -82,9 +82,17 @@ def gcode_file_metadata(
     filament_weights: list[float] = []
     filament_weight_total: float | None = None
     estimated_time: int | None = None
+    filament_colors: list[str] = []
+    filament_types: list[str] = []
+    filament_brands: list[str] = []
+    filament_presets: list[str] = []
+
+    def _split_semi(value: str) -> list[str]:
+        return [v.strip() for v in value.split(";") if v.strip()]
 
     def _parse_lines(lines: list[str]):
         nonlocal filament_weights, filament_weight_total, estimated_time
+        nonlocal filament_colors, filament_types, filament_brands, filament_presets
         for line in lines:
             line = line.strip()
             if not line.startswith(";"):
@@ -126,6 +134,34 @@ def gcode_file_metadata(
                     if secs > 0:
                         estimated_time = secs
 
+            if not filament_colors:
+                m = re.match(r"^;\s*filament_colou?r\s*=\s*(.+)$", line, re.IGNORECASE)
+                if m:
+                    filament_colors = [
+                        "#" + c.lstrip("#").upper() if c else ""
+                        for c in _split_semi(m.group(1))
+                    ]
+
+            if not filament_types:
+                m = re.match(r"^;\s*filament_type\s*=\s*(.+)$", line, re.IGNORECASE)
+                if m:
+                    filament_types = _split_semi(m.group(1))
+
+            if not filament_brands:
+                m = re.match(r"^;\s*filament_vendor\s*=\s*(.+)$", line, re.IGNORECASE)
+                if m:
+                    filament_brands = _split_semi(m.group(1))
+
+            if not filament_presets:
+                m = re.match(r"^;\s*filament_settings_id\s*=\s*(.+)$", line, re.IGNORECASE)
+                if m:
+                    # Each entry is a quoted string: "Name @printer" — strip quotes and @suffix
+                    raw = _split_semi(m.group(1))
+                    filament_presets = [
+                        re.sub(r'\s*@\S+$', '', v.strip('"').strip("'")).strip()
+                        for v in raw
+                    ]
+
     try:
         file_size = os.path.getsize(file_path)
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -133,9 +169,9 @@ def gcode_file_metadata(
             head = [f.readline() for _ in range(200)]
             _parse_lines(head)
 
-            # If not found yet, also scan last 16 KB (OrcaSlicer puts metadata at end)
-            if filament_weight_total is None and estimated_time is None:
-                seek_pos = max(0, file_size - 65536)
+            # If not found yet, also scan last 512 KB (Snapmaker Orca puts metadata at end of large files)
+            if not filament_weights or filament_weight_total is None or estimated_time is None:
+                seek_pos = max(0, file_size - 524288)
                 f.seek(seek_pos)
                 if seek_pos > 0:
                     f.readline()  # skip partial line
@@ -146,8 +182,20 @@ def gcode_file_metadata(
     if filament_weight_total is None and filament_weights:
         filament_weight_total = round(sum(filament_weights), 3)
 
+    slot_count = max(len(filament_weights), len(filament_colors), len(filament_types), len(filament_presets))
+    filament_slots = [
+        {
+            "color_hex": filament_colors[i] if i < len(filament_colors) else None,
+            "material": filament_types[i] if i < len(filament_types) else None,
+            "brand": filament_brands[i] if i < len(filament_brands) else None,
+            "preset_name": filament_presets[i] if i < len(filament_presets) else None,
+        }
+        for i in range(slot_count)
+    ]
+
     return {
         "filament_weights": filament_weights,
+        "filament_slots": filament_slots,
         "filament_weight_total": filament_weight_total,
         "estimated_time": estimated_time,
         "error": None,

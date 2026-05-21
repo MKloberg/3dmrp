@@ -801,6 +801,27 @@ export const patchSpoolmanLotNr = (spoolId: number, cardUids: string[]) =>
     body: JSON.stringify({ card_uids: cardUids }),
   })
 
+// --- Mobile Session (WebSocket) ---
+export interface MobileNfcWriteTask {
+  type: 'task'
+  task_type: 'nfc_write'
+  nfc_token: string
+}
+
+export interface MobilePrintLabelTask { type: 'task'; task_type: 'print_label'; spool_id: number }
+export type MobileTask = MobileNfcWriteTask | MobilePrintLabelTask
+
+export interface MobileTaskResult {
+  type: 'task_result'
+  task_type: string
+  success: boolean
+  card_uid?: string
+  card_uid_b?: string
+}
+
+export const createMobileSession = () =>
+  req<{ token: string }>('/mobile/sessions', { method: 'POST' })
+
 export async function restoreDatabase(file: File): Promise<void> {
   const form = new FormData()
   form.append('file', file)

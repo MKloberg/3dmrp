@@ -4,6 +4,8 @@ import { execSync } from 'child_process'
 import pkg from './package.json'
 
 function getAppVersion(): string {
+  // During Docker builds, git is unavailable — version is injected via APP_VERSION build arg.
+  if (process.env.APP_VERSION) return process.env.APP_VERSION.replace(/^v/, '')
   try {
     return execSync('git describe --tags --abbrev=0').toString().trim().replace(/^v/, '')
   } catch {
