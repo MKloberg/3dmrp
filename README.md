@@ -6,6 +6,8 @@ A self-hosted web app for managing 3D print items, filament inventory, orders, a
 
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-mkloberg-yellow?logo=buy-me-a-coffee&logoColor=white)](https://buymeacoffee.com/mkloberg)
 
+> **v0.4.0:** 3DMRP now has a mobile companion app. Scan a QR code once and your phone stays connected — permanently. Walk up to any spool, tag both sides with NFC, print a QR label directly to your label printer, and move on. No dialogs. No tapping "confirm" on a desktop. The spool workflow is now fully hands-free.
+>
 > **v0.3.1:** G-Code thumbnail previews with zoom & drag, native Windows file picker for model files, redesigned Analyze wizard step 1, and AFC load/unload reliability improvements.
 >
 > **v0.3.0:** 3DMRP started as a production planning tool — a place to manage items, orders, and filament. It has quietly grown into something more: a **fleet command and control center** for Klipper/Moonraker printer farms. You can now monitor every printer's live status, load and unload filament lanes remotely, mirror and interact with the printer touchscreen, and see aggregated fleet statistics across your entire operation — all from a single browser tab. The MRP roots are still here; the scope is now bigger.
@@ -150,37 +152,58 @@ The Filament Slots section below the media area shows what's loaded in each slot
 
 ---
 
-### Mobile Filament Loader
+### Mobile Companion App *(Android)*
 
-A phone-optimized workflow for loading spools at the printer — no typing required.
+A dedicated single-page app that turns your phone into a hands-free spool management terminal. Scan the QR code in the sidebar once and your phone stays paired — across page refreshes, new browser tabs, and backend restarts.
 
-#### How it works
+#### Spool intake workflow
 
-1. Open the **Mobile** QR code in the sidebar on any desktop browser and scan it with your phone. It links to `https://your-server:7892/mobile`.
-2. On the mobile landing screen, point your phone's camera at the **QR label on a printer** (printed from the Printers page). The app identifies the printer automatically.
-3. For each filament slot, tap **Scan spool** and point the camera at the Spoolman QR label on the spool you're loading. The spool is looked up in Spoolman and shown with color, material, and remaining weight.
-4. Rearrange slots with the up/down arrows if the physical order doesn't match.
-5. Tap **Confirm & Update Printer** to write the slot assignments to Moonraker via the Spoolman plugin.
+Walk up to a new spool delivery and complete the entire intake without touching a keyboard:
+
+1. Open the **Mobile** QR code in the sidebar and scan it with your Android phone. The app loads at `https://your-server:7892/mobile/app/{token}`.
+2. Tap **Add Spool(s)** to start the receive wizard — scan the Spoolman QR code on the spool packaging to identify it.
+3. Tap **Tag Spool** to write NFC tags to both sides of the spool. The phone writes the spool ID to the tag; either side can be scanned later to identify the spool at a printer.
+4. Tap **Print Label** to send a QR label directly to your configured label printer. The label comes out immediately — no browser print dialog, no desktop interaction required.
+
+#### Filament loader workflow
+
+Load filament at a printer without touching a computer:
+
+1. On the mobile app, point the camera at the **QR label on a printer** to identify it.
+2. For each filament slot, tap **Scan spool** and scan the Spoolman QR label (or NFC tag) on the spool.
+3. Rearrange slots with the up/down arrows if the physical order doesn't match.
+4. Tap **Confirm & Update Printer** to write slot assignments to Moonraker via the Spoolman plugin.
 
 #### Features
 
-- Live camera viewfinder with real-time QR decode (no button press needed)
+- **Persistent pairing** — scan once, stay connected. The session token is stored in the database and survives backend restarts; the phone reconnects automatically with no re-scan needed
+- **Real-time WebSocket bridge** — tasks and results flow instantly between phone and desktop via a dedicated relay channel
+- **NFC tag writing** — write Spoolman spool IDs to NFC tags (write both sides for convenience); tags can be scanned at any printer to identify the spool without hunting for the QR label
+- **Direct label printing** — configure a Windows label printer in **Settings → Mobile Access**; labels triggered from the mobile app bypass the browser print dialog and print immediately
+- Live camera viewfinder with real-time QR decode — no button press needed
 - Parses both plain spool IDs and full Spoolman QR URLs
 - Per-slot color swatch, vendor, material, and remaining weight
-- Re-scan or clear individual slots at any time
-- **Spoolman warning** — if the scanned printer doesn't have Spoolman active in Moonraker, a banner is shown explaining that the assignment will be saved in 3DMRP only (not pushed to the printer)
-- Works on iPhone (Safari) and Android (Chrome)
+- **Spoolman warning** — if the scanned printer doesn't have Spoolman active in Moonraker, a banner explains that the assignment will be saved in 3DMRP only
+- **Android Chrome** is the supported and tested platform
+
+#### Desktop label printing
+
+The desktop Spool Inventory page also has a **Print QR Label** button on each spool row. This opens a modal with label size selection and a browser print dialog — giving you full control over printer selection, copies, and paper size. The two flows are independent: mobile prints go direct, desktop prints go through the dialog.
+
+#### Label printer setup
+
+In **Settings → Mobile Access**, select a Windows printer from the dropdown and click **Test Print** to verify. Once saved, all mobile-triggered label prints go straight to that printer. Desktop modal prints are unaffected and always use the browser dialog.
 
 #### Accessing from your phone
 
 The sidebar QR widget auto-detects your server's LAN IP and generates the correct mobile URL. Click the QR code to expand a larger version with the full URL printed below it.
 
-HTTPS is required for camera access on real devices (both iOS and Android enforce this). 3DMRP serves HTTPS automatically on port `7892` using a self-signed certificate. The first time you open the mobile URL on a new phone, your browser will show a certificate warning — this is expected and safe to proceed past:
+HTTPS is required for camera access on real devices. 3DMRP serves HTTPS automatically on port `7892` using a self-signed certificate. The first time you open the mobile URL on a new phone, your browser will show a certificate warning — this is expected and safe to proceed past:
 
-- **iPhone / iPad (Safari):** "This Connection Is Not Private" → tap **Show Details** → **visit this website** → **Visit Website**
 - **Android (Chrome):** "Your connection is not private" → tap **Advanced** → **Proceed to [IP] (unsafe)**
+- **iPhone / iPad (Safari):** "This Connection Is Not Private" → tap **Show Details** → **visit this website** → **Visit Website**
 
-You only need to do this once per device. See **Settings → Mobile Access** to toggle between HTTPS and HTTP or review these instructions again.
+You only need to do this once per device. See **Settings → Mobile Access** to toggle between HTTPS and HTTP.
 
 ---
 
@@ -240,7 +263,7 @@ Settings are split into focused sub-pages accessible from a landing page.
 ![Settings](docs/screenshots/settings.png)
 
 - **General** — light/dark theme; Spoolman URL with live connection test; Square Personal Access Token; preferred Amazon store for purchase link auto-fill
-- **Mobile Access** — HTTPS/HTTP protocol toggle for the mobile filament loader QR codes, with certificate trust instructions for iOS and Android
+- **Mobile Access** — HTTPS/HTTP protocol toggle for QR codes; label printer selection with test print button for direct mobile-triggered label printing
 - **Slicers** — add, edit, and remove slicer software entries with executable paths; configure and scaffold the **G-Code Repository**
 - **Printer Types** — define printer categories with default slot counts and slicer assignments
 - **Database** — download a full backup or restore from a previous backup file
@@ -384,6 +407,41 @@ Set the Spoolman URL in **Settings → General** (e.g. `http://192.168.1.100:791
 - The **Mobile Filament Loader** looks up scanned spool QR codes against Spoolman and writes slot assignments back to Moonraker
 - The **Printers** page shows live Spoolman slot assignments per printer when Spoolman is active
 - AFC-equipped printers automatically enrich their lane data with Spoolman spool names, weights, and IDs
+
+---
+
+## What's new in v0.4.0
+
+### Mobile companion app — hands-free spool workflow
+
+The headline feature of this release is a dedicated **Android mobile app** that pairs with the desktop over a persistent WebSocket connection. Scan the sidebar QR code once and your phone is connected for good — no re-scanning after a page refresh, a new browser tab, or a backend restart. The session token is stored in the database and automatically refreshed, so the pairing is invisible in day-to-day use.
+
+The app is designed around a single goal: **receive a new spool and put it away without touching a keyboard**. The full workflow looks like this:
+
+- Walk up to a spool delivery. Open the **Add Spool(s)** wizard on your phone.
+- Scan the Spoolman QR code on the packaging to identify the spool.
+- Tap **Tag Spool** — the phone writes the spool ID to an NFC tag. Stick a tag on each side of the spool so it can be identified from any angle at the printer.
+- Tap **Print Label** — a QR code label comes out of the label printer immediately. No dialog, no clicking through a print preview. Stick it on the spool and move on.
+
+The entire intake sequence — scan, tag ×2, label — takes seconds per spool, entirely from your phone.
+
+### Direct label printing
+
+When a label printer is configured in **Settings → Mobile Access**, labels triggered from the mobile app print directly to the Windows print queue with no browser involvement. No dialog, no tab opening, no clicking Print. The label just comes out.
+
+Desktop users retain the full browser print dialog flow from the Spool Inventory page — full control over label size, printer selection, and copies. The two paths are completely independent; changing one does not affect the other.
+
+### NFC tag writing
+
+The mobile app can write Spoolman spool IDs to NFC tags. Write a tag for each side of the spool so it can be identified at a printer regardless of which side faces out. The NFC session is managed over the WebSocket bridge — tap Tag on the phone, touch the tag, done.
+
+### Cross-device WebSocket relay
+
+A FastAPI WebSocket endpoint bridges the phone and the desktop in real time. Tasks (print label, write NFC, etc.) are pushed from either side and results flow back immediately. The relay is robust: the phone reconnects automatically after network drops, sleeps, or backend restarts, and the desktop receives a notification when the phone comes back online.
+
+### Bug fixes
+
+- **Fixes #1** — `docker compose up` on a fresh clone failed with `Cannot find module '../lib/currency'` and several other missing source files that were never committed. All source files are now in the repository and the build completes cleanly.
 
 ---
 
