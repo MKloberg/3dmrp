@@ -30,8 +30,8 @@ function emptyForm(): FilamentSpecInput {
 
 function spoolmanToInput(sf: SpoolmanFilament): FilamentSpecInput {
   return {
-    material: sf.material || 'PLA',
-    color_name: sf.name,
+    material: sf.material ?? 'PLA',
+    color_name: sf.name ?? '',
     color_hex: normalizeHex(sf.color_hex),
     brand: sf.vendor?.name ?? '',
     price: sf.price,

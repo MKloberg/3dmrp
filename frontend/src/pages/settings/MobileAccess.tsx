@@ -2,35 +2,19 @@ import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { getSettings, setSetting } from '../../api/client'
-import { Lock, Wifi, AlertTriangle, ChevronLeft, Info, Printer, CheckCircle2, XCircle } from 'lucide-react'
+import { Lock, Wifi, AlertTriangle, ChevronLeft, Info } from 'lucide-react'
 import clsx from 'clsx'
-
-function useLabelPrinters() {
-  return useQuery({
-    queryKey: ['label-printers'],
-    queryFn: () => fetch('/api/print/printers').then(r => r.json()) as Promise<{ printers: string[]; error?: string }>,
-    staleTime: 30_000,
-  })
-}
 
 export default function MobileAccess() {
   const qc = useQueryClient()
   const { data: settings, isLoading } = useQuery({ queryKey: ['settings'], queryFn: getSettings })
-  const { data: printersData } = useLabelPrinters()
 
   const [mobileProtocol, setMobileProtocol] = useState<'https' | 'http'>('https')
   const [saved, setSaved] = useState(false)
-  const [labelPrinter, setLabelPrinter] = useState('')
-  const [printerSaved, setPrinterSaved] = useState(false)
-  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'error'>('idle')
-  const [testError, setTestError] = useState('')
 
   useEffect(() => {
     if (settings?.mobile_protocol === 'http' || settings?.mobile_protocol === 'https') {
       setMobileProtocol(settings.mobile_protocol)
-    }
-    if (settings?.label_printer_name !== undefined) {
-      setLabelPrinter(settings.label_printer_name)
     }
   }, [settings])
 
@@ -42,33 +26,6 @@ export default function MobileAccess() {
       setTimeout(() => setSaved(false), 2000)
     },
   })
-
-  const savePrinterMutation = useMutation({
-    mutationFn: () => setSetting('label_printer_name', labelPrinter),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['settings'] })
-      setPrinterSaved(true)
-      setTimeout(() => setPrinterSaved(false), 2000)
-    },
-  })
-
-  async function handleTestPrint() {
-    if (!labelPrinter) return
-    setTestStatus('testing')
-    setTestError('')
-    try {
-      const res = await fetch(`/api/print/test?printer=${encodeURIComponent(labelPrinter)}`, { method: 'POST' })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({ detail: res.statusText }))
-        throw new Error(body.detail ?? res.statusText)
-      }
-      setTestStatus('ok')
-      setTimeout(() => setTestStatus('idle'), 3000)
-    } catch (e: unknown) {
-      setTestStatus('error')
-      setTestError(e instanceof Error ? e.message : String(e))
-    }
-  }
 
   if (isLoading) return <div className="p-6 text-sm text-gray-400">Loading…</div>
 
@@ -159,62 +116,6 @@ export default function MobileAccess() {
           >
             {saved ? 'Saved!' : saveMutation.isPending ? 'Saving…' : 'Save'}
           </button>
-        </div>
-      </section>
-
-      <section className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4">
-        <div>
-          <h2 className="font-semibold text-gray-800 dark:text-gray-100 flex items-center gap-2"><Printer size={16} /> Label Printer</h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-            Select a Windows printer for automatic QR code label printing. When set, spool labels triggered from the mobile app print directly to this printer — no browser dialog required.
-          </p>
-        </div>
-
-        <div className="space-y-2">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Printer</label>
-          <select
-            value={labelPrinter}
-            onChange={e => setLabelPrinter(e.target.value)}
-            className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-brand-500"
-          >
-            <option value="">— None (use browser print dialog) —</option>
-            {printersData?.printers.map(p => (
-              <option key={p} value={p}>{p}</option>
-            ))}
-          </select>
-          {printersData?.error && (
-            <p className="text-xs text-amber-600 dark:text-amber-400">{printersData.error}</p>
-          )}
-        </div>
-
-        <div className="flex items-center gap-3 flex-wrap">
-          <button
-            onClick={() => savePrinterMutation.mutate()}
-            disabled={savePrinterMutation.isPending}
-            className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 text-sm rounded-lg disabled:opacity-50"
-          >
-            {printerSaved ? 'Saved!' : savePrinterMutation.isPending ? 'Saving…' : 'Save'}
-          </button>
-          {labelPrinter && (
-            <button
-              onClick={handleTestPrint}
-              disabled={testStatus === 'testing'}
-              className={clsx(
-                'flex items-center gap-1.5 px-4 py-2 text-sm rounded-lg border transition-colors disabled:opacity-50',
-                testStatus === 'ok'
-                  ? 'border-green-500 text-green-600 dark:text-green-400'
-                  : testStatus === 'error'
-                  ? 'border-red-400 text-red-600 dark:text-red-400'
-                  : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
-              )}
-            >
-              {testStatus === 'ok' ? <CheckCircle2 size={14} /> : testStatus === 'error' ? <XCircle size={14} /> : <Printer size={14} />}
-              {testStatus === 'testing' ? 'Printing…' : testStatus === 'ok' ? 'Printed!' : testStatus === 'error' ? 'Failed' : 'Test Print'}
-            </button>
-          )}
-          {testStatus === 'error' && testError && (
-            <p className="text-xs text-red-600 dark:text-red-400 w-full">{testError}</p>
-          )}
         </div>
       </section>
     </div>
