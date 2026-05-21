@@ -6,6 +6,8 @@ A self-hosted web app for managing 3D print items, filament inventory, orders, a
 
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-mkloberg-yellow?logo=buy-me-a-coffee&logoColor=white)](https://buymeacoffee.com/mkloberg)
 
+> **v0.4.1:** Patch — fixes a crash on the Filaments and Filament Inventory pages when Spoolman returns filaments with a null name or material field.
+>
 > **v0.4.0:** 3DMRP now has a mobile companion app. Scan a QR code once and your phone stays connected — permanently. Walk up to any spool, tag both sides with NFC, print a QR label directly to your label printer, and move on. No dialogs. No tapping "confirm" on a desktop. The spool workflow is now fully hands-free.
 >
 > **v0.3.1:** G-Code thumbnail previews with zoom & drag, native Windows file picker for model files, redesigned Analyze wizard step 1, and AFC load/unload reliability improvements.
