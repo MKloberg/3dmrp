@@ -129,8 +129,8 @@ export default function FilamentInventory() {
       )
     })
     .sort((a, b) => {
-      const mc = a.filament.material.localeCompare(b.filament.material)
-      return mc !== 0 ? mc : a.filament.name.localeCompare(b.filament.name)
+      const mc = (a.filament.material ?? '').localeCompare(b.filament.material ?? '')
+      return mc !== 0 ? mc : (a.filament.name ?? '').localeCompare(b.filament.name ?? '')
     })
 
   const totalSpools = activeSpools.length

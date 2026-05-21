@@ -370,7 +370,7 @@ export default function Filaments() {
   )
   const isImported = (sf: SpoolmanFilament) =>
     importedSpoolmanIds.has(sf.id) ||
-    localKeys.has(`${sf.material.toLowerCase()}::${sf.name.toLowerCase()}`)
+    localKeys.has(`${(sf.material ?? '').toLowerCase()}::${(sf.name ?? '').toLowerCase()}`)
 
   const spoolmanMultiColorMap = new Map(
     (spoolmanData?.filaments ?? [])

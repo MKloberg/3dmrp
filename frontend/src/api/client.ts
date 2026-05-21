@@ -364,8 +364,8 @@ export interface SpoolmanVendor {
 export interface SpoolmanFilament {
   id: number
   registered: string
-  name: string
-  material: string
+  name: string | null
+  material: string | null
   price: number | null
   density: number
   diameter: number
