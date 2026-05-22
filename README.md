@@ -6,6 +6,8 @@ A self-hosted web app for managing 3D print items, filament inventory, orders, a
 
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-mkloberg-yellow?logo=buy-me-a-coffee&logoColor=white)](https://buymeacoffee.com/mkloberg)
 
+> **v0.4.7:** Spoolman webhook support on the Spool Inventory page, unified NFC tagging via the persistent mobile session, TLS certificate persistence across container restarts, and several UX refinements.
+>
 > **v0.4.3:** Patch — fixes remaining null crashes on the Spool Inventory and Filament Inventory report pages when Spoolman filaments have a null name or material field.
 >
 > **v0.4.2:** QR Code Label Printer setting moved to General Settings, plus an additional null-safety fix in the Spoolman import form.
@@ -413,6 +415,43 @@ Set the Spoolman URL in **Settings → General** (e.g. `http://192.168.1.100:791
 - The **Mobile Filament Loader** looks up scanned spool QR codes against Spoolman and writes slot assignments back to Moonraker
 - The **Printers** page shows live Spoolman slot assignments per printer when Spoolman is active
 - AFC-equipped printers automatically enrich their lane data with Spoolman spool names, weights, and IDs
+
+---
+
+## What's new in v0.4.7
+
+### Spoolman webhook support
+
+The Spool Inventory page now reacts instantly when Spoolman reports a change. Configure your Spoolman instance to POST to `http://<3dmrp-ip>:8000/api/webhooks/spoolman` (Settings → Integrations in Spoolman) and the page will refresh its stock data automatically — no manual reload, no waiting for the 60-second poll cycle. A **blinking green dot** next to the "Live data from Spoolman" label confirms the live connection is active.
+
+### NFC tagging unified with the persistent mobile session
+
+Initiating an NFC tag write from the Spool Inventory page (**Tag** button on a spool row) now uses the same persistent phone session as the sidebar QR code — no separate one-time link, no second pairing step.
+
+- **Phone already connected** — the NFC task is pushed to the phone immediately; no QR code is shown on the desktop at all
+- **Phone not connected** — a QR code is shown that links to the persistent session (`/mobile/app/{token}`); as soon as the phone connects, the task is pushed automatically
+
+After a successful tag write, the phone shows the **"Print a QR label?"** prompt regardless of whether the task came from the phone's own spool picker or was pushed from the desktop.
+
+### TLS certificate persistence
+
+The self-signed HTTPS certificate used for mobile camera access is now stored in a Docker named volume (`3dmrp_certs`). Previously, the certificate was regenerated on every `docker compose up`, which invalidated the phone's one-time "proceed anyway" trust acceptance and required re-accepting the warning after every restart.
+
+The certificate is also now generated correctly from the start:
+
+- The host machine's real LAN IP is fetched from the backend and included in the certificate's Subject Alternative Name (SAN) — required by Chrome 58+ for accepting a self-signed cert on a local IP
+- HTTP/2 is disabled on the HTTPS port — HTTP/2 uses a different WebSocket upgrade mechanism (RFC 8441) that conflicts with the standard nginx WebSocket proxy config; removing it restores reliable WebSocket connectivity on HTTPS
+
+The combined effect: accept the cert warning once on your phone and it stays trusted across container restarts indefinitely.
+
+### Filament management UX
+
+- **Add Filament button** on the Filaments page now opens the Spoolman web UI in a new tab rather than a local form. All filament spec management should live in Spoolman; this just saves the copy-paste step
+- **Spool Inventory link** rephrased from "New spool? Register in Spoolman first" to "New filament type? Add it in Spoolman first →" — the action is creating a filament type in Spoolman, not registering a spool
+
+### Reverse proxy WebSocket hint
+
+If the mobile app's disconnect screen detects that the app is being served from a custom domain (not a bare IP or localhost), it now shows a targeted configuration hint: the reverse proxy must forward WebSocket upgrade connections for `/api/` paths. Bare-IP and localhost installs are unaffected.
 
 ---
 
