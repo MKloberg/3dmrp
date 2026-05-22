@@ -349,7 +349,7 @@ export default function SpoolInventory() {
               onClick={() => fetch('/api/settings/open-spoolman')}
               className="text-xs text-gray-400 hover:text-teal-500 transition-colors"
             >
-              New spool? Register in Spoolman first →
+              New filament type? Add it in Spoolman first →
             </button>
           )}
         </div>
