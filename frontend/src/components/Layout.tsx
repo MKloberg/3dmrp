@@ -4,7 +4,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
   LayoutDashboard, Box, ClipboardList, TrendingUp, Disc2, Printer,
-  Settings, Users, FileText, ChevronRight, SlidersHorizontal, Layers, Database, X,
+  Settings, Users, FileText, ChevronRight, SlidersHorizontal, Layers, Database, X, ExternalLink,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { QRCodeSVG } from 'qrcode.react'
@@ -139,6 +139,28 @@ function NavTreeItem({ item }: { item: NavItemDef }) {
         </div>
       )}
     </div>
+  )
+}
+
+function SpoolmanBadge() {
+  const { data } = useQuery({
+    queryKey: ['spoolman-ping'],
+    queryFn: () => fetch('/api/spoolman/ping').then(r => r.json()) as Promise<{ connected: boolean; url?: string }>,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  })
+
+  if (!data?.connected || !data.url) return null
+
+  return (
+    <button
+      onClick={() => fetch('/api/settings/open-spoolman')}
+      title="Open Spoolman"
+      className="absolute bottom-1.5 right-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-teal-600/90 hover:bg-teal-500 transition-colors text-white shadow-md"
+    >
+      <Disc2 size={10} />
+      <ExternalLink size={9} />
+    </button>
   )
 }
 
@@ -294,8 +316,9 @@ export default function Layout() {
     <div className="flex h-screen overflow-hidden">
       <PrinterWsManager />
       <aside className="w-56 bg-gray-900 text-white flex flex-col shrink-0">
-        <div className="px-4 py-3 border-b border-gray-700 shrink-0">
+        <div className="relative px-4 py-3 border-b border-gray-700 shrink-0">
           <img src="/logo.png" alt="3DMRP" className="h-16 w-auto cursor-pointer" onClick={() => navigate('/')} />
+          <SpoolmanBadge />
         </div>
         <nav className="px-3 py-4 space-y-1 overflow-y-auto shrink-0">
           {nav.map(item => (

@@ -55,6 +55,18 @@ def get_settings(db: Session = Depends(get_db)) -> Dict[str, str]:
     return result
 
 
+@router.get("/open-spoolman")
+def open_spoolman(db: Session = Depends(get_db)):
+    url = get_setting(db, "spoolman_url")
+    if not url:
+        raise HTTPException(status_code=404, detail="Spoolman URL not configured")
+    try:
+        subprocess.Popen(["cmd", "/c", "start", "", url.rstrip("/")])
+    except Exception:
+        webbrowser.open(url.rstrip("/"))
+    return {"ok": True}
+
+
 @router.get("/open-browser")
 async def open_browser(url: str):
     if not (url.startswith("http://localhost") or url.startswith("http://127.0.0.1")):

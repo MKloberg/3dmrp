@@ -14,6 +14,20 @@ _ASIN_RE = re.compile(r'^B[0-9A-Z]{9}$')
 router = APIRouter(prefix="/api/spoolman", tags=["spoolman"])
 
 
+@router.get("/ping")
+async def ping_spoolman(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    url = get_setting(db, "spoolman_url")
+    if not url:
+        return {"connected": False}
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(f"{url.rstrip('/')}/api/v1/info")
+            resp.raise_for_status()
+        return {"connected": True, "url": url.rstrip("/")}
+    except Exception:
+        return {"connected": False}
+
+
 @router.get("/stock")
 async def get_spoolman_stock(db: Session = Depends(get_db)) -> Dict[str, Any]:
     url = get_setting(db, "spoolman_url")
