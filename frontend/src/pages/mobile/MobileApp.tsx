@@ -419,6 +419,7 @@ export default function MobileApp() {
 
   // Connecting / reconnecting
   if (phase === 'connecting' || phase === 'disconnected') {
+    const isCustomDomain = !/^(localhost|(\d+\.)+\d+)$/.test(window.location.hostname)
     return (
       <div className="min-h-dvh bg-gray-950 flex flex-col items-center justify-center gap-5 px-6 text-center">
         <div className="w-16 h-16 rounded-full bg-gray-800 flex items-center justify-center">
@@ -434,6 +435,11 @@ export default function MobileApp() {
             {phase === 'disconnected' ? 'Reconnecting to 3DMRP…' : 'Opening secure channel…'}
           </p>
         </div>
+        {phase === 'disconnected' && isCustomDomain && (
+          <p className="text-xs text-gray-600 leading-relaxed max-w-xs">
+            Using a reverse proxy? Make sure it forwards WebSocket upgrades for <span className="font-mono text-gray-500">/api/</span>.
+          </p>
+        )}
       </div>
     )
   }
