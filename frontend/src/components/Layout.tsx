@@ -3,8 +3,8 @@ declare const __APP_VERSION__: string
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-  LayoutDashboard, Box, ClipboardList, TrendingUp, Disc2, Printer,
-  Settings, Users, FileText, ChevronRight, SlidersHorizontal, Layers, Database, X,
+  LayoutDashboard, Box, ClipboardList, TrendingUp, Printer,
+  Settings, Users, FileText, ChevronRight, SlidersHorizontal, Layers, Database, X, Disc2,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { QRCodeSVG } from 'qrcode.react'
@@ -12,6 +12,7 @@ import { usePrinterWebSocket } from '../hooks/usePrinterWebSocket'
 import { useWsMode } from '../hooks/useWsMode'
 import { getPrinters, getSpoolmanStock, getSettings, type Printer as PrinterType } from '../api/client'
 import { useMobileSession } from '../contexts/MobileSessionContext'
+import { SpoolIcon } from './SpoolIcon'
 
 type Child = { to: string; label: string; icon?: React.ElementType }
 type NavItemDef = {
@@ -158,7 +159,9 @@ function SpoolmanBadge() {
       title="Open Spoolman"
       className="absolute bottom-2 right-2 flex items-center gap-1.5 px-2 py-1 rounded-lg bg-teal-400/10 hover:bg-teal-400/20 border border-teal-400/25 hover:border-teal-400/50 backdrop-blur-sm transition-all group"
     >
-      <Disc2 size={11} className="text-teal-400 group-hover:text-teal-300 transition-colors shrink-0" />
+      <span className="opacity-90 group-hover:opacity-100 transition-opacity shrink-0">
+        <SpoolIcon size={18} color="#2dd4bf" />
+      </span>
       <span className="text-[10px] font-bold tracking-widest uppercase text-teal-400/80 group-hover:text-teal-300 transition-colors">
         Spoolman
       </span>
