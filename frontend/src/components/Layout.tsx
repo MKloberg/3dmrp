@@ -157,10 +157,10 @@ function SpoolmanBadge() {
     <button
       onClick={() => fetch('/api/settings/open-spoolman')}
       title="Open Spoolman"
-      className="absolute bottom-2 right-2 flex items-center gap-1.5 opacity-60 hover:opacity-100 transition-all duration-200 group"
+      className="absolute bottom-3 right-3 flex items-center gap-1.5 opacity-60 hover:opacity-100 transition-all duration-200 group"
     >
       <span className="group-hover:drop-shadow-[0_0_5px_rgba(251,146,60,0.6)] transition-all duration-200">
-        <SpoolIcon size={24} color="#fb923c" />
+        <SpoolIcon size={20} color="#fb923c" />
       </span>
       <span className="text-[10px] font-semibold tracking-widest uppercase text-gray-400 group-hover:text-teal-400 transition-colors duration-200">
         Spoolman
