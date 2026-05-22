@@ -208,6 +208,20 @@ export default function SpoolInventory() {
   })
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: getSettings })
 
+  const { data: webhookData } = useQuery({
+    queryKey: ['spoolman-webhook-version'],
+    queryFn: () => fetch('/api/webhooks/spoolman/version').then(r => r.json()) as Promise<{ version: number }>,
+    refetchInterval: 5_000,
+  })
+  const prevWebhookVersionRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (webhookData == null) return
+    if (prevWebhookVersionRef.current !== null && webhookData.version !== prevWebhookVersionRef.current) {
+      qc.invalidateQueries({ queryKey: ['spoolman-stock'] })
+    }
+    prevWebhookVersionRef.current = webhookData.version
+  }, [webhookData, qc])
+
   const viewSynced = useRef(false)
   useEffect(() => {
     if (settings && !viewSynced.current) {
@@ -334,7 +348,7 @@ export default function SpoolInventory() {
             <SpoolIcon size={40} color="#9ca3af" />
             Spool Inventory
           </h1>
-          <p className="text-xs text-gray-400 mt-0.5">Live data from Spoolman · refreshes every 60s</p>
+          <p className="text-xs text-gray-400 mt-0.5">Live data from Spoolman · auto-updates via webhook</p>
         </div>
         <div className="flex flex-col items-end gap-1 shrink-0">
           <button
