@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { getSettings, setSetting } from '../../api/client'
-import { Lock, Wifi, AlertTriangle, ChevronLeft, Info, Nfc } from 'lucide-react'
+import { Lock, Wifi, AlertTriangle, ChevronLeft, Info, Nfc, Globe } from 'lucide-react'
 import clsx from 'clsx'
 
 export default function MobileAccess() {
@@ -15,12 +15,16 @@ export default function MobileAccess() {
   const [nfcWriteMode, setNfcWriteMode] = useState<'push' | 'auto'>('push')
   const [nfcModeSaved, setNfcModeSaved] = useState(false)
 
+  const [mobileBaseUrl, setMobileBaseUrl] = useState('')
+  const [baseUrlSaved, setBaseUrlSaved] = useState(false)
+
   useEffect(() => {
     if (settings?.mobile_protocol === 'http' || settings?.mobile_protocol === 'https') {
       setMobileProtocol(settings.mobile_protocol)
     }
     if (settings?.nfc_write_mode === 'auto') setNfcWriteMode('auto')
     else setNfcWriteMode('push')
+    if (settings?.mobile_base_url !== undefined) setMobileBaseUrl(settings.mobile_base_url)
   }, [settings])
 
   const saveProtocolMutation = useMutation({
@@ -38,6 +42,15 @@ export default function MobileAccess() {
       qc.invalidateQueries({ queryKey: ['settings'] })
       setNfcModeSaved(true)
       setTimeout(() => setNfcModeSaved(false), 2000)
+    },
+  })
+
+  const saveBaseUrlMutation = useMutation({
+    mutationFn: () => setSetting('mobile_base_url', mobileBaseUrl.trim()),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['settings'] })
+      setBaseUrlSaved(true)
+      setTimeout(() => setBaseUrlSaved(false), 2000)
     },
   })
 
@@ -131,6 +144,38 @@ export default function MobileAccess() {
           >
             {protocolSaved ? 'Saved!' : saveProtocolMutation.isPending ? 'Saving…' : 'Save'}
           </button>
+        </div>
+      </section>
+
+      {/* Custom Base URL */}
+      <section className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4">
+        <div>
+          <h2 className="font-semibold text-gray-800 dark:text-gray-100 flex items-center gap-2"><Globe size={16} /> Base URL Override</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+            By default the QR code uses the auto-detected LAN IP. If you're running 3DMRP behind a reverse proxy with a DNS alias, set the full base URL here instead.
+          </p>
+        </div>
+        <div>
+          <input
+            type="url"
+            className="w-full border rounded-lg px-3 py-2 text-sm font-mono dark:bg-gray-900 dark:border-gray-600 dark:text-gray-200"
+            placeholder="https://3dmrp.home (leave blank to use auto-detected IP)"
+            value={mobileBaseUrl}
+            onChange={e => setMobileBaseUrl(e.target.value)}
+          />
+          <p className="text-xs text-gray-400 mt-1">No trailing slash. The QR code will link to <span className="font-mono">{mobileBaseUrl || 'https://&lt;lan-ip&gt;:7892'}/mobile/app/…</span></p>
+        </div>
+        <div className="flex items-center gap-3 pt-1">
+          <button
+            onClick={() => saveBaseUrlMutation.mutate()}
+            disabled={saveBaseUrlMutation.isPending}
+            className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 text-sm rounded-lg disabled:opacity-50"
+          >
+            {baseUrlSaved ? 'Saved!' : saveBaseUrlMutation.isPending ? 'Saving…' : 'Save'}
+          </button>
+          {mobileBaseUrl && (
+            <button onClick={() => setMobileBaseUrl('')} className="text-sm text-gray-400 hover:text-red-500">Clear</button>
+          )}
         </div>
       </section>
 

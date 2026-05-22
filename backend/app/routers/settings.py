@@ -24,7 +24,7 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 SETTING_KEYS = {"spoolman_url", "amazon_domain", "gcode_repo_path", "square_api_token", "mobile_protocol", "currency",
                 "ui_printers_view", "ui_spool_inventory_view", "ui_printer_label_size_index", "label_printer_name",
                 "label_print_quantity", "nfc_write_mode", "machine_hourly_rate", "electricity_cost_kwh",
-                "markup_multiplier", "printer_ws_mode"}
+                "markup_multiplier", "printer_ws_mode", "mobile_base_url"}
 
 
 def get_setting(db: Session, key: str) -> str:

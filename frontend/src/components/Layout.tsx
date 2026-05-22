@@ -160,6 +160,10 @@ function MobileQrWidget() {
 
   const url = useMemo(() => {
     if (!token) return null
+    if (settings?.mobile_base_url) {
+      const base = settings.mobile_base_url.replace(/\/$/, '')
+      return `${base}/mobile/app/${token}`
+    }
     const ip = lanIpData?.ip ?? window.location.hostname
     const protocol = settings?.mobile_protocol || 'https'
     if (protocol === 'https') {
