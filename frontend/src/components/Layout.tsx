@@ -160,7 +160,7 @@ function SpoolmanBadge() {
       className="absolute bottom-4 right-6 flex items-center gap-1.5 opacity-75 hover:opacity-100 transition-all duration-200 group"
     >
       <span className="inline-flex items-center group-hover:drop-shadow-[0_0_5px_rgba(251,146,60,0.6)] transition-all duration-200">
-        <SpoolIcon size={14} color="#fb923c" middleColor="#e5e7eb" hubColor="#9ca3af" />
+        <SpoolIcon size={14} color="#fb923c" />
       </span>
       <span className="text-[11px] font-semibold tracking-widest uppercase text-green-400 group-hover:text-teal-400 transition-colors duration-200">
         Spoolman
