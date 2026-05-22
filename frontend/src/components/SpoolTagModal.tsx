@@ -46,6 +46,7 @@ export default function SpoolTagModal({ spool, onClose }: Props) {
   })
 
   const mobileBase = useMemo(() => {
+    if (settings?.mobile_base_url) return settings.mobile_base_url.replace(/\/$/, '')
     const ip = lanIpData?.ip ?? window.location.hostname
     const protocol = settings?.mobile_protocol ?? 'https'
     if (protocol === 'https') {
