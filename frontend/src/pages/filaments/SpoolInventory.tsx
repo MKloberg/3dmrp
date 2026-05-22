@@ -348,7 +348,10 @@ export default function SpoolInventory() {
             <SpoolIcon size={40} color="#9ca3af" />
             Spool Inventory
           </h1>
-          <p className="text-xs text-gray-400 mt-0.5">Live data from Spoolman</p>
+          <p className="flex items-center gap-1.5 text-xs text-gray-400 mt-0.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-blink shrink-0" />
+            Live data from Spoolman
+          </p>
         </div>
         <div className="flex flex-col items-end gap-1 shrink-0">
           <button
