@@ -5,6 +5,7 @@ import {
   FilamentSpec, FilamentSpecInput,
   getSpoolmanFilaments, SpoolmanFilament,
   spoolmanBulkImport, spoolmanSync,
+  getSettings,
 } from '../api/client'
 import Modal from '../components/Modal'
 import { useNavigate } from 'react-router-dom'
@@ -310,6 +311,8 @@ export default function Filaments() {
   const qc = useQueryClient()
   const { data: filaments = [] } = useQuery({ queryKey: ['filaments'], queryFn: getFilaments })
   const { data: spoolmanData } = useQuery({ queryKey: ['spoolman-filaments'], queryFn: getSpoolmanFilaments })
+  const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: getSettings })
+  const spoolmanUrl = (settings?.spoolman_url || '').replace(/\/$/, '')
 
   const [expanded, setExpanded] = useState<number | null>(null)
   const [showForm, setShowForm] = useState(false)
@@ -441,9 +444,12 @@ export default function Filaments() {
               <Download size={14} /> Import from Spoolman ({notImported.length})
             </button>
           )}
-          <button onClick={openCreate}
-            className="flex items-center gap-1.5 bg-brand-600 hover:bg-brand-700 text-white text-sm px-4 py-2 rounded-lg">
-            <Plus size={15} /> Add Filament
+          <button
+            onClick={() => spoolmanUrl ? window.open(spoolmanUrl, '_blank') : undefined}
+            disabled={!spoolmanUrl}
+            className="flex items-center gap-1.5 bg-brand-600 hover:bg-brand-700 text-white text-sm px-4 py-2 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <ExternalLink size={15} /> Add Filament
           </button>
           </div>
         </div>
