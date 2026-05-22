@@ -14,11 +14,9 @@ ENV APP_VERSION=$APP_VERSION
 RUN npm run build
 
 FROM nginx:alpine
-RUN apk add --no-cache openssl && \
-    openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
-        -keyout /etc/ssl/private/nginx-selfsigned.key \
-        -out /etc/ssl/certs/nginx-selfsigned.crt \
-        -subj "/CN=3dmrp-local"
+RUN apk add --no-cache openssl
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-EXPOSE 443
+COPY docker-entrypoint.sh /docker-entrypoint.d/10-gen-cert.sh
+RUN chmod +x /docker-entrypoint.d/10-gen-cert.sh
+EXPOSE 80 443
