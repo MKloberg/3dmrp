@@ -163,7 +163,7 @@ function SpoolmanBadge() {
         <SpoolIcon size={14} color="#fb923c" />
       </span>
       <span className="text-[11px] font-semibold tracking-wide text-green-400 group-hover:text-teal-400 transition-colors duration-200">
-        Spoolman
+        <span className="text-[13px]">S</span>pool<span className="text-[13px]">M</span>an
       </span>
     </button>
   )
