@@ -400,8 +400,8 @@ export interface SpoolmanSpool {
   last_used: string | null
   filament: {
     id: number
-    name: string
-    material: string
+    name: string | null
+    material: string | null
     color_hex: string | null
     multi_color_hexes: string | null
     vendor: { id: number; name: string } | null

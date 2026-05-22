@@ -451,7 +451,7 @@ function PrintWizard({
     if (needsSuggestions) {
       const compatible = (spoolStock?.spools ?? []).filter(s =>
         !s.archived &&
-        materialsCompatible(s.filament.material, bomMat) &&
+        materialsCompatible(s.filament.material ?? '', bomMat) &&
         (s.remaining_weight ?? 0) >= bom.grams + safetyBuffer
       )
       const byFilamentId = new Map<number, SpoolmanSpool[]>()
@@ -465,7 +465,7 @@ function PrintWizard({
         const spoolHex = normalizeHex(best.filament.color_hex)
         const colorScore = bomHex && spoolHex ? Math.max(0, 1 - colorDist(bomHex, spoolHex) / 441) : 0
         const brandBonus = (bom.filament_spec.brand && best.filament.vendor?.name?.toLowerCase() === bom.filament_spec.brand.toLowerCase()) ? 0.05 : 0
-        const exactMatBonus = best.filament.material.toUpperCase().trim() === bomMat.toUpperCase().trim() ? 0.1 : 0
+        const exactMatBonus = (best.filament.material ?? '').toUpperCase().trim() === bomMat.toUpperCase().trim() ? 0.1 : 0
         reps.push({ spool: best, score: colorScore + brandBonus + exactMatBonus })
       }
       reps.sort((a, b) => b.score - a.score)
