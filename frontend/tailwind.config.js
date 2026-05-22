@@ -11,7 +11,7 @@ export default {
         },
       },
       animation: {
-        blink: 'blink 4s step-start infinite',
+        blink: 'blink 2s step-start infinite',
       },
       colors: {
         brand: {
