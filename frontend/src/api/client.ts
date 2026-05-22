@@ -16,10 +16,10 @@ async function req<T>(path: string, options?: RequestInit): Promise<T> {
 // --- Types ---
 export interface FilamentSpec {
   id: number
-  material: string
-  color_name: string
-  color_hex: string
-  brand: string
+  material: string | null
+  color_name: string | null
+  color_hex: string | null
+  brand: string | null
   price: number | null
   density: number | null
   diameter: number | null

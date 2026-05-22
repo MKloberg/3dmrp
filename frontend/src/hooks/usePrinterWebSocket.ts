@@ -79,6 +79,12 @@ export function usePrinterWebSocket(printerId: number, printerUrl: string, enabl
 
     const wsUrl = printerUrl.replace(/^https?/, 'ws').replace(/\/$/, '') + '/websocket'
 
+    // Mixed-content guard: browsers block ws:// from an https:// page
+    if (window.location.protocol === 'https:' && wsUrl.startsWith('ws://')) {
+      qc.setQueryData(['ws-connected', printerId], false)
+      return
+    }
+
     function subscribeMsg(id: number) {
       return JSON.stringify({
         jsonrpc: '2.0',

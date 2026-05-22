@@ -380,7 +380,7 @@ function PrintWizard({
       if (!slot?.material) continue
 
       // Start with all filaments, narrow by material
-      let pool = filaments.filter(f => f.material.toUpperCase() === slot.material!.toUpperCase())
+      let pool = filaments.filter(f => (f.material ?? '').toUpperCase() === slot.material!.toUpperCase())
       if (pool.length === 0) continue
 
       // If a preset name exists, try to narrow further by substring match

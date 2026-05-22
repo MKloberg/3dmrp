@@ -366,7 +366,7 @@ export default function Filaments() {
   const linkedToSpoolman = filaments.filter(f => f.spoolman_id).length
   const importedSpoolmanIds = new Set(filaments.map(f => f.spoolman_id).filter(Boolean))
   const localKeys = new Set(
-    filaments.map(f => `${f.material.toLowerCase()}::${f.color_name.toLowerCase()}`)
+    filaments.map(f => `${(f.material ?? '').toLowerCase()}::${(f.color_name ?? '').toLowerCase()}`)
   )
   const isImported = (sf: SpoolmanFilament) =>
     importedSpoolmanIds.has(sf.id) ||
@@ -378,13 +378,13 @@ export default function Filaments() {
       .map(sf => [sf.id, sf.multi_color_hexes!])
   )
 
-  const allMaterials = [...new Set(filaments.map(f => f.material))].sort()
-  const allBrands = [...new Set(filaments.map(f => f.brand).filter(Boolean))].sort()
+  const allMaterials = [...new Set(filaments.map(f => f.material).filter((m): m is string => !!m))].sort()
+  const allBrands = [...new Set(filaments.map(f => f.brand).filter((b): b is string => !!b))].sort()
 
   const filteredFilaments = filaments.filter(f => {
     if (filterMaterial && f.material !== filterMaterial) return false
     if (filterBrand && f.brand !== filterBrand) return false
-    if (filterColor && !f.color_name.toLowerCase().includes(filterColor.toLowerCase())) return false
+    if (filterColor && !(f.color_name ?? '').toLowerCase().includes(filterColor.toLowerCase())) return false
     if (filterSpoolman === 'linked' && !f.spoolman_id) return false
     if (filterSpoolman === 'unlinked' && f.spoolman_id) return false
     return true
@@ -392,15 +392,15 @@ export default function Filaments() {
 
   const sortedFilaments = [...filteredFilaments].sort((a, b) => {
     let cmp = 0
-    if (sortBy === 'color_name') cmp = a.color_name.localeCompare(b.color_name)
-    else if (sortBy === 'brand') cmp = (a.brand || '').localeCompare(b.brand || '')
-    else if (sortBy === 'material') cmp = a.material.localeCompare(b.material)
+    if (sortBy === 'color_name') cmp = (a.color_name ?? '').localeCompare(b.color_name ?? '')
+    else if (sortBy === 'brand') cmp = (a.brand ?? '').localeCompare(b.brand ?? '')
+    else if (sortBy === 'material') cmp = (a.material ?? '').localeCompare(b.material ?? '')
     else if (sortBy === 'spoolman_id') cmp = (a.spoolman_id ?? 0) - (b.spoolman_id ?? 0)
     return sortDir === 'asc' ? cmp : -cmp
   })
 
   const grouped = sortedFilaments.reduce<Record<string, FilamentSpec[]>>((acc, f) => {
-    ;(acc[f.material] ??= []).push(f); return acc
+    ;(acc[f.material ?? ''] ??= []).push(f); return acc
   }, {})
 
   const spoolmanFilaments = (spoolmanData?.filaments ?? []).filter(
