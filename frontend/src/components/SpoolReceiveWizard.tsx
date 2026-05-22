@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { QRCodeSVG } from 'qrcode.react'
-import { ChevronRight, ChevronLeft, Check, Loader2, Plus, Search, Nfc, Package, AlertTriangle, QrCode } from 'lucide-react'
+import { ChevronRight, ChevronLeft, Check, Loader2, Plus, Search, Nfc, Package, AlertTriangle, QrCode, HelpCircle } from 'lucide-react'
 import Modal from './Modal'
 import {
   getSpoolmanFilaments,
@@ -81,7 +81,7 @@ export default function SpoolReceiveWizard({ onClose }: { onClose: () => void })
   const qc = useQueryClient()
 
   // ── Step state ──
-  const [step, setStep] = useState(1)
+  const [step, setStep] = useState(0)
   const [route, setRoute] = useState<Route | null>(null)
 
   // ── Step 2: filament ──
@@ -165,7 +165,7 @@ export default function SpoolReceiveWizard({ onClose }: { onClose: () => void })
     return f ? filamentLabel(f) : '—'
   }
 
-  const totalSteps = route === 'nfc' ? 4 : 4
+  const totalSteps = 5
 
   // ── Step navigation ──
   function canAdvanceStep2(): boolean {
@@ -322,7 +322,41 @@ export default function SpoolReceiveWizard({ onClose }: { onClose: () => void })
 
   return (
     <Modal title="Add Spool(s) to Inventory" onClose={onClose}>
-      <StepDots total={totalSteps} current={step - 1} />
+      <StepDots total={totalSteps} current={step} />
+
+      {/* ── Step 0: Spoolman pre-check ── */}
+      {step === 0 && (
+        <div className="space-y-5 py-2">
+          <div className="flex flex-col items-center gap-3 pt-2 pb-1 text-center">
+            <div className="w-12 h-12 rounded-full bg-blue-50 dark:bg-blue-950/40 flex items-center justify-center">
+              <HelpCircle size={24} className="text-blue-500" />
+            </div>
+            <div>
+              <p className="font-semibold text-gray-900 dark:text-gray-100">Is this filament in Spoolman?</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 leading-relaxed">
+                Before adding a spool here, its filament type needs to exist in Spoolman. If this is a new filament you haven't registered yet, open Spoolman first to create the filament type — then come back and continue.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => fetch('/api/settings/open-spoolman')}
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border-2 border-teal-400/40 bg-teal-50 dark:bg-teal-950/20 text-teal-700 dark:text-teal-300 text-sm font-medium hover:border-teal-400/70 hover:bg-teal-100 dark:hover:bg-teal-950/40 transition-all"
+          >
+            <HelpCircle size={15} />
+            Open Spoolman to register filament
+          </button>
+
+          <div className="flex justify-end pt-1">
+            <button
+              onClick={() => setStep(1)}
+              className="flex items-center gap-1.5 px-5 py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium"
+            >
+              Filament is in Spoolman <ChevronRight size={16} />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Step 1: Route selection ── */}
       {step === 1 && (

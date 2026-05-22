@@ -336,13 +336,23 @@ export default function SpoolInventory() {
           </h1>
           <p className="text-xs text-gray-400 mt-0.5">Live data from Spoolman · refreshes every 60s</p>
         </div>
-        <button
-          onClick={() => setShowWizard(true)}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium transition-colors shrink-0"
-        >
-          <Plus size={15} />
-          Add Spool(s)
-        </button>
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <button
+            onClick={() => setShowWizard(true)}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium transition-colors"
+          >
+            <Plus size={15} />
+            Add Spool(s)
+          </button>
+          {spoolmanUrl && (
+            <button
+              onClick={() => fetch('/api/settings/open-spoolman')}
+              className="text-xs text-gray-400 hover:text-teal-500 transition-colors"
+            >
+              New spool? Register in Spoolman first →
+            </button>
+          )}
+        </div>
       </div>
 
       {isLoading && <p className="text-sm text-gray-400 italic">Loading…</p>}
