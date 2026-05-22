@@ -3,10 +3,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { QRCodeSVG } from 'qrcode.react'
 import { Check, Loader2, AlertTriangle, QrCode, Nfc, RefreshCw } from 'lucide-react'
 import Modal from './Modal'
+import { useMobileSession } from '../contexts/MobileSessionContext'
 import {
   getSettings,
   createNfcSession,
-  getNfcSession,
   patchSpoolmanLotNr,
   SpoolmanSpool,
 } from '../api/client'
@@ -21,22 +21,17 @@ interface Props {
   onClose: () => void
 }
 
-type Phase = 'scanning' | 'patching' | 'done' | 'error'
+type Phase = 'qr' | 'waiting' | 'done' | 'error'
 
 export default function SpoolTagModal({ spool, onClose }: Props) {
   const qc = useQueryClient()
+  const { phoneConnected, pushTask, token } = useMobileSession()
 
-  const [phase, setPhase] = useState<Phase>('scanning')
-  const [nfcToken, setNfcToken] = useState<string | null>(null)
-  const [tagAScanned, setTagAScanned] = useState(false)
-  const [finalUids, setFinalUids] = useState<string[]>([])
+  const [phase, setPhase] = useState<Phase>(() => phoneConnected ? 'waiting' : 'qr')
   const [patchError, setPatchError] = useState<string | null>(null)
   const [writtenLotNr, setWrittenLotNr] = useState<string | null>(null)
-
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const patchedARef = useRef(false)
-  const patchAPromiseRef = useRef<Promise<unknown>>(Promise.resolve())
-  const startedRef = useRef(false)
+  const [finalUids, setFinalUids] = useState<string[]>([])
+  const taskPushedRef = useRef(false)
 
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: getSettings })
   const { data: lanIpData } = useQuery({
@@ -57,86 +52,59 @@ export default function SpoolTagModal({ spool, onClose }: Props) {
     return `http://${ip}${port ? `:${port}` : ''}`
   }, [lanIpData, settings])
 
-  useEffect(() => () => { if (pollingRef.current) clearInterval(pollingRef.current) }, [])
-
-  async function startSession() {
-    if (pollingRef.current) clearInterval(pollingRef.current)
-    patchedARef.current = false
-    setTagAScanned(false)
-    setPatchError(null)
+  async function pushNfcTask() {
+    if (taskPushedRef.current) return
+    taskPushedRef.current = true
+    setPhase('waiting')
 
     const spoolLabel = spool.filament.name
       ? `${spool.filament.name} #${spool.id}`
       : `Spool #${spool.id}`
 
-    const session = await createNfcSession({
-      spool_id: spool.id,
-      spool_label: spoolLabel,
-      slot: 'A',
-      mode: 'read_write',
-      filament_type: spool.filament.material || undefined,
-      color_hex: normalizeColorHex(spool.filament.color_hex),
-      brand: spool.filament.vendor?.name || undefined,
-    })
-    setNfcToken(session.token)
+    try {
+      const session = await createNfcSession({
+        spool_id: spool.id,
+        spool_label: spoolLabel,
+        slot: 'A',
+        mode: 'read_write',
+        filament_type: spool.filament.material || undefined,
+        color_hex: normalizeColorHex(spool.filament.color_hex),
+        brand: spool.filament.vendor?.name || undefined,
+      })
 
-    pollingRef.current = setInterval(async () => {
-      try {
-        const s = await getNfcSession(session.token)
-
-        if (s.status === 'tag_a_done' && s.card_uid && !patchedARef.current) {
-          patchedARef.current = true
-          setTagAScanned(true)
-          const p = patchSpoolmanLotNr(spool.id, [s.card_uid])
-          patchAPromiseRef.current = p
-          p.catch(e => {
-            setPatchError(e instanceof Error ? e.message : 'Failed to update Spoolman')
-          })
+      pushTask({ task_type: 'nfc_write', nfc_token: session.token }, (result) => {
+        if (!result.success) {
+          setPatchError('NFC write failed on phone')
+          setPhase('error')
+          return
         }
-
-        if (s.status === 'completed' && s.card_uid) {
-          clearInterval(pollingRef.current!)
-          pollingRef.current = null
-
-          const uids = [s.card_uid, ...(s.card_uid_b ? [s.card_uid_b] : [])].map(u => u.replace(/:/g, '').toLowerCase())
-          setFinalUids(uids)
-
-          const finalize = (uidsToWrite: string[]) =>
-            patchSpoolmanLotNr(spool.id, uidsToWrite)
-              .then(() => {
-                setWrittenLotNr(uidsToWrite.map(u => `card_uid:${u}`).join(','))
-                qc.invalidateQueries({ queryKey: ['spoolman-stock'] })
-                setPhase('done')
-              })
-              .catch(e => {
-                setPatchError(e instanceof Error ? e.message : 'Failed to update Spoolman')
-                setPhase('error')
-              })
-
-          if (s.card_uid_b) {
-            // Wait for tag-A patch to settle first, then overwrite with both UIDs
-            patchAPromiseRef.current.catch(() => {}).then(() => finalize(uids))
-          } else if (!patchedARef.current) {
-            // Missed tag_a_done entirely — patch now
-            finalize(uids)
-          } else {
-            // Single tag, already patched — just finalize UI
-            setWrittenLotNr(uids.map(u => `card_uid:${u}`).join(','))
+        const uids = [result.card_uid, result.card_uid_b].filter(Boolean) as string[]
+        const normalized = uids.map(u => u.replace(/:/g, '').toLowerCase())
+        setFinalUids(normalized)
+        patchSpoolmanLotNr(spool.id, normalized)
+          .then(() => {
+            setWrittenLotNr(normalized.map(u => `card_uid:${u}`).join(','))
             qc.invalidateQueries({ queryKey: ['spoolman-stock'] })
             setPhase('done')
-          }
-        }
-      } catch { /* poll errors ignored */ }
-    }, 1000)
+          })
+          .catch(e => {
+            setPatchError(e instanceof Error ? e.message : 'Failed to update Spoolman')
+            setPhase('error')
+          })
+      })
+    } catch (e) {
+      setPatchError(e instanceof Error ? e.message : 'Failed to create NFC session')
+      setPhase('error')
+      taskPushedRef.current = false
+    }
   }
 
   useEffect(() => {
-    if (!startedRef.current) {
-      startedRef.current = true
-      startSession()
+    if (phoneConnected && !taskPushedRef.current) {
+      pushNfcTask()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [phoneConnected])
 
   const spoolName = spool.filament.name || `Spool #${spool.id}`
   const vendorName = spool.filament.vendor?.name
@@ -159,12 +127,12 @@ export default function SpoolTagModal({ spool, onClose }: Props) {
           </div>
         </div>
 
-        {/* Phase: scanning */}
-        {phase === 'scanning' && nfcToken && (
+        {/* QR — phone not connected */}
+        {phase === 'qr' && token && (
           <div className="flex flex-col items-center gap-4">
             <div className="p-2 bg-white rounded-lg shadow-sm border border-gray-100">
               <QRCodeSVG
-                value={`${mobileBase}/mobile/nfc/${nfcToken}`}
+                value={`${mobileBase}/mobile/app/${token}`}
                 size={160}
                 bgColor="#ffffff"
                 fgColor="#111827"
@@ -174,50 +142,45 @@ export default function SpoolTagModal({ spool, onClose }: Props) {
             <div className="text-center space-y-1">
               <div className="flex items-center gap-1.5 justify-center">
                 <QrCode size={13} className="text-gray-400" />
-                <p className="text-sm font-medium text-gray-800 dark:text-gray-200">Scan with your phone</p>
+                <p className="text-sm font-medium text-gray-800 dark:text-gray-200">Open on your phone</p>
               </div>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                {tagAScanned
-                  ? 'Tag A written — waiting for second tag decision on phone…'
-                  : 'Hold NFC tag(s) to your phone. It will ask about a second tag.'}
+                Scan to connect — NFC tagging will start automatically.
               </p>
             </div>
-            {tagAScanned ? (
-              <div className="flex items-center gap-2 text-xs text-green-600 dark:text-green-400">
-                <Check size={13} /> Tag A written
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 text-xs text-gray-400">
-                <span className="w-2 h-2 rounded-full bg-brand-500 animate-pulse" />
-                Waiting for tag write…
-              </div>
-            )}
-            {patchError && (
-              <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs text-amber-700 dark:text-amber-400 w-full">
-                <AlertTriangle size={13} className="shrink-0 mt-0.5" />
-                Spoolman update failed: {patchError}
-              </div>
-            )}
+            <div className="flex items-center gap-2 text-xs text-gray-400">
+              <span className="w-2 h-2 rounded-full bg-brand-500 animate-pulse" />
+              Waiting for phone to connect…
+            </div>
           </div>
         )}
 
-        {/* Loading spinner while session starts */}
-        {phase === 'scanning' && !nfcToken && (
+        {/* Loading while token resolves */}
+        {phase === 'qr' && !token && (
           <div className="flex items-center justify-center gap-2 py-8">
             <Loader2 size={18} className="animate-spin text-brand-500" />
-            <span className="text-sm text-gray-500 dark:text-gray-400">Starting NFC session…</span>
+            <span className="text-sm text-gray-500 dark:text-gray-400">Loading…</span>
           </div>
         )}
 
-        {/* Phase: patching */}
-        {phase === 'patching' && (
-          <div className="flex items-center justify-center gap-2 py-8">
-            <Loader2 size={18} className="animate-spin text-brand-500" />
-            <span className="text-sm text-gray-500 dark:text-gray-400">Writing to Spoolman…</span>
+        {/* Waiting — task pushed, phone scanning */}
+        {phase === 'waiting' && (
+          <div className="flex flex-col items-center gap-3 py-4">
+            <div className="w-14 h-14 rounded-full bg-brand-50 dark:bg-brand-900/20 flex items-center justify-center">
+              <Nfc size={26} className="text-brand-600 dark:text-brand-400" />
+            </div>
+            <div className="text-center space-y-1">
+              <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">Waiting for phone…</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">Hold an NFC tag to your phone to write spool data.</p>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-gray-400">
+              <span className="w-2 h-2 rounded-full bg-brand-500 animate-pulse" />
+              NFC task sent to phone
+            </div>
           </div>
         )}
 
-        {/* Phase: done */}
+        {/* Done */}
         {phase === 'done' && (
           <div className="space-y-4">
             <div className="flex flex-col items-center gap-3 py-3">
@@ -241,13 +204,13 @@ export default function SpoolTagModal({ spool, onClose }: Props) {
           </div>
         )}
 
-        {/* Phase: error */}
+        {/* Error */}
         {phase === 'error' && (
           <div className="space-y-4">
             <div className="flex items-start gap-3 p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800">
               <AlertTriangle size={16} className="text-red-500 shrink-0 mt-0.5" />
               <div className="space-y-0.5">
-                <p className="text-sm font-semibold text-red-700 dark:text-red-400">Failed to update Spoolman</p>
+                <p className="text-sm font-semibold text-red-700 dark:text-red-400">Tagging failed</p>
                 <p className="text-xs text-red-600 dark:text-red-500">{patchError}</p>
               </div>
             </div>
@@ -262,19 +225,14 @@ export default function SpoolTagModal({ spool, onClose }: Props) {
             <div className="flex gap-2">
               <button
                 onClick={() => {
+                  taskPushedRef.current = false
                   setPatchError(null)
-                  setPhase('patching')
-                  patchSpoolmanLotNr(spool.id, finalUids)
-                    .then(() => {
-                      const lotNr = finalUids.map(u => `card_uid:${u}`).join(',')
-                      setWrittenLotNr(lotNr)
-                      qc.invalidateQueries({ queryKey: ['spoolman-stock'] })
-                      setPhase('done')
-                    })
-                    .catch(e => {
-                      setPatchError(e instanceof Error ? e.message : 'Failed to update Spoolman')
-                      setPhase('error')
-                    })
+                  setFinalUids([])
+                  if (phoneConnected) {
+                    pushNfcTask()
+                  } else {
+                    setPhase('qr')
+                  }
                 }}
                 className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-800"
               >
@@ -287,14 +245,6 @@ export default function SpoolTagModal({ spool, onClose }: Props) {
                 Close
               </button>
             </div>
-          </div>
-        )}
-
-        {/* NFC icon hint while scanning */}
-        {phase === 'scanning' && nfcToken && (
-          <div className="flex items-center gap-2 p-2.5 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900 text-xs text-blue-600 dark:text-blue-400">
-            <Nfc size={13} className="shrink-0" />
-            The phone will also write the spool ID to each tag if it's writable.
           </div>
         )}
       </div>

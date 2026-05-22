@@ -217,6 +217,14 @@ export default function MobileApp() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Auto-return to idle after desktop-initiated NFC task completes
+  useEffect(() => {
+    if (phase !== 'nfc_done' || phoneInitiatedRef.current) return
+    const timer = setTimeout(() => returnToIdle(), 2500)
+    return () => clearTimeout(timer)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase])
+
   async function runNfcScan(
     session: NfcSession,
     onRead: (uid: string, wrote: boolean, writeErr: string | null) => void,
