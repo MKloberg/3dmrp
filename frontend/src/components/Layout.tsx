@@ -162,8 +162,8 @@ function SpoolmanBadge() {
       <span className="group-hover:drop-shadow-[0_0_5px_rgba(251,146,60,0.6)] transition-all duration-200">
         <SpoolIcon size={14} color="#fb923c" />
       </span>
-      <span className="text-[11px] font-semibold tracking-wide text-green-400 group-hover:text-teal-400 transition-colors duration-200">
-        <span className="text-[13px]">S</span>pool<span className="text-[13px]">M</span>an
+      <span className="text-[11px] font-semibold tracking-widest uppercase text-green-400 group-hover:text-teal-400 transition-colors duration-200">
+        Spoolman
       </span>
     </button>
   )
