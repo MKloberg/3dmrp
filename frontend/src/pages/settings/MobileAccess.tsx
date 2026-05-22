@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { getSettings, setSetting } from '../../api/client'
-import { Lock, Wifi, AlertTriangle, ChevronLeft, Info } from 'lucide-react'
+import { Lock, Wifi, AlertTriangle, ChevronLeft, Info, Nfc } from 'lucide-react'
 import clsx from 'clsx'
 
 export default function MobileAccess() {
@@ -10,20 +10,34 @@ export default function MobileAccess() {
   const { data: settings, isLoading } = useQuery({ queryKey: ['settings'], queryFn: getSettings })
 
   const [mobileProtocol, setMobileProtocol] = useState<'https' | 'http'>('https')
-  const [saved, setSaved] = useState(false)
+  const [protocolSaved, setProtocolSaved] = useState(false)
+
+  const [nfcWriteMode, setNfcWriteMode] = useState<'push' | 'auto'>('push')
+  const [nfcModeSaved, setNfcModeSaved] = useState(false)
 
   useEffect(() => {
     if (settings?.mobile_protocol === 'http' || settings?.mobile_protocol === 'https') {
       setMobileProtocol(settings.mobile_protocol)
     }
+    if (settings?.nfc_write_mode === 'auto') setNfcWriteMode('auto')
+    else setNfcWriteMode('push')
   }, [settings])
 
-  const saveMutation = useMutation({
+  const saveProtocolMutation = useMutation({
     mutationFn: () => setSetting('mobile_protocol', mobileProtocol),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['settings'] })
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
+      setProtocolSaved(true)
+      setTimeout(() => setProtocolSaved(false), 2000)
+    },
+  })
+
+  const saveNfcModeMutation = useMutation({
+    mutationFn: () => setSetting('nfc_write_mode', nfcWriteMode),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['settings'] })
+      setNfcModeSaved(true)
+      setTimeout(() => setNfcModeSaved(false), 2000)
     },
   })
 
@@ -37,10 +51,11 @@ export default function MobileAccess() {
         </Link>
         <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Mobile Access</h1>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          Configure the protocol used for the mobile filament loader QR codes.
+          Configure the protocol and NFC behavior for the mobile companion app.
         </p>
       </div>
 
+      {/* Protocol */}
       <section className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4">
         <div>
           <h2 className="font-semibold text-gray-800 dark:text-gray-100">Protocol</h2>
@@ -110,11 +125,69 @@ export default function MobileAccess() {
 
         <div className="flex items-center gap-3 pt-1">
           <button
-            onClick={() => saveMutation.mutate()}
-            disabled={saveMutation.isPending}
+            onClick={() => saveProtocolMutation.mutate()}
+            disabled={saveProtocolMutation.isPending}
             className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 text-sm rounded-lg disabled:opacity-50"
           >
-            {saved ? 'Saved!' : saveMutation.isPending ? 'Saving…' : 'Save'}
+            {protocolSaved ? 'Saved!' : saveProtocolMutation.isPending ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </section>
+
+      {/* NFC Write Mode */}
+      <section className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-4">
+        <div>
+          <h2 className="font-semibold text-gray-800 dark:text-gray-100 flex items-center gap-2"><Nfc size={16} /> NFC Write Mode</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+            Both modes write the same data to the tag. The difference is where you start the workflow.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-3">
+          <button
+            onClick={() => setNfcWriteMode('push')}
+            className={clsx(
+              'w-full px-4 py-3 rounded-lg border text-sm transition-colors text-left space-y-1',
+              nfcWriteMode === 'push'
+                ? 'bg-brand-600 border-brand-600 text-white'
+                : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+            )}
+          >
+            <p className="font-semibold">Desktop-triggered <span className={clsx('text-xs font-normal ml-1', nfcWriteMode === 'push' ? 'text-brand-200' : 'text-gray-400')}>— current default</span></p>
+            <p className={clsx('text-xs leading-relaxed', nfcWriteMode === 'push' ? 'text-brand-100' : 'text-gray-500 dark:text-gray-400')}>
+              Start at the desktop — pick a spool and tap "Tag Spool." That pushes the spool data to your phone, then you walk to the shelf and touch the tag. The phone handles everything from there.
+            </p>
+          </button>
+          <button
+            onClick={() => setNfcWriteMode('auto')}
+            className={clsx(
+              'w-full px-4 py-3 rounded-lg border text-sm transition-colors text-left space-y-1',
+              nfcWriteMode === 'auto'
+                ? 'bg-brand-600 border-brand-600 text-white'
+                : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+            )}
+          >
+            <p className="font-semibold">Auto-write</p>
+            <p className={clsx('text-xs leading-relaxed', nfcWriteMode === 'auto' ? 'text-brand-100' : 'text-gray-500 dark:text-gray-400')}>
+              Start at the shelf — your phone scans continuously and writes the moment a tag comes near. No desktop needed to kick things off. Ideal for receiving a batch of new spools: touch, done, next.
+            </p>
+          </button>
+        </div>
+
+        {nfcWriteMode === 'auto' && (
+          <div className="flex items-start gap-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 p-4 text-sm text-amber-800 dark:text-amber-300">
+            <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+            <p>Auto-write requires <strong>Android Chrome</strong>. iOS Safari does not support continuous background NFC scanning in the browser and will fall back to desktop-triggered mode.</p>
+          </div>
+        )}
+
+        <div className="flex items-center gap-3 pt-1">
+          <button
+            onClick={() => saveNfcModeMutation.mutate()}
+            disabled={saveNfcModeMutation.isPending}
+            className="bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 text-sm rounded-lg disabled:opacity-50"
+          >
+            {nfcModeSaved ? 'Saved!' : saveNfcModeMutation.isPending ? 'Saving…' : 'Save'}
           </button>
         </div>
       </section>

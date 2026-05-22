@@ -59,6 +59,7 @@ export default function MobileNfcScan() {
   const [session, setSession] = useState<NfcSession | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [status, setStatus] = useState<ScanStatus>('loading')
+  const [autoWrite, setAutoWrite] = useState(false)
 
   // Tag A state
   const [cardUidA, setCardUidA] = useState<string | null>(null)
@@ -82,26 +83,28 @@ export default function MobileNfcScan() {
 
   useEffect(() => {
     if (!token) { setLoadError('Missing session token'); setStatus('error'); return }
-    getNfcSession(token)
-      .then(s => {
-        if (s.status === 'completed') {
-          setSession(s)
-          setCardUidA(s.card_uid)
-          setCardUidB(s.card_uid_b)
-          setWroteTagA(s.wrote_tag ?? false)
-          setWroteTagB(s.wrote_tag_b ?? false)
-          setStatus('done')
-        } else if (s.status === 'tag_a_done') {
-          setSession(s)
-          setCardUidA(s.card_uid)
-          setWroteTagA(s.wrote_tag ?? false)
-          setStatus('ask_second')
-        } else {
-          setSession(s)
-          setStatus('ready')
-        }
-      })
-      .catch(() => { setLoadError('Session not found or expired'); setStatus('error') })
+    Promise.all([
+      getNfcSession(token),
+      fetch('/api/settings').then(r => r.json()).catch(() => ({})),
+    ]).then(([s, settings]) => {
+      setAutoWrite(settings?.nfc_write_mode === 'auto')
+      if (s.status === 'completed') {
+        setSession(s)
+        setCardUidA(s.card_uid)
+        setCardUidB(s.card_uid_b)
+        setWroteTagA(s.wrote_tag ?? false)
+        setWroteTagB(s.wrote_tag_b ?? false)
+        setStatus('done')
+      } else if (s.status === 'tag_a_done') {
+        setSession(s)
+        setCardUidA(s.card_uid)
+        setWroteTagA(s.wrote_tag ?? false)
+        setStatus('ask_second')
+      } else {
+        setSession(s)
+        setStatus('ready')
+      }
+    }).catch(() => { setLoadError('Session not found or expired'); setStatus('error') })
   }, [token])
 
   async function runNfcScan(
@@ -182,7 +185,26 @@ export default function MobileNfcScan() {
         setWriteErrorA(writeErr)
         try {
           await postNfcTagA(token, { card_uid: uid, wrote_tag: wrote })
-          setStatus('ask_second')
+          if (autoWrite) {
+            // In auto mode skip the prompt and go straight to tag B
+            setStatus('scanning_b')
+            setErrorMsg(null)
+            setWriteErrorB(null)
+            await runNfcScan(
+              async (uidB, wroteB, writeErrB) => {
+                setCardUidB(uidB)
+                setWroteTagB(wroteB)
+                setWriteErrorB(writeErrB)
+                setStatus('done')
+                try {
+                  await postNfcResult(token, { card_uid: uid, wrote_tag: wrote, card_uid_b: uidB, wrote_tag_b: wroteB })
+                } catch { /* ignore */ }
+              },
+              (msg) => { setStatus('error'); setErrorMsg(msg) },
+            )
+          } else {
+            setStatus('ask_second')
+          }
         } catch {
           setStatus('error')
           setErrorMsg('Session expired or lost — close this page and scan the QR code again.')
@@ -395,9 +417,11 @@ export default function MobileNfcScan() {
             <div className="text-center space-y-2 px-4">
               {!isError && !isScanning && (
                 <>
-                  <p className="text-white font-semibold text-lg">Ready to write</p>
+                  <p className="text-white font-semibold text-lg">{autoWrite ? 'Tap once to begin' : 'Ready to write'}</p>
                   <p className="text-sm text-gray-400 leading-relaxed">
-                    Tap the button below, then hold an NFC tag to the back of your phone.
+                    {autoWrite
+                      ? 'One tap starts scanning. After that, just hold each tag to your phone — both sides write automatically.'
+                      : 'Tap the button below, then hold an NFC tag to the back of your phone.'}
                   </p>
                 </>
               )}
@@ -418,15 +442,15 @@ export default function MobileNfcScan() {
         )}
       </div>
 
-      {/* Bottom button */}
-      {nfcSupported && (
+      {/* Bottom button — in auto mode only shows on ready (first tap) and errors */}
+      {nfcSupported && (!autoWrite || status === 'ready' || isError) && (
         <div className="px-6 pb-safe pb-10 pt-4">
           <button
             onClick={isScanningB ? undefined : isError && cardUidA ? startScanB : startScanA}
             disabled={isScanning}
             className="w-full py-4 rounded-2xl bg-brand-600 hover:bg-brand-700 active:bg-brand-800 text-white font-semibold text-base disabled:opacity-50 transition-colors"
           >
-            {isScanning ? 'Writing…' : isError ? 'Try Again' : isScanningB ? 'Write Tag B' : 'Write NFC Tag'}
+            {isScanning ? 'Writing…' : isError ? 'Try Again' : autoWrite ? 'Start Scanning' : isScanningB ? 'Write Tag B' : 'Write NFC Tag'}
           </button>
         </div>
       )}

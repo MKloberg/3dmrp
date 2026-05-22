@@ -151,12 +151,13 @@ def list_printers():
 
 
 @router.post("/spool/{spool_id}")
-async def print_spool_label(spool_id: int, size: int = 0, db: Session = Depends(get_db)):
+async def print_spool_label(spool_id: int, size: int = 0, qty: int = 1, db: Session = Depends(get_db)):
     printer_name = get_setting(db, "label_printer_name")
     if not printer_name:
         raise HTTPException(status_code=400, detail="No label printer configured")
 
     size = max(0, min(size, len(LABEL_SIZES) - 1))
+    qty = max(1, min(qty, 2))
     w_mm, h_mm = LABEL_SIZES[size]
 
     spoolman_url = get_setting(db, "spoolman_url")
@@ -180,7 +181,8 @@ async def print_spool_label(spool_id: int, size: int = 0, db: Session = Depends(
     img = _make_label_image(spool_id, name, material, vendor, w_mm, h_mm, dpi)
 
     try:
-        _send_to_printer(img, printer_name)
+        for _ in range(qty):
+            _send_to_printer(img, printer_name)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Print error: {e}")
 
@@ -188,11 +190,13 @@ async def print_spool_label(spool_id: int, size: int = 0, db: Session = Depends(
 
 
 @router.post("/test")
-def print_test_label(printer: str):
+def print_test_label(printer: str, qty: int = 1):
+    qty = max(1, min(qty, 2))
     dpi = _get_printer_dpi(printer)
     img = _make_label_image(0, 'Test Label', 'PLA', '3DMRP', 40, 25, dpi)
     try:
-        _send_to_printer(img, printer)
+        for _ in range(qty):
+            _send_to_printer(img, printer)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     return {"ok": True}

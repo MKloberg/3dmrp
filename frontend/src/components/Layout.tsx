@@ -266,10 +266,11 @@ function PrintLabelHandler() {
     if (!pendingPrint) return
     const sizeIndex = Number(settings?.ui_printer_label_size_index ?? 0)
     const labelPrinter = settings?.label_printer_name ?? ''
+    const qty = Number(settings?.label_print_quantity ?? 1)
     clearPendingPrint()
 
     if (labelPrinter) {
-      fetch(`/api/print/spool/${pendingPrint.spool_id}?size=${sizeIndex}`, { method: 'POST' })
+      fetch(`/api/print/spool/${pendingPrint.spool_id}?size=${sizeIndex}&qty=${qty}`, { method: 'POST' })
         .catch(() => {
           const url = `${window.location.origin}/print/spool/${pendingPrint.spool_id}?size=${sizeIndex}`
           fetch(`/api/settings/open-browser?url=${encodeURIComponent(url)}`).catch(() => window.open(url, '_blank'))
