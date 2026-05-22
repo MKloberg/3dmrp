@@ -11,3 +11,8 @@ services:
       - "${HTTPS_PORT:-7892}:443"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes:
+      - 3dmrp_certs:/etc/nginx/ssl
+
+volumes:
+  3dmrp_certs:
