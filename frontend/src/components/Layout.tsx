@@ -4,7 +4,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
   LayoutDashboard, Box, ClipboardList, TrendingUp, Disc2, Printer,
-  Settings, Users, FileText, ChevronRight, SlidersHorizontal, Layers, Database, X, ExternalLink,
+  Settings, Users, FileText, ChevronRight, SlidersHorizontal, Layers, Database, X,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { QRCodeSVG } from 'qrcode.react'
@@ -156,10 +156,12 @@ function SpoolmanBadge() {
     <button
       onClick={() => fetch('/api/settings/open-spoolman')}
       title="Open Spoolman"
-      className="absolute bottom-1.5 right-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-teal-600/90 hover:bg-teal-500 transition-colors text-white shadow-md"
+      className="absolute bottom-2 right-2 flex items-center gap-1.5 px-2 py-1 rounded-lg bg-teal-400/10 hover:bg-teal-400/20 border border-teal-400/25 hover:border-teal-400/50 backdrop-blur-sm transition-all group"
     >
-      <Disc2 size={10} />
-      <ExternalLink size={9} />
+      <Disc2 size={11} className="text-teal-400 group-hover:text-teal-300 transition-colors shrink-0" />
+      <span className="text-[10px] font-bold tracking-widest uppercase text-teal-400/80 group-hover:text-teal-300 transition-colors">
+        Spoolman
+      </span>
     </button>
   )
 }
