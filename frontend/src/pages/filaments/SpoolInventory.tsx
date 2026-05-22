@@ -292,8 +292,8 @@ export default function SpoolInventory() {
       )
     })
     .sort((a, b) => {
-      const mc = a.filament.material.localeCompare(b.filament.material)
-      return mc !== 0 ? mc : a.filament.name.localeCompare(b.filament.name)
+      const mc = (a.filament.material ?? '').localeCompare(b.filament.material ?? '')
+      return mc !== 0 ? mc : (a.filament.name ?? '').localeCompare(b.filament.name ?? '')
     })
 
   // suppress unused warning — spoolmanUrl kept for potential future use

@@ -105,12 +105,12 @@ export default function FilamentInventory() {
       return acc
     }, {})
   ).sort((a, b) => {
-    const mc = a.filament.material.localeCompare(b.filament.material)
-    return mc !== 0 ? mc : a.filament.name.localeCompare(b.filament.name)
+    const mc = (a.filament.material ?? '').localeCompare(b.filament.material ?? '')
+    return mc !== 0 ? mc : (a.filament.name ?? '').localeCompare(b.filament.name ?? '')
   })
 
   const byMaterial = groups.reduce<Record<string, FilamentGroup[]>>((acc, g) => {
-    ;(acc[g.filament.material] ??= []).push(g)
+    ;(acc[g.filament.material ?? ''] ??= []).push(g)
     return acc
   }, {})
 
