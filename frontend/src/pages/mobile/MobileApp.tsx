@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { useParams } from 'react-router-dom'
-import { getNfcSession, postNfcTagA, postNfcResult, getSpoolmanStock, createNfcSession, patchSpoolmanLotNr, type NfcSession, type SpoolmanSpool } from '../../api/client'
-import { Check, Loader2, X, AlertTriangle, WifiOff, Nfc, ChevronRight, ArrowLeft } from 'lucide-react'
+import { getNfcSession, postNfcTagA, postNfcResult, getSpoolmanStock, createNfcSession, patchSpoolmanLotNr, patchSpoolmanRemainingWeight, patchSpoolmanFilamentSpoolWeight, type NfcSession, type SpoolmanSpool } from '../../api/client'
+import { Check, Loader2, X, AlertTriangle, WifiOff, Nfc, ChevronRight, ArrowLeft, Scale, Sparkles, Info } from 'lucide-react'
 
 declare global {
   interface Window {
@@ -37,6 +37,7 @@ type AppPhase =
   | 'nfc_ask_second'
   | 'nfc_scanning_b'
   | 'nfc_done'
+  | 'weigh_spool'
   | 'nfc_error'
   | 'disconnected'
   | 'session_error'
@@ -108,6 +109,10 @@ export default function MobileApp() {
   const [spools, setSpools] = useState<SpoolmanSpool[]>([])
   const [spoolsLoading, setSpoolsLoading] = useState(false)
   const phoneInitiatedRef = useRef(false)
+
+  // Weigh spool state
+  const [weighSpool, setWeighSpool] = useState<SpoolmanSpool | null>(null)
+  const [weighLoading, setWeighLoading] = useState(false)
 
   const nfcSupported = typeof window !== 'undefined' && 'NDEFReader' in window
 
@@ -404,6 +409,24 @@ export default function MobileApp() {
     }
   }
 
+  async function handleWeighYes() {
+    if (!nfcSession) return
+    const spoolId = nfcSession.spool_id
+    let spool = spools.find(s => s.id === spoolId) ?? null
+    if (!spool) {
+      setWeighLoading(true)
+      try {
+        const res = await getSpoolmanStock()
+        spool = res.spools.find(s => s.id === spoolId) ?? null
+      } catch { /* ignore */ }
+      setWeighLoading(false)
+    }
+    if (spool) {
+      setWeighSpool(spool)
+      _setPhase('weigh_spool')
+    }
+  }
+
   // Session error (bad URL)
   if (phase === 'session_error') {
     return (
@@ -491,6 +514,14 @@ export default function MobileApp() {
     />
   }
 
+  // Weigh spool
+  if (phase === 'weigh_spool' && weighSpool) {
+    return <WeighSpoolScreen
+      spool={weighSpool}
+      onDone={() => { setWeighSpool(null); _setPhase('idle') }}
+    />
+  }
+
   // NFC loading
   if (phase === 'nfc_loading') {
     return (
@@ -503,7 +534,6 @@ export default function MobileApp() {
   // NFC done
   if (phase === 'nfc_done') {
     const tagCount = cardUidB ? 2 : 1
-    const canPrintLabel = nfcSession != null
 
     function sendPrintLabel() {
       if (nfcSession) {
@@ -540,26 +570,30 @@ export default function MobileApp() {
           {cardUidB && !wroteTagB && writeErrorB && <NfcWriteErrorBox writeError={writeErrorB} label="Tag B" uid={cardUidB} />}
         </div>
         <div className="px-6 pb-safe pb-10 pt-4 space-y-3">
-          {canPrintLabel && (
-            <div className="rounded-2xl bg-gray-900 border border-gray-800 px-4 py-4 space-y-3">
-              <p className="text-sm font-semibold text-white text-center">Print a QR label for this spool?</p>
-              <div className="flex gap-3">
-                <button
-                  onClick={returnToIdle}
-                  className="flex-1 py-3 rounded-xl border-2 border-gray-700 text-gray-300 font-semibold text-sm hover:bg-gray-800 transition-colors"
-                >
-                  No
-                </button>
-                <button
-                  onClick={sendPrintLabel}
-                  className="flex-1 py-3 rounded-xl bg-brand-600 hover:bg-brand-700 active:bg-brand-800 text-white font-semibold text-sm transition-colors"
-                >
-                  Yes
-                </button>
-              </div>
-            </div>
-          )}
-          {!canPrintLabel && (
+          {nfcSession ? (
+            <>
+              <button
+                onClick={handleWeighYes}
+                disabled={weighLoading}
+                className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-brand-600 hover:bg-brand-700 active:bg-brand-800 text-white font-semibold text-base transition-colors disabled:opacity-50"
+              >
+                {weighLoading ? <Loader2 size={18} className="animate-spin" /> : <Scale size={18} />}
+                Weigh this spool
+              </button>
+              <button
+                onClick={sendPrintLabel}
+                className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl border border-gray-700 text-gray-300 font-medium text-sm hover:bg-gray-900 transition-colors"
+              >
+                Print QR label
+              </button>
+              <button
+                onClick={returnToIdle}
+                className="w-full py-3 text-gray-500 text-sm font-medium hover:text-gray-300 transition-colors"
+              >
+                Done
+              </button>
+            </>
+          ) : (
             <button
               onClick={returnToIdle}
               className="w-full py-4 rounded-2xl bg-brand-600 hover:bg-brand-700 active:bg-brand-800 text-white font-semibold text-base transition-colors"
@@ -865,6 +899,189 @@ function SpoolPickerScreen({
               )
             })}
           </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function WeighSpoolScreen({ spool, onDone }: { spool: SpoolmanSpool; onDone: () => void }) {
+  const [gross, setGross] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [detectedTare, setDetectedTare] = useState<number | null>(null)
+  const [updatingTare, setUpdatingTare] = useState(false)
+
+  const tare = spool.filament.spool_weight
+  const grossNum = parseFloat(gross)
+  const remaining = tare != null && gross !== '' && !isNaN(grossNum) ? grossNum - tare : null
+  const belowTare = remaining !== null && remaining < 0
+  const canSave = remaining !== null && !belowTare && !saving
+
+  async function handleSave() {
+    if (!canSave || remaining === null) return
+    setSaving(true)
+    setError(null)
+    try {
+      await patchSpoolmanRemainingWeight(spool.id, Math.round(remaining))
+      const filamentWeight = spool.filament.weight
+      if (filamentWeight != null && remaining > filamentWeight * 0.95) {
+        setDetectedTare(Math.round(grossNum - filamentWeight))
+        setSaving(false)
+      } else {
+        onDone()
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to update Spoolman')
+      setSaving(false)
+    }
+  }
+
+  async function handleUpdateTare() {
+    if (detectedTare === null) return
+    setUpdatingTare(true)
+    try {
+      await patchSpoolmanFilamentSpoolWeight(spool.filament.id, detectedTare)
+    } catch { /* best-effort */ }
+    onDone()
+  }
+
+  const rawHex = spool.filament.multi_color_hexes
+    ? spool.filament.multi_color_hexes.split(/[,;]/)[0]
+    : spool.filament.color_hex
+  const color = rawHex ? (rawHex.startsWith('#') ? rawHex : `#${rawHex}`) : '#888888'
+  const name = spool.filament.name || `Spool #${spool.id}`
+  const sub = [spool.filament.material, spool.filament.vendor?.name].filter(Boolean).join(' · ')
+
+  return (
+    <div className="min-h-dvh bg-gray-950 flex flex-col text-white select-none">
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 pt-safe pt-10 pb-4 border-b border-gray-800">
+        <button
+          onClick={onDone}
+          className="w-9 h-9 rounded-xl bg-gray-900 border border-gray-800 flex items-center justify-center shrink-0"
+        >
+          <ArrowLeft size={16} className="text-gray-300" />
+        </button>
+        <div>
+          <p className="text-xs text-gray-500 uppercase tracking-widest">3DMRP Mobile</p>
+          <p className="text-sm font-semibold text-white">Weigh Spool</p>
+        </div>
+      </div>
+
+      {detectedTare !== null ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-5 px-6 text-center">
+          <div className="w-20 h-20 rounded-full bg-green-500/20 flex items-center justify-center">
+            <Sparkles size={36} className="text-green-400" />
+          </div>
+          <div className="space-y-1">
+            <p className="text-white text-xl font-bold">New Spool Detected</p>
+            <p className="text-sm text-gray-400">
+              Calculated empty spool weight: <span className="font-semibold text-white">{detectedTare} g</span>
+            </p>
+          </div>
+          <p className="text-sm text-gray-500 leading-relaxed max-w-xs">
+            Update the filament type in Spoolman so future weighings are more accurate?
+          </p>
+        </div>
+      ) : (
+        <div className="flex-1 px-5 py-6 space-y-5">
+          <div className="flex items-center gap-3 p-3 bg-gray-900 border border-gray-800 rounded-xl">
+            <div className="w-9 h-9 rounded-full shrink-0 border border-black/20" style={{ backgroundColor: color }} />
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-white truncate">{name}</p>
+              {sub && <p className="text-xs text-gray-500 truncate">{sub}</p>}
+            </div>
+          </div>
+
+          {tare == null ? (
+            <div className="text-sm text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3">
+              Spool tare weight is not set on this filament type in Spoolman. Set it there first, then try again.
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-400">Empty spool weight (tare)</span>
+                <span className="text-sm font-medium text-gray-200">{tare} g</span>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-300">Gross weight (spool + filament)</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    step={1}
+                    autoFocus
+                    className="flex-1 bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 text-lg font-semibold text-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                    placeholder={`e.g. ${tare + 500}`}
+                    value={gross}
+                    onChange={e => { setGross(e.target.value); setError(null) }}
+                    onKeyDown={e => e.key === 'Enter' && handleSave()}
+                  />
+                  <span className="text-gray-400 text-sm font-medium shrink-0">g</span>
+                </div>
+                {belowTare && (
+                  <p className="text-xs text-red-400">Gross weight must be greater than the tare ({tare} g).</p>
+                )}
+              </div>
+
+              {remaining !== null && !belowTare && (
+                <div className="flex items-center justify-between p-4 bg-gray-900 border border-gray-800 rounded-xl">
+                  <span className="text-sm text-gray-400">Remaining filament</span>
+                  <span className="text-2xl font-bold text-brand-400">{Math.round(remaining)} g</span>
+                </div>
+              )}
+
+              {error && <p className="text-xs text-red-400">{error}</p>}
+            </>
+          )}
+
+          <div className="flex gap-2 text-xs text-blue-300 bg-blue-500/10 border border-blue-500/25 rounded-xl px-3 py-2.5">
+            <Info size={13} className="shrink-0 mt-px" />
+            <p className="leading-relaxed">
+              Place the spool on a scale and enter the total weight. The tare is pulled from the filament type in Spoolman. If the tare is wrong, the calculated remaining weight will drift.
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className="px-5 pb-safe pb-8 pt-4 space-y-3">
+        {detectedTare !== null ? (
+          <>
+            <button
+              onClick={handleUpdateTare}
+              disabled={updatingTare}
+              className="w-full py-4 rounded-2xl bg-green-600 hover:bg-green-700 active:bg-green-800 text-white font-semibold text-base transition-colors disabled:opacity-50"
+            >
+              {updatingTare ? 'Updating…' : 'Update Tare'}
+            </button>
+            <button
+              onClick={onDone}
+              className="w-full py-3 text-gray-500 text-sm font-medium hover:text-gray-300 transition-colors"
+            >
+              Skip
+            </button>
+          </>
+        ) : (
+          <>
+            {tare != null && (
+              <button
+                onClick={handleSave}
+                disabled={!canSave}
+                className="w-full py-4 rounded-2xl bg-brand-600 hover:bg-brand-700 active:bg-brand-800 text-white font-semibold text-base transition-colors disabled:opacity-50"
+              >
+                {saving ? 'Saving…' : 'Save Weight'}
+              </button>
+            )}
+            <button
+              onClick={onDone}
+              className="w-full py-3 text-gray-500 text-sm font-medium hover:text-gray-300 transition-colors"
+            >
+              {tare == null ? 'Back' : 'Cancel'}
+            </button>
+          </>
         )}
       </div>
     </div>
