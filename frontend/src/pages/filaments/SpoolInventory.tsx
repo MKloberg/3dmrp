@@ -73,7 +73,7 @@ function SpoolRow({ spool, onPrintLabel, onTag, onWeigh, onLocationChange, allLo
               <select
                 style={{ width: selectWidth }}
                 value={spool.location ?? ''}
-                onChange={e => onLocationChange(e.target.value || null)}
+                onChange={e => { const t = e.target; onLocationChange(t.value || null); requestAnimationFrame(() => t.blur()) }}
                 className="text-xs border rounded px-1.5 py-0.5 bg-white dark:bg-gray-800 dark:border-gray-600 text-gray-600 dark:text-gray-300 cursor-pointer"
               >
                 <option value="">Unknown</option>
@@ -196,7 +196,7 @@ function SpoolCard({ spool, onPrintLabel, onTag, onWeigh, onLocationChange, allL
             <select
               style={{ width: selectWidth }}
               value={spool.location ?? ''}
-              onChange={e => onLocationChange(e.target.value || null)}
+              onChange={e => { const t = e.target; onLocationChange(t.value || null); requestAnimationFrame(() => t.blur()) }}
               className="text-xs border rounded px-1.5 py-0.5 bg-white dark:bg-gray-800 dark:border-gray-600 text-gray-600 dark:text-gray-300 cursor-pointer"
             >
               <option value="">Unknown</option>
@@ -246,7 +246,7 @@ export default function SpoolInventory() {
   const { data, isLoading } = useQuery({
     queryKey: ['spoolman-stock'],
     queryFn: getSpoolmanStock,
-    refetchInterval: 60_000,
+    refetchInterval: 15_000,
   })
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: getSettings })
   const { data: locationData } = useQuery({ queryKey: ['spoolman-location-options'], queryFn: getSpoolmanLocationOptions })

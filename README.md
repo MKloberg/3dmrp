@@ -6,6 +6,8 @@ A self-hosted web app for managing 3D print items, filament inventory, orders, a
 
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-mkloberg-yellow?logo=buy-me-a-coffee&logoColor=white)](https://buymeacoffee.com/mkloberg)
 
+> **v0.4.9:** Spool weigh modal now includes an inline guide explaining the process, where the empty spool tare comes from (Spoolman's filament type definition), and the drift risk if tare isn't kept up to date. Location sort now correctly separates storage locations from printer-named locations. Dropdown focus clears immediately after selection. Spool inventory refresh interval tightened to 15 s.
+>
 > **v0.4.8:** Live two-way spool location sync between 3DMRP and Spoolman — the foundation for RFID-based spool tracking across your printer fleet. Plus spool weighing workflow, inventory sort pills, and more.
 >
 > **v0.4.7:** Spoolman webhook support on the Spool Inventory page, unified NFC tagging via the persistent mobile session, TLS certificate persistence across container restarts, and several UX refinements.

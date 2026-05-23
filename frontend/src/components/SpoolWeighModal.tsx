@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Scale } from 'lucide-react'
+import { Scale, Info } from 'lucide-react'
 import { SpoolmanSpool, patchSpoolmanRemainingWeight } from '../api/client'
 import { SpoolIcon } from './SpoolIcon'
 import Modal from './Modal'
@@ -109,6 +109,15 @@ export default function SpoolWeighModal({ spool, onClose, onSaved }: Props) {
             {error && <p className="text-xs text-red-500">{error}</p>}
           </>
         )}
+
+        <div className="flex gap-2 text-xs text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg px-3 py-2.5">
+          <Info size={13} className="shrink-0 mt-px" />
+          <p className="leading-relaxed">
+            Place the spool on a scale and enter the total weight. The empty spool tare is pulled from the filament
+            type definition in Spoolman (<span className="font-medium">Settings → Filaments</span>). If the tare is
+            wrong or goes out of date, the calculated remaining weight will drift — keep it updated for accurate readings.
+          </p>
+        </div>
 
         <div className="flex items-center gap-2 justify-end pt-1">
           <button

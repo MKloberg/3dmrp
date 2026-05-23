@@ -86,16 +86,15 @@ async def get_location_options(db: Session = Depends(get_db)) -> Dict[str, Any]:
 
         spoolman_locs = sorted(spoolman_set)
 
-    # 3. Printer names from 3DMRP (separate group, after Spoolman locations)
-    printer_locs = sorted(
-        p.name for p in db.query(Printer).all() if p.name
-    )
+    # 3. Printer names from 3DMRP
+    printer_names = sorted(p.name for p in db.query(Printer).all() if p.name)
+    printer_names_lower = {n.lower() for n in printer_names}
 
-    # Merge: Spoolman locations first, then printers not already listed
-    spoolman_set_lower = {l.lower() for l in spoolman_locs}
-    combined = spoolman_locs + [p for p in printer_locs if p.lower() not in spoolman_set_lower]
+    # Split Spoolman locations: storage (non-printer) first, printer-named ones go to bottom group
+    storage_locs = sorted(l for l in spoolman_locs if l.lower() not in printer_names_lower)
+    printer_locs = sorted(set(printer_names) | {l for l in spoolman_locs if l.lower() in printer_names_lower})
 
-    return {"locations": combined}
+    return {"locations": storage_locs + printer_locs}
 
 
 @router.get("/filaments")
