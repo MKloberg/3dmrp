@@ -37,6 +37,7 @@ type AppPhase =
   | 'nfc_ask_second'
   | 'nfc_scanning_b'
   | 'nfc_done'
+  | 'label_done'
   | 'weigh_spool'
   | 'nfc_error'
   | 'disconnected'
@@ -110,6 +111,9 @@ export default function MobileApp() {
   const [spoolsLoading, setSpoolsLoading] = useState(false)
   const [pickerIntent, setPickerIntent] = useState<'nfc' | 'label' | 'weigh'>('nfc')
   const phoneInitiatedRef = useRef(false)
+
+  // Label done state
+  const [labeledSpool, setLabeledSpool] = useState<SpoolmanSpool | null>(null)
 
   // Weigh spool state
   const [weighSpool, setWeighSpool] = useState<SpoolmanSpool | null>(null)
@@ -414,7 +418,8 @@ export default function MobileApp() {
 
   function handleSpoolPickLabel(spool: SpoolmanSpool) {
     wsRef.current?.send(JSON.stringify({ type: 'task', task_type: 'print_label', spool_id: spool.id }))
-    returnToIdle()
+    setLabeledSpool(spool)
+    _setPhase('label_done')
   }
 
   function handleSpoolPickWeigh(spool: SpoolmanSpool) {
@@ -559,6 +564,38 @@ export default function MobileApp() {
       onBack={returnToIdle}
       showNfcScan={pickerIntent !== 'nfc'}
     />
+  }
+
+  // Label done
+  if (phase === 'label_done' && labeledSpool) {
+    const name = labeledSpool.filament.name || `Spool #${labeledSpool.id}`
+    const sub = [labeledSpool.filament.material, labeledSpool.filament.vendor?.name].filter(Boolean).join(' · ')
+    return (
+      <div className="min-h-dvh bg-gray-950 flex flex-col text-white select-none">
+        <div className="flex-1 flex flex-col items-center justify-center gap-5 px-6 text-center">
+          <div className="w-20 h-20 rounded-full bg-green-500/20 flex items-center justify-center">
+            <Check size={40} className="text-green-400" />
+          </div>
+          <div className="space-y-1">
+            <p className="text-white text-xl font-bold">Label Sent</p>
+            <p className="text-sm text-gray-400">{name}</p>
+            {sub && <p className="text-xs text-gray-600">{sub}</p>}
+            <p className="text-xs text-gray-600 font-mono">#{labeledSpool.id}</p>
+          </div>
+          <p className="text-sm text-gray-500 leading-relaxed max-w-xs">
+            The QR label is printing on your desktop.
+          </p>
+        </div>
+        <div className="px-6 pb-safe pb-10 pt-4">
+          <button
+            onClick={() => { setLabeledSpool(null); _setPhase('idle') }}
+            className="w-full py-4 rounded-2xl bg-brand-600 hover:bg-brand-700 active:bg-brand-800 text-white font-semibold text-base transition-colors"
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    )
   }
 
   // Weigh spool
@@ -1040,6 +1077,7 @@ function WeighSpoolScreen({ spool, onDone }: { spool: SpoolmanSpool; onDone: () 
   const [error, setError] = useState<string | null>(null)
   const [detectedTare, setDetectedTare] = useState<number | null>(null)
   const [updatingTare, setUpdatingTare] = useState(false)
+  const [savedRemaining, setSavedRemaining] = useState<number | null>(null)
 
   const tare = spool.filament.spool_weight
   const grossNum = parseFloat(gross)
@@ -1058,7 +1096,8 @@ function WeighSpoolScreen({ spool, onDone }: { spool: SpoolmanSpool; onDone: () 
         setDetectedTare(Math.round(grossNum - filamentWeight))
         setSaving(false)
       } else {
-        onDone()
+        setSavedRemaining(Math.round(remaining))
+        setSaving(false)
       }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to update Spoolman')
@@ -1098,7 +1137,22 @@ function WeighSpoolScreen({ spool, onDone }: { spool: SpoolmanSpool; onDone: () 
         </div>
       </div>
 
-      {detectedTare !== null ? (
+      {savedRemaining !== null ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-5 px-6 text-center">
+          <div className="w-20 h-20 rounded-full bg-green-500/20 flex items-center justify-center">
+            <Check size={40} className="text-green-400" />
+          </div>
+          <div className="space-y-1">
+            <p className="text-white text-xl font-bold">Weight Saved</p>
+            <p className="text-sm text-gray-400">{name}</p>
+            <p className="text-xs text-gray-600 font-mono">#{spool.id}</p>
+          </div>
+          <div className="px-10 py-4 bg-gray-900 border border-gray-800 rounded-2xl">
+            <p className="text-xs text-gray-500 mb-1">Remaining filament</p>
+            <p className="text-4xl font-bold text-brand-400">{savedRemaining} g</p>
+          </div>
+        </div>
+      ) : detectedTare !== null ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-5 px-6 text-center">
           <div className="w-20 h-20 rounded-full bg-green-500/20 flex items-center justify-center">
             <Sparkles size={36} className="text-green-400" />
@@ -1178,7 +1232,14 @@ function WeighSpoolScreen({ spool, onDone }: { spool: SpoolmanSpool; onDone: () 
       )}
 
       <div className="px-5 pb-safe pb-8 pt-4 space-y-3">
-        {detectedTare !== null ? (
+        {savedRemaining !== null ? (
+          <button
+            onClick={onDone}
+            className="w-full py-4 rounded-2xl bg-brand-600 hover:bg-brand-700 active:bg-brand-800 text-white font-semibold text-base transition-colors"
+          >
+            Done
+          </button>
+        ) : detectedTare !== null ? (
           <>
             <button
               onClick={handleUpdateTare}
