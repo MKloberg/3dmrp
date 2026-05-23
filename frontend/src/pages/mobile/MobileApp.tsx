@@ -1105,6 +1105,20 @@ function WeighSpoolScreen({ spool, onDone }: { spool: SpoolmanSpool; onDone: () 
     }
   }
 
+  async function handleAcceptCurrent() {
+    if (spool.remaining_weight == null) return
+    setSaving(true)
+    setError(null)
+    try {
+      await patchSpoolmanRemainingWeight(spool.id, Math.round(spool.remaining_weight))
+      setSavedRemaining(Math.round(spool.remaining_weight))
+      setSaving(false)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to update Spoolman')
+      setSaving(false)
+    }
+  }
+
   async function handleUpdateTare() {
     if (detectedTare === null) return
     setUpdatingTare(true)
@@ -1210,6 +1224,27 @@ function WeighSpoolScreen({ spool, onDone }: { spool: SpoolmanSpool; onDone: () 
                 <span className="text-sm text-gray-400">Empty spool weight (tare)</span>
                 <span className="text-sm font-medium text-gray-200">{tare} g</span>
               </div>
+
+              {spool.remaining_weight != null && (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-400">Current recorded weight</span>
+                    <span className="text-sm font-medium text-gray-200">{Math.round(spool.remaining_weight)} g</span>
+                  </div>
+                  <button
+                    onClick={handleAcceptCurrent}
+                    disabled={saving}
+                    className="w-full py-3 rounded-xl border border-gray-700 text-gray-300 text-sm font-medium hover:bg-gray-800 active:bg-gray-700 transition-colors disabled:opacity-50"
+                  >
+                    {saving ? 'Saving…' : 'Accept — weight is unchanged'}
+                  </button>
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 border-t border-gray-800" />
+                    <span className="text-xs text-gray-600">or enter a new measurement</span>
+                    <div className="flex-1 border-t border-gray-800" />
+                  </div>
+                </>
+              )}
 
               <div className="space-y-2">
                 <label className="text-sm font-medium text-gray-300">Gross weight (spool + filament)</label>
