@@ -717,6 +717,7 @@ function SpoolPickerScreen({
   const [selectedMaterial, setSelectedMaterial] = useState<string | null>(null)
   const [selectedBrand, setSelectedBrand] = useState<string | null>(null)
   const [selectedColor, setSelectedColor] = useState<string | null>(null)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
 
   const materials = useMemo(() => {
     const seen = new Set<string>()
@@ -745,8 +746,9 @@ function SpoolPickerScreen({
     if (selectedColor) active = active.filter(s =>
       (s.filament.color_hex ?? '').replace('#', '').toUpperCase() === selectedColor
     )
+    active.sort((a, b) => sortDir === 'asc' ? a.id - b.id : b.id - a.id)
     return active
-  }, [spools, selectedMaterial, selectedBrand, selectedColor])
+  }, [spools, selectedMaterial, selectedBrand, selectedColor, sortDir])
 
   return (
     <div className="min-h-dvh bg-gray-950 flex flex-col text-white select-none">
@@ -768,7 +770,7 @@ function SpoolPickerScreen({
       {!loading && (
         <div className="border-b border-gray-800 divide-y divide-gray-800/60">
           {materials.length > 0 && (
-            <div className="flex gap-2 overflow-x-auto px-4 py-2.5" style={{ scrollbarWidth: 'none' }}>
+            <div className="flex flex-wrap gap-2 px-4 py-2.5">
               <button onClick={() => setSelectedMaterial(null)} className={pillCls(!selectedMaterial)}>All</button>
               {materials.map(m => (
                 <button key={m} onClick={() => setSelectedMaterial(selectedMaterial === m ? null : m)} className={pillCls(selectedMaterial === m)}>{m}</button>
@@ -776,7 +778,7 @@ function SpoolPickerScreen({
             </div>
           )}
           {brands.length > 0 && (
-            <div className="flex gap-2 overflow-x-auto px-4 py-2.5" style={{ scrollbarWidth: 'none' }}>
+            <div className="flex flex-wrap gap-2 px-4 py-2.5">
               <button onClick={() => setSelectedBrand(null)} className={pillCls(!selectedBrand)}>All</button>
               {brands.map(b => (
                 <button key={b} onClick={() => setSelectedBrand(selectedBrand === b ? null : b)} className={pillCls(selectedBrand === b)}>{b}</button>
@@ -784,7 +786,7 @@ function SpoolPickerScreen({
             </div>
           )}
           {colors.length > 0 && (
-            <div className="flex items-center gap-2 overflow-x-auto px-4 py-2.5" style={{ scrollbarWidth: 'none' }}>
+            <div className="flex flex-wrap items-center gap-2 px-4 py-2.5">
               <button onClick={() => setSelectedColor(null)} className={pillCls(!selectedColor)}>All</button>
               {colors.map(hex => (
                 <button
@@ -798,6 +800,15 @@ function SpoolPickerScreen({
               ))}
             </div>
           )}
+          <div className="flex items-center gap-2 px-4 py-2">
+            <span className="text-xs text-gray-500">Sort</span>
+            <button
+              onClick={() => setSortDir(d => d === 'asc' ? 'desc' : 'asc')}
+              className={pillCls(true)}
+            >
+              ID {sortDir === 'asc' ? '↑' : '↓'}
+            </button>
+          </div>
         </div>
       )}
 
@@ -815,8 +826,11 @@ function SpoolPickerScreen({
         ) : (
           <div className="divide-y divide-gray-800/60">
             {filtered.map(spool => {
-              const hex = spool.filament.color_hex
-                ? (spool.filament.color_hex.startsWith('#') ? spool.filament.color_hex : `#${spool.filament.color_hex}`)
+              const rawHex = spool.filament.multi_color_hexes
+                ? spool.filament.multi_color_hexes.split(/[,;]/)[0]
+                : spool.filament.color_hex
+              const hex = rawHex
+                ? (rawHex.startsWith('#') ? rawHex : `#${rawHex}`)
                 : '#888888'
               const name = spool.filament.name || `Spool #${spool.id}`
               const sub = [spool.filament.material, spool.filament.vendor?.name].filter(Boolean).join(' · ')
