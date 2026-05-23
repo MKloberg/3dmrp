@@ -1159,6 +1159,7 @@ function WeighSpoolScreen({ spool, onDone }: { spool: SpoolmanSpool; onDone: () 
           <div className="space-y-1">
             <p className="text-white text-xl font-bold">Weight Saved</p>
             <p className="text-sm text-gray-400">{name}</p>
+            {sub && <p className="text-xs text-gray-600">{sub}</p>}
             <p className="text-2xl font-bold text-gray-300">#{spool.id}</p>
           </div>
           <div className="w-full bg-gray-900 border border-gray-800 rounded-2xl px-5 py-4 space-y-3">
