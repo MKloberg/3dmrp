@@ -580,7 +580,7 @@ export default function MobileApp() {
             <p className="text-white text-xl font-bold">Label Sent</p>
             <p className="text-sm text-gray-400">{name}</p>
             {sub && <p className="text-xs text-gray-600">{sub}</p>}
-            <p className="text-xs text-gray-600 font-mono">#{labeledSpool.id}</p>
+            <p className="text-2xl font-bold text-gray-300">#{labeledSpool.id}</p>
           </div>
           <p className="text-sm text-gray-500 leading-relaxed max-w-xs">
             The QR label is printing on your desktop.
