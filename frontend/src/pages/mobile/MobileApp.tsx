@@ -518,7 +518,7 @@ export default function MobileApp() {
   if (phase === 'weigh_spool' && weighSpool) {
     return <WeighSpoolScreen
       spool={weighSpool}
-      onDone={() => { setWeighSpool(null); _setPhase('idle') }}
+      onDone={() => { setWeighSpool(null); _setPhase('nfc_done') }}
     />
   }
 
