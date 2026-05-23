@@ -1147,9 +1147,31 @@ function WeighSpoolScreen({ spool, onDone }: { spool: SpoolmanSpool; onDone: () 
             <p className="text-sm text-gray-400">{name}</p>
             <p className="text-xs text-gray-600 font-mono">#{spool.id}</p>
           </div>
-          <div className="px-10 py-4 bg-gray-900 border border-gray-800 rounded-2xl">
-            <p className="text-xs text-gray-500 mb-1">Remaining filament</p>
-            <p className="text-4xl font-bold text-brand-400">{savedRemaining} g</p>
+          <div className="w-full bg-gray-900 border border-gray-800 rounded-2xl px-5 py-4 space-y-3">
+            {spool.remaining_weight != null && (
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-500">Before</span>
+                <span className="text-sm text-gray-400">{Math.round(spool.remaining_weight)} g</span>
+              </div>
+            )}
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-400">Now</span>
+              <span className="text-2xl font-bold text-brand-400">{savedRemaining} g</span>
+            </div>
+            {spool.remaining_weight != null && (() => {
+              const delta = savedRemaining - Math.round(spool.remaining_weight)
+              return (
+                <>
+                  <div className="border-t border-gray-800" />
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-gray-500">Change</span>
+                    <span className="text-sm font-semibold text-gray-400">
+                      {delta >= 0 ? '+' : ''}{delta} g
+                    </span>
+                  </div>
+                </>
+              )
+            })()}
           </div>
         </div>
       ) : detectedTare !== null ? (
