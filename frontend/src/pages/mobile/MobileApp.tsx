@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { useParams } from 'react-router-dom'
 import { getNfcSession, postNfcTagA, postNfcResult, getSpoolmanStock, createNfcSession, patchSpoolmanLotNr, patchSpoolmanRemainingWeight, patchSpoolmanFilamentSpoolWeight, type NfcSession, type SpoolmanSpool } from '../../api/client'
-import { Check, Loader2, X, AlertTriangle, WifiOff, Nfc, ChevronRight, ArrowLeft, Scale, Sparkles, Info } from 'lucide-react'
+import { Check, Loader2, X, AlertTriangle, WifiOff, Nfc, ChevronRight, ArrowLeft, Scale, Sparkles, Info, QrCode } from 'lucide-react'
 
 declare global {
   interface Window {
@@ -108,6 +108,7 @@ export default function MobileApp() {
   // Spool picker state
   const [spools, setSpools] = useState<SpoolmanSpool[]>([])
   const [spoolsLoading, setSpoolsLoading] = useState(false)
+  const [pickerIntent, setPickerIntent] = useState<'nfc' | 'label' | 'weigh'>('nfc')
   const phoneInitiatedRef = useRef(false)
 
   // Weigh spool state
@@ -360,7 +361,8 @@ export default function MobileApp() {
     phoneInitiatedRef.current = false
   }
 
-  async function openSpoolPicker() {
+  async function openSpoolPicker(intent: 'nfc' | 'label' | 'weigh' = 'nfc') {
+    setPickerIntent(intent)
     setSpoolsLoading(true)
     _setPhase('spool_picker')
     try {
@@ -407,6 +409,16 @@ export default function MobileApp() {
       _setPhase('nfc_error')
       setNfcErrorMsg('Failed to create tag session. Check your connection and try again.')
     }
+  }
+
+  function handleSpoolPickLabel(spool: SpoolmanSpool) {
+    wsRef.current?.send(JSON.stringify({ type: 'task', task_type: 'print_label', spool_id: spool.id }))
+    returnToIdle()
+  }
+
+  function handleSpoolPickWeigh(spool: SpoolmanSpool) {
+    setWeighSpool(spool)
+    _setPhase('weigh_spool')
   }
 
   async function handleWeighYes() {
@@ -483,7 +495,7 @@ export default function MobileApp() {
           <p className="text-xs font-medium text-gray-500 uppercase tracking-widest px-2 mb-3">Actions</p>
 
           <button
-            onClick={openSpoolPicker}
+            onClick={() => openSpoolPicker('nfc')}
             className="w-full flex items-center gap-4 px-4 py-4 rounded-2xl bg-gray-900 border border-gray-800 hover:border-brand-500/50 hover:bg-gray-800 active:bg-gray-700 transition-colors text-left"
           >
             <div className="w-11 h-11 rounded-xl bg-brand-500/15 flex items-center justify-center shrink-0">
@@ -492,6 +504,34 @@ export default function MobileApp() {
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-white">Tag a Spool</p>
               <p className="text-xs text-gray-400 mt-0.5">Pick a spool and write its NFC tags</p>
+            </div>
+            <ChevronRight size={16} className="text-gray-600 shrink-0" />
+          </button>
+
+          <button
+            onClick={() => openSpoolPicker('label')}
+            className="w-full flex items-center gap-4 px-4 py-4 rounded-2xl bg-gray-900 border border-gray-800 hover:border-brand-500/50 hover:bg-gray-800 active:bg-gray-700 transition-colors text-left"
+          >
+            <div className="w-11 h-11 rounded-xl bg-brand-500/15 flex items-center justify-center shrink-0">
+              <QrCode size={22} className="text-brand-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-white">Label a Spool</p>
+              <p className="text-xs text-gray-400 mt-0.5">Pick a spool and print its QR label</p>
+            </div>
+            <ChevronRight size={16} className="text-gray-600 shrink-0" />
+          </button>
+
+          <button
+            onClick={() => openSpoolPicker('weigh')}
+            className="w-full flex items-center gap-4 px-4 py-4 rounded-2xl bg-gray-900 border border-gray-800 hover:border-brand-500/50 hover:bg-gray-800 active:bg-gray-700 transition-colors text-left"
+          >
+            <div className="w-11 h-11 rounded-xl bg-brand-500/15 flex items-center justify-center shrink-0">
+              <Scale size={22} className="text-brand-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-white">Weigh a Spool</p>
+              <p className="text-xs text-gray-400 mt-0.5">Pick a spool and record its weight</p>
             </div>
             <ChevronRight size={16} className="text-gray-600 shrink-0" />
           </button>
@@ -506,10 +546,13 @@ export default function MobileApp() {
 
   // Spool picker
   if (phase === 'spool_picker') {
+    const onPick = pickerIntent === 'label' ? handleSpoolPickLabel
+      : pickerIntent === 'weigh' ? handleSpoolPickWeigh
+      : handleSpoolPick
     return <SpoolPickerScreen
       spools={spools}
       loading={spoolsLoading}
-      onPick={handleSpoolPick}
+      onPick={onPick}
       onBack={returnToIdle}
     />
   }
