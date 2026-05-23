@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 
 from ..database import get_db
-from ..models import FilamentSpec
+from ..models import FilamentSpec, Printer
 from .settings import get_setting
 
 _ASIN_RE = re.compile(r'^B[0-9A-Z]{9}$')
@@ -43,6 +43,59 @@ async def get_spoolman_stock(db: Session = Depends(get_db)) -> Dict[str, Any]:
         return {"connected": False, "spools": [], "error": "Cannot connect to Spoolman"}
     except Exception as e:
         return {"connected": False, "spools": [], "error": str(e)}
+
+
+@router.get("/location-options")
+async def get_location_options(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    url = get_setting(db, "spoolman_url")
+    spoolman_locs: list[str] = []
+    printer_locs: list[str] = []
+
+    if url:
+        base = url.rstrip("/")
+        spoolman_set: set[str] = set()
+
+        # 1. Spoolman predefined locations (stored in /api/v1/setting → locations.value)
+        try:
+            import json as _json
+            async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+                resp = await client.get(f"{base}/api/v1/setting")
+                if resp.status_code == 200:
+                    setting = resp.json()
+                    raw = setting.get("locations", {}).get("value")
+                    if raw:
+                        for loc in _json.loads(raw):
+                            if loc:
+                                spoolman_set.add(loc)
+        except Exception:
+            pass
+
+        # 2. Locations set directly on spools but not in the predefined list
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(f"{base}/api/v1/spool")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    items = data.get("value", data) if isinstance(data, dict) else data
+                    for spool in (items if isinstance(items, list) else []):
+                        loc = spool.get("location")
+                        if loc:
+                            spoolman_set.add(loc)
+        except Exception:
+            pass
+
+        spoolman_locs = sorted(spoolman_set)
+
+    # 3. Printer names from 3DMRP (separate group, after Spoolman locations)
+    printer_locs = sorted(
+        p.name for p in db.query(Printer).all() if p.name
+    )
+
+    # Merge: Spoolman locations first, then printers not already listed
+    spoolman_set_lower = {l.lower() for l in spoolman_locs}
+    combined = spoolman_locs + [p for p in printer_locs if p.lower() not in spoolman_set_lower]
+
+    return {"locations": combined}
 
 
 @router.get("/filaments")
@@ -294,6 +347,52 @@ async def patch_spool_lot_nr(spool_id: int, body: PatchLotNrRequest, db: Session
             resp = await client.patch(
                 f"{url.rstrip('/')}/api/v1/spool/{spool_id}",
                 json={"lot_nr": lot_nr},
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Spoolman error: {e.response.text}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Spoolman: {e}")
+
+
+class PatchLocationRequest(BaseModel):
+    location: str | None
+
+
+@router.patch("/spools/{spool_id}/location")
+async def patch_spool_location(spool_id: int, body: PatchLocationRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    url = get_setting(db, "spoolman_url")
+    if not url:
+        raise HTTPException(status_code=400, detail="Spoolman URL not configured")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.patch(
+                f"{url.rstrip('/')}/api/v1/spool/{spool_id}",
+                json={"location": body.location},
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Spoolman error: {e.response.text}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Spoolman: {e}")
+
+
+class PatchRemainingWeightRequest(BaseModel):
+    remaining_weight: float
+
+
+@router.patch("/spools/{spool_id}/remaining-weight")
+async def patch_spool_remaining_weight(spool_id: int, body: PatchRemainingWeightRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    url = get_setting(db, "spoolman_url")
+    if not url:
+        raise HTTPException(status_code=400, detail="Spoolman URL not configured")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.patch(
+                f"{url.rstrip('/')}/api/v1/spool/{spool_id}",
+                json={"remaining_weight": body.remaining_weight},
             )
             resp.raise_for_status()
             return resp.json()

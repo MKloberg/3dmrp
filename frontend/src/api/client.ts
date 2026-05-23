@@ -406,6 +406,7 @@ export interface SpoolmanSpool {
     multi_color_hexes: string | null
     vendor: { id: number; name: string } | null
     weight: number | null
+    spool_weight: number | null
   }
 }
 
@@ -799,6 +800,21 @@ export const patchSpoolmanLotNr = (spoolId: number, cardUids: string[]) =>
   req<{ id: number }>(`/spoolman/spools/${spoolId}/lot-nr`, {
     method: 'PATCH',
     body: JSON.stringify({ card_uids: cardUids }),
+  })
+
+export const getSpoolmanLocationOptions = () =>
+  req<{ locations: string[] }>('/spoolman/location-options')
+
+export const patchSpoolmanLocation = (spoolId: number, location: string | null) =>
+  req<{ id: number }>(`/spoolman/spools/${spoolId}/location`, {
+    method: 'PATCH',
+    body: JSON.stringify({ location }),
+  })
+
+export const patchSpoolmanRemainingWeight = (spoolId: number, remainingWeight: number) =>
+  req<{ id: number }>(`/spoolman/spools/${spoolId}/remaining-weight`, {
+    method: 'PATCH',
+    body: JSON.stringify({ remaining_weight: remainingWeight }),
   })
 
 // --- Mobile Session (WebSocket) ---

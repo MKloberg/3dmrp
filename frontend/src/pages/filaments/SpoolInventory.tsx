@@ -1,17 +1,20 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { getSpoolmanStock, getSettings, setSetting, SpoolmanSpool, createNfcSession, patchSpoolmanLotNr } from '../../api/client'
-import { ArrowLeft, WifiOff, MapPin, LayoutList, LayoutGrid, QrCode, Plus, Nfc, Loader2, Check } from 'lucide-react'
+import { getSpoolmanStock, getSettings, setSetting, SpoolmanSpool, createNfcSession, patchSpoolmanLotNr, patchSpoolmanLocation, getSpoolmanLocationOptions } from '../../api/client'
+import { ArrowLeft, WifiOff, MapPin, LayoutList, LayoutGrid, QrCode, Plus, Nfc, Loader2, Check, Scale, ChevronUp, ChevronDown } from 'lucide-react'
 import { SpoolIcon } from '../../components/SpoolIcon'
 import { QRCodeSVG } from 'qrcode.react'
 import Modal from '../../components/Modal'
 import SpoolReceiveWizard from '../../components/SpoolReceiveWizard'
 import SpoolTagModal from '../../components/SpoolTagModal'
 import SpoolStickerModal from '../../components/SpoolStickerModal'
+import SpoolWeighModal from '../../components/SpoolWeighModal'
 import { useMobileSession } from '../../contexts/MobileSessionContext'
 
 type View = 'list' | 'details'
+type SortKey = 'brand' | 'id' | 'material' | 'color' | 'location' | 'remaining'
+type SortDir = 'asc' | 'desc'
 
 function normalizeHex(hex: string | null | undefined): string {
   if (!hex) return '#888888'
@@ -40,7 +43,10 @@ function spoolBarStyle(spool: SpoolmanSpool, pct: number, isLow: boolean): React
 }
 
 
-function SpoolRow({ spool, onPrintLabel, onTag }: { spool: SpoolmanSpool; onPrintLabel: () => void; onTag: () => void }) {
+function SpoolRow({ spool, onPrintLabel, onTag, onWeigh, onLocationChange, allLocations, selectWidth }: {
+  spool: SpoolmanSpool; onPrintLabel: () => void; onTag: () => void; onWeigh: () => void
+  onLocationChange: (location: string | null) => void; allLocations: string[]; selectWidth: number
+}) {
   const color = spoolColor(spool)
   const pct = spool.filament.weight && spool.remaining_weight != null
     ? Math.min(100, (spool.remaining_weight / spool.filament.weight) * 100)
@@ -54,31 +60,38 @@ function SpoolRow({ spool, onPrintLabel, onTag }: { spool: SpoolmanSpool; onPrin
         #{spool.id}
       </p>
       <div className="flex-1 min-w-0">
-        <div className="flex items-baseline gap-2 flex-wrap justify-between">
+        <div className="flex items-center gap-2 flex-wrap justify-between">
           <div className="flex items-baseline gap-2 min-w-0">
             <span className="text-sm font-medium truncate">{spool.filament.name || '—'}</span>
             {spool.filament.vendor?.name && (
               <span className="text-xs text-gray-400 shrink-0">{spool.filament.vendor.name}</span>
             )}
           </div>
-          <div className="flex items-baseline gap-1.5 shrink-0">
-            <span className={`text-sm font-semibold ${isLow ? 'text-red-500' : 'text-gray-800 dark:text-gray-100'}`}>
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1">
+              <MapPin size={11} className="text-gray-400 shrink-0" />
+              <select
+                style={{ width: selectWidth }}
+                value={spool.location ?? ''}
+                onChange={e => onLocationChange(e.target.value || null)}
+                className="text-xs border rounded px-1.5 py-0.5 bg-white dark:bg-gray-800 dark:border-gray-600 text-gray-600 dark:text-gray-300 cursor-pointer"
+              >
+                <option value="">Unknown</option>
+                {allLocations.map(l => <option key={l} value={l}>{l}</option>)}
+              </select>
+            </div>
+            <span className={`text-sm font-semibold tabular-nums text-right w-16 ${isLow ? 'text-red-500' : 'text-gray-800 dark:text-gray-100'}`}>
               {weightLabel(spool.remaining_weight)}
             </span>
-            {pct !== null && (
-              <span className={`text-xs ${isLow ? 'text-red-400' : 'text-gray-400'}`}>{Math.round(pct)}%</span>
-            )}
+            <span className={`text-xs tabular-nums text-right w-7 ${pct !== null && isLow ? 'text-red-400' : 'text-gray-400'}`}>
+              {pct !== null ? `${Math.round(pct)}%` : ''}
+            </span>
           </div>
         </div>
         <div className="flex items-center gap-2 mt-0.5 flex-wrap">
           <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 font-medium">
             {spool.filament.material}
           </span>
-          {spool.location && (
-            <span className="flex items-center gap-0.5 text-xs text-gray-400">
-              <MapPin size={10} />{spool.location}
-            </span>
-          )}
           {spool.lot_nr && <span className="text-xs text-gray-400">Lot: {spool.lot_nr}</span>}
           {spool.comment && (
             <span className="text-xs text-gray-400 italic truncate max-w-40">{spool.comment}</span>
@@ -98,6 +111,13 @@ function SpoolRow({ spool, onPrintLabel, onTag }: { spool: SpoolmanSpool; onPrin
       </div>
       <div className="flex items-center gap-0.5 shrink-0">
         <button
+          onClick={onWeigh}
+          title="Update weight"
+          className="p-1.5 text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 transition-colors"
+        >
+          <Scale size={16} />
+        </button>
+        <button
           onClick={onTag}
           title="Tag spool with NFC"
           className="p-1.5 text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 transition-colors"
@@ -116,7 +136,10 @@ function SpoolRow({ spool, onPrintLabel, onTag }: { spool: SpoolmanSpool; onPrin
   )
 }
 
-function SpoolCard({ spool, onPrintLabel, onTag }: { spool: SpoolmanSpool; onPrintLabel: () => void; onTag: () => void }) {
+function SpoolCard({ spool, onPrintLabel, onTag, onWeigh, onLocationChange, allLocations, selectWidth }: {
+  spool: SpoolmanSpool; onPrintLabel: () => void; onTag: () => void; onWeigh: () => void
+  onLocationChange: (location: string | null) => void; allLocations: string[]; selectWidth: number
+}) {
   const color = spoolColor(spool)
   const pct = spool.filament.weight && spool.remaining_weight != null
     ? Math.min(100, (spool.remaining_weight / spool.filament.weight) * 100)
@@ -128,6 +151,13 @@ function SpoolCard({ spool, onPrintLabel, onTag }: { spool: SpoolmanSpool; onPri
       <div className="relative flex items-center justify-center py-6" style={{ backgroundColor: `${color}28` }}>
         <SpoolIcon color={color} size={72} />
         <div className="absolute top-2 right-2 flex items-center gap-0.5">
+          <button
+            onClick={onWeigh}
+            title="Update weight"
+            className="p-1.5 rounded-lg text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-white/60 dark:hover:bg-gray-900/40 transition-colors"
+          >
+            <Scale size={15} />
+          </button>
           <button
             onClick={onTag}
             title="Tag spool with NFC"
@@ -158,20 +188,29 @@ function SpoolCard({ spool, onPrintLabel, onTag }: { spool: SpoolmanSpool; onPri
           <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 font-medium">
             {spool.filament.material}
           </span>
-          {spool.location && (
-            <span className="flex items-center gap-0.5 text-xs text-gray-400">
-              <MapPin size={10} />{spool.location}
-            </span>
-          )}
           {spool.lot_nr && <span className="text-xs text-gray-400">Lot: {spool.lot_nr}</span>}
         </div>
-        <div className="mt-auto pt-3 flex items-baseline justify-between">
-          <span className={`text-sm font-semibold ${isLow ? 'text-red-500' : 'text-gray-800 dark:text-gray-100'}`}>
-            {weightLabel(spool.remaining_weight)}
-          </span>
-          {pct !== null && (
-            <span className={`text-xs ${isLow ? 'text-red-400' : 'text-gray-400'}`}>{Math.round(pct)}%</span>
-          )}
+        <div className="mt-auto pt-3 space-y-2">
+          <div className="flex items-center gap-1">
+            <MapPin size={11} className="text-gray-400 shrink-0" />
+            <select
+              style={{ width: selectWidth }}
+              value={spool.location ?? ''}
+              onChange={e => onLocationChange(e.target.value || null)}
+              className="text-xs border rounded px-1.5 py-0.5 bg-white dark:bg-gray-800 dark:border-gray-600 text-gray-600 dark:text-gray-300 cursor-pointer"
+            >
+              <option value="">Unknown</option>
+              {allLocations.map(l => <option key={l} value={l}>{l}</option>)}
+            </select>
+          </div>
+          <div className="flex items-baseline justify-between">
+            <span className={`text-sm font-semibold ${isLow ? 'text-red-500' : 'text-gray-800 dark:text-gray-100'}`}>
+              {weightLabel(spool.remaining_weight)}
+            </span>
+            {pct !== null && (
+              <span className={`text-xs ${isLow ? 'text-red-400' : 'text-gray-400'}`}>{Math.round(pct)}%</span>
+            )}
+          </div>
         </div>
       </div>
       {/* Full-width gauge strip at the card bottom */}
@@ -195,8 +234,11 @@ export default function SpoolInventory() {
   const { phoneConnected, pushTask } = useMobileSession()
   const [search, setSearch] = useState('')
   const [view, setView] = useState<View>('list')
+  const [sortKey, setSortKey] = useState<SortKey>('material')
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [labelSpool, setLabelSpool] = useState<SpoolmanSpool | null>(null)
   const [tagSpool, setTagSpool] = useState<SpoolmanSpool | null>(null)
+  const [weighSpool, setWeighSpool] = useState<SpoolmanSpool | null>(null)
   const [showWizard, setShowWizard] = useState(false)
   const [taskFeedback, setTaskFeedback] = useState<TaskFeedback | null>(null)
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -207,6 +249,7 @@ export default function SpoolInventory() {
     refetchInterval: 60_000,
   })
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: getSettings })
+  const { data: locationData } = useQuery({ queryKey: ['spoolman-location-options'], queryFn: getSpoolmanLocationOptions })
 
   const { data: webhookData } = useQuery({
     queryKey: ['spoolman-webhook-version'],
@@ -218,6 +261,7 @@ export default function SpoolInventory() {
     if (webhookData == null) return
     if (prevWebhookVersionRef.current !== null && webhookData.version !== prevWebhookVersionRef.current) {
       qc.invalidateQueries({ queryKey: ['spoolman-stock'] })
+      qc.invalidateQueries({ queryKey: ['spoolman-location-options'] })
     }
     prevWebhookVersionRef.current = webhookData.version
   }, [webhookData, qc])
@@ -287,10 +331,32 @@ export default function SpoolInventory() {
   const spoolmanUrl = (settings?.spoolman_url || '').replace(/\/$/, '')
 
   const activeSpools = (data?.spools ?? []).filter(s => !s.archived)
+
+  const allLocations = useMemo(() => locationData?.locations ?? [], [locationData])
+
+  const sizerRef = useRef<HTMLSelectElement>(null)
+  const [selectWidth, setSelectWidth] = useState(100)
+  useEffect(() => {
+    if (sizerRef.current) setSelectWidth(sizerRef.current.offsetWidth)
+  }, [allLocations])
+
+  async function handleLocationChange(spool: SpoolmanSpool, location: string | null) {
+    try {
+      await patchSpoolmanLocation(spool.id, location)
+      qc.invalidateQueries({ queryKey: ['spoolman-stock'] })
+    } catch {
+      // leave Spoolman as-is; next refetch will restore the displayed value
+    }
+  }
   const materialsCount = new Set(activeSpools.map(s => s.filament.material)).size
   const colorsCount = new Set(activeSpools.map(s => s.filament.color_hex ?? 'unknown')).size
   const brandsCount = new Set(activeSpools.map(s => s.filament.vendor?.name ?? '').filter(Boolean)).size
   const totalWeight = activeSpools.reduce((sum, s) => sum + (s.remaining_weight ?? 0), 0)
+
+  function handleSort(key: SortKey) {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortKey(key); setSortDir('asc') }
+  }
 
   const filteredSpools = activeSpools
     .filter(s => {
@@ -306,8 +372,14 @@ export default function SpoolInventory() {
       )
     })
     .sort((a, b) => {
-      const mc = (a.filament.material ?? '').localeCompare(b.filament.material ?? '')
-      return mc !== 0 ? mc : (a.filament.name ?? '').localeCompare(b.filament.name ?? '')
+      let cmp = 0
+      if (sortKey === 'brand') cmp = (a.filament.vendor?.name ?? '').localeCompare(b.filament.vendor?.name ?? '')
+      else if (sortKey === 'id') cmp = a.id - b.id
+      else if (sortKey === 'material') cmp = (a.filament.material ?? '').localeCompare(b.filament.material ?? '')
+      else if (sortKey === 'color') cmp = (a.filament.color_hex ?? '').localeCompare(b.filament.color_hex ?? '')
+      else if (sortKey === 'location') cmp = (a.location ?? '').localeCompare(b.location ?? '')
+      else if (sortKey === 'remaining') cmp = (a.remaining_weight ?? 0) - (b.remaining_weight ?? 0)
+      return sortDir === 'asc' ? cmp : -cmp
     })
 
   // suppress unused warning — spoolmanUrl kept for potential future use
@@ -315,8 +387,21 @@ export default function SpoolInventory() {
 
   return (
     <div className="p-6 space-y-6">
+      {/* Hidden sizer — measures the width needed to fit the longest location option */}
+      <select ref={sizerRef} className="invisible fixed pointer-events-none" style={{ width: 'auto' }} aria-hidden tabIndex={-1}>
+        <option value="">Unknown</option>
+        {allLocations.map(l => <option key={l} value={l}>{l}</option>)}
+      </select>
+
       {labelSpool && <SpoolStickerModal spool={labelSpool} onClose={() => setLabelSpool(null)} />}
       {tagSpool && <SpoolTagModal spool={tagSpool} onClose={() => setTagSpool(null)} />}
+      {weighSpool && (
+        <SpoolWeighModal
+          spool={weighSpool}
+          onClose={() => setWeighSpool(null)}
+          onSaved={() => qc.invalidateQueries({ queryKey: ['spoolman-stock'] })}
+        />
+      )}
       {showWizard && <SpoolReceiveWizard onClose={() => setShowWizard(false)} />}
 
       {taskFeedback && (
@@ -348,8 +433,8 @@ export default function SpoolInventory() {
             <SpoolIcon size={40} color="#9ca3af" />
             Spool Inventory
           </h1>
-          <p className="flex items-center gap-1.5 text-xs text-gray-400 mt-0.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-blink shrink-0" />
+          <p className="flex items-center gap-1.5 text-xs text-gray-400 mt-0.5 leading-none">
+            <span className="w-2 h-2 rounded-full bg-green-500 animate-blink shrink-0 translate-y-px" />
             Live data from Spoolman
           </p>
         </div>
@@ -406,13 +491,29 @@ export default function SpoolInventory() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <input
-              className="flex-1 border rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-200"
+              className="flex-1 min-w-48 border rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-200"
               placeholder="Filter by ID, name, material, vendor, location, lot…"
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
+            <div className="flex items-center gap-1 flex-wrap">
+              {([['brand', 'Brand'], ['id', 'ID'], ['material', 'Material'], ['color', 'Color'], ['location', 'Location'], ['remaining', 'Remaining']] as [SortKey, string][]).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => handleSort(key)}
+                  className={`flex items-center gap-0.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                    sortKey === key
+                      ? 'bg-brand-600 text-white'
+                      : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+                  }`}
+                >
+                  {label}
+                  {sortKey === key && (sortDir === 'asc' ? <ChevronUp size={11} /> : <ChevronDown size={11} />)}
+                </button>
+              ))}
+            </div>
             <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden shrink-0">
               <button
                 onClick={() => changeView('list')}
@@ -444,13 +545,13 @@ export default function SpoolInventory() {
           ) : view === 'list' ? (
             <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
               {filteredSpools.map(spool => (
-                <SpoolRow key={spool.id} spool={spool} onPrintLabel={() => setLabelSpool(spool)} onTag={() => handleTag(spool)} />
+                <SpoolRow key={spool.id} spool={spool} onPrintLabel={() => setLabelSpool(spool)} onTag={() => handleTag(spool)} onWeigh={() => setWeighSpool(spool)} onLocationChange={loc => handleLocationChange(spool, loc)} allLocations={allLocations} selectWidth={selectWidth} />
               ))}
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
               {filteredSpools.map(spool => (
-                <SpoolCard key={spool.id} spool={spool} onPrintLabel={() => setLabelSpool(spool)} onTag={() => handleTag(spool)} />
+                <SpoolCard key={spool.id} spool={spool} onPrintLabel={() => setLabelSpool(spool)} onTag={() => handleTag(spool)} onWeigh={() => setWeighSpool(spool)} onLocationChange={loc => handleLocationChange(spool, loc)} allLocations={allLocations} selectWidth={selectWidth} />
               ))}
             </div>
           )}
