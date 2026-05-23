@@ -1236,7 +1236,7 @@ function WeighSpoolScreen({ spool, onDone }: { spool: SpoolmanSpool; onDone: () 
                     disabled={saving}
                     className="w-full py-3 rounded-xl border border-gray-700 text-gray-300 text-sm font-medium hover:bg-gray-800 active:bg-gray-700 transition-colors disabled:opacity-50"
                   >
-                    {saving ? 'Saving…' : 'Accept — weight is unchanged'}
+                    {saving ? 'Saving…' : `Accept ${Math.round(spool.remaining_weight)} g — weight is unchanged`}
                   </button>
                   <div className="flex items-center gap-3">
                     <div className="flex-1 border-t border-gray-800" />
