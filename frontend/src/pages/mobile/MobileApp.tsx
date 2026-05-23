@@ -8,7 +8,7 @@ declare global {
     NDEFReader: new () => NDEFReaderInstance
   }
   interface NDEFReaderInstance extends EventTarget {
-    scan(): Promise<void>
+    scan(options?: { signal?: AbortSignal }): Promise<void>
     write(message: NDEFMessageInit, options?: { overwrite?: boolean; signal?: AbortSignal }): Promise<void>
   }
   interface NDEFMessageInit {
@@ -554,6 +554,7 @@ export default function MobileApp() {
       loading={spoolsLoading}
       onPick={onPick}
       onBack={returnToIdle}
+      showNfcScan={pickerIntent !== 'nfc'}
     />
   }
 
@@ -784,17 +785,66 @@ function pillCls(active: boolean) {
 }
 
 function SpoolPickerScreen({
-  spools, loading, onPick, onBack,
+  spools, loading, onPick, onBack, showNfcScan = false,
 }: {
   spools: SpoolmanSpool[]
   loading: boolean
   onPick: (spool: SpoolmanSpool) => void
   onBack: () => void
+  showNfcScan?: boolean
 }) {
   const [selectedMaterial, setSelectedMaterial] = useState<string | null>(null)
   const [selectedBrand, setSelectedBrand] = useState<string | null>(null)
   const [selectedColor, setSelectedColor] = useState<string | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [nfcState, setNfcState] = useState<'idle' | 'scanning' | 'not_found'>('idle')
+  const abortRef = useRef<AbortController | null>(null)
+
+  function cancelNfcScan() {
+    abortRef.current?.abort()
+    abortRef.current = null
+    setNfcState('idle')
+  }
+
+  async function startNfcScan() {
+    if (!('NDEFReader' in window)) return
+    setNfcState('scanning')
+    const abort = new AbortController()
+    abortRef.current = abort
+    try {
+      const reader = new window.NDEFReader()
+      await reader.scan({ signal: abort.signal })
+      reader.addEventListener('reading', (ev: Event) => {
+        type NfcRecord = { recordType: string; mediaType?: string; data?: DataView }
+        const records = (ev as unknown as { message: { records: NfcRecord[] } }).message.records
+        let spoolId: number | null = null
+        for (const record of records) {
+          if (record.mediaType === 'application/json' && record.data) {
+            try {
+              const json = JSON.parse(new TextDecoder().decode(record.data))
+              if (json.spool_id) { spoolId = Number(json.spool_id); break }
+            } catch { /* ignore */ }
+          }
+        }
+        abort.abort()
+        abortRef.current = null
+        const spool = spoolId !== null ? spools.find(s => s.id === spoolId) ?? null : null
+        if (spool) {
+          onPick(spool)
+        } else {
+          setNfcState('not_found')
+          setTimeout(() => setNfcState('idle'), 2500)
+        }
+      })
+    } catch (e) {
+      if ((e as Error).name !== 'AbortError') {
+        setNfcState('not_found')
+        setTimeout(() => setNfcState('idle'), 2500)
+      } else {
+        setNfcState('idle')
+      }
+    }
+  }
 
   const materials = useMemo(() => {
     const seen = new Set<string>()
@@ -834,7 +884,7 @@ function SpoolPickerScreen({
   }, [spools, selectedMaterial, selectedBrand, selectedColor, sortDir])
 
   return (
-    <div className="min-h-dvh bg-gray-950 flex flex-col text-white select-none">
+    <div className="min-h-dvh bg-gray-950 flex flex-col text-white select-none relative">
       {/* Header */}
       <div className="flex items-center gap-3 px-4 pt-safe pt-10 pb-4 border-b border-gray-800">
         <button
@@ -843,11 +893,46 @@ function SpoolPickerScreen({
         >
           <ArrowLeft size={16} className="text-gray-300" />
         </button>
-        <div>
+        <div className="flex-1">
           <p className="text-xs text-gray-500 uppercase tracking-widest">3DMRP Mobile</p>
-          <p className="text-sm font-semibold text-white">Tag a Spool</p>
+          <p className="text-sm font-semibold text-white">Select a Spool</p>
         </div>
+        {showNfcScan && (
+          <button
+            onClick={startNfcScan}
+            title="Scan NFC tag"
+            className="w-10 h-10 rounded-full bg-gray-900 border border-gray-700 flex items-center justify-center shrink-0 hover:border-brand-500 hover:bg-gray-800 transition-colors"
+          >
+            <Nfc size={18} className="text-brand-400" />
+          </button>
+        )}
       </div>
+
+      {/* NFC scanning overlay */}
+      {nfcState === 'scanning' && (
+        <div className="absolute inset-0 bg-gray-950/95 flex flex-col items-center justify-center gap-6 z-10">
+          <div className="w-28 h-28 rounded-full bg-brand-500/20 border-2 border-brand-400 animate-pulse flex items-center justify-center">
+            <Nfc size={48} className="text-brand-400" />
+          </div>
+          <div className="text-center space-y-1.5">
+            <p className="text-white font-semibold text-lg">Scan NFC Tag</p>
+            <p className="text-sm text-gray-400">Hold the spool's tag to the back of your phone</p>
+          </div>
+          <button
+            onClick={cancelNfcScan}
+            className="px-8 py-3 rounded-2xl border border-gray-700 text-gray-300 font-medium text-sm hover:bg-gray-900 transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {/* Not found toast */}
+      {nfcState === 'not_found' && (
+        <div className="absolute top-24 left-4 right-4 bg-red-950 border border-red-800 rounded-xl px-4 py-3 z-10 text-center">
+          <p className="text-sm text-red-300 font-medium">No matching spool found for this tag.</p>
+        </div>
+      )}
 
       {/* Filter pills */}
       {!loading && (
