@@ -6,6 +6,8 @@ A self-hosted web app for managing 3D print items, filament inventory, orders, a
 
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-mkloberg-yellow?logo=buy-me-a-coffee&logoColor=white)](https://buymeacoffee.com/mkloberg)
 
+> **v0.4.8:** Live two-way spool location sync between 3DMRP and Spoolman — the foundation for RFID-based spool tracking across your printer fleet. Plus spool weighing workflow, inventory sort pills, and more.
+>
 > **v0.4.7:** Spoolman webhook support on the Spool Inventory page, unified NFC tagging via the persistent mobile session, TLS certificate persistence across container restarts, and several UX refinements.
 >
 > **v0.4.3:** Patch — fixes remaining null crashes on the Spool Inventory and Filament Inventory report pages when Spoolman filaments have a null name or material field.
@@ -415,6 +417,38 @@ Set the Spoolman URL in **Settings → General** (e.g. `http://192.168.1.100:791
 - The **Mobile Filament Loader** looks up scanned spool QR codes against Spoolman and writes slot assignments back to Moonraker
 - The **Printers** page shows live Spoolman slot assignments per printer when Spoolman is active
 - AFC-equipped printers automatically enrich their lane data with Spoolman spool names, weights, and IDs
+
+---
+
+## What's new in v0.4.8
+
+### Live two-way spool location sync — the foundation for fleet-wide spool tracking
+
+Every spool row and card in the Spool Inventory now has a location dropdown. Change it and Spoolman updates instantly. Change it in Spoolman and 3DMRP reflects it on the next webhook. No manual reconciliation, no stale data.
+
+**What makes this genuinely exciting:** when you assign a printer name as a spool's location, Spoolman automatically creates that location if it doesn't exist yet. Printer names are offered as location choices alongside your Spoolman-defined storage locations — so "SNMA01-U1" is right there in the list. Move a spool to a printer, and Spoolman knows where it is.
+
+This is the groundwork for something bigger: RFID detection at each printer. When a spool is scanned at a printer, its location will update automatically — turning your passive inventory into a live map of where every spool actually is across your entire fleet. No barcodes, no clipboards. The spool finds itself.
+
+**Location list is a hybrid of three sources**, in priority order:
+
+1. **Spoolman predefined locations** — your named storage areas ("Shop Storage Rack", "Office Storage")
+2. **Locations already on spools** — catches anything set directly without going through the list
+3. **3DMRP printer names** — so every printer is immediately available as a destination
+
+All deduplicated. Spoolman locations appear first, printers after. Webhook-driven — no polling.
+
+### Spool weighing workflow
+
+Each spool row now has a **scale icon button** that opens a weigh modal. Enter the gross weight from your scale; the app subtracts the empty spool tare (sourced from Spoolman's filament type) and shows the calculated remaining weight before you save. One tap updates Spoolman. If the filament type doesn't have a tare weight set, the modal tells you exactly where to fix it.
+
+### Spool Inventory sort pills
+
+Six sort options as compact pills above the spool list: **Brand**, **ID**, **Material**, **Color**, **Location**, **Remaining**. The active pill highlights in blue and shows a direction arrow. Tap again to reverse. Default is Material ascending — same as before, just now switchable in one click.
+
+### Location column alignment
+
+All location dropdowns share a pixel-perfect measured width — calculated from a hidden sizer element containing all options — so the dropdown column lines up exactly across every row regardless of spool count or label length.
 
 ---
 
