@@ -734,7 +734,10 @@ function SpoolPickerScreen({
   const colors = useMemo(() => {
     const seen = new Set<string>()
     spools.forEach(s => {
-      if (s.filament.color_hex) seen.add(s.filament.color_hex.replace('#', '').toUpperCase())
+      const raw = s.filament.multi_color_hexes
+        ? s.filament.multi_color_hexes.split(/[,;]/)[0]
+        : s.filament.color_hex
+      if (raw) seen.add(raw.replace('#', '').toUpperCase())
     })
     return Array.from(seen)
   }, [spools])
@@ -743,9 +746,12 @@ function SpoolPickerScreen({
     let active = spools.filter(s => !s.archived)
     if (selectedMaterial) active = active.filter(s => s.filament.material === selectedMaterial)
     if (selectedBrand) active = active.filter(s => s.filament.vendor?.name === selectedBrand)
-    if (selectedColor) active = active.filter(s =>
-      (s.filament.color_hex ?? '').replace('#', '').toUpperCase() === selectedColor
-    )
+    if (selectedColor) active = active.filter(s => {
+      const raw = s.filament.multi_color_hexes
+        ? s.filament.multi_color_hexes.split(/[,;]/)[0]
+        : s.filament.color_hex
+      return (raw ?? '').replace('#', '').toUpperCase() === selectedColor
+    })
     active.sort((a, b) => sortDir === 'asc' ? a.id - b.id : b.id - a.id)
     return active
   }, [spools, selectedMaterial, selectedBrand, selectedColor, sortDir])
