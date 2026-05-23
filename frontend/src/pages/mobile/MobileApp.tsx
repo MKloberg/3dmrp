@@ -114,6 +114,7 @@ export default function MobileApp() {
   // Weigh spool state
   const [weighSpool, setWeighSpool] = useState<SpoolmanSpool | null>(null)
   const [weighLoading, setWeighLoading] = useState(false)
+  const weighReturnPhaseRef = useRef<'idle' | 'nfc_done'>('idle')
 
   const nfcSupported = typeof window !== 'undefined' && 'NDEFReader' in window
 
@@ -417,12 +418,14 @@ export default function MobileApp() {
   }
 
   function handleSpoolPickWeigh(spool: SpoolmanSpool) {
+    weighReturnPhaseRef.current = 'idle'
     setWeighSpool(spool)
     _setPhase('weigh_spool')
   }
 
   async function handleWeighYes() {
     if (!nfcSession) return
+    weighReturnPhaseRef.current = 'nfc_done'
     const spoolId = nfcSession.spool_id
     let spool = spools.find(s => s.id === spoolId) ?? null
     if (!spool) {
@@ -562,7 +565,7 @@ export default function MobileApp() {
   if (phase === 'weigh_spool' && weighSpool) {
     return <WeighSpoolScreen
       spool={weighSpool}
-      onDone={() => { setWeighSpool(null); _setPhase('nfc_done') }}
+      onDone={() => { setWeighSpool(null); _setPhase(weighReturnPhaseRef.current) }}
     />
   }
 
@@ -593,9 +596,7 @@ export default function MobileApp() {
             <Check size={40} className="text-green-400" />
           </div>
           <div className="space-y-1">
-            <p className="text-white text-xl font-bold">
-              {tagCount === 2 ? 'Both Tags Written' : 'Tag Written'}
-            </p>
+            <p className="text-white text-xl font-bold">Complete</p>
             {nfcSession && <p className="text-sm text-gray-400">{nfcSession.spool_label}</p>}
           </div>
           {wroteTagA && (
@@ -1116,10 +1117,11 @@ function WeighSpoolScreen({ spool, onDone }: { spool: SpoolmanSpool; onDone: () 
         <div className="flex-1 px-5 py-6 space-y-5">
           <div className="flex items-center gap-3 p-3 bg-gray-900 border border-gray-800 rounded-xl">
             <div className="w-9 h-9 rounded-full shrink-0 border border-black/20" style={{ backgroundColor: color }} />
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className="text-sm font-medium text-white truncate">{name}</p>
               {sub && <p className="text-xs text-gray-500 truncate">{sub}</p>}
             </div>
+            <p className="text-xl font-bold text-gray-300 shrink-0">#{spool.id}</p>
           </div>
 
           {tare == null ? (
