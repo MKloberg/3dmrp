@@ -56,7 +56,9 @@ export default function SpoolStickerModal({ spool, onClose }: { spool: SpoolmanS
 
   function handlePrint() {
     onClose()
-    fetch(`/api/settings/open-browser?url=${encodeURIComponent(printUrl)}`).catch(() => window.open(printUrl, '_blank'))
+    fetch(`/api/settings/open-browser?url=${encodeURIComponent(printUrl)}`)
+      .then(r => { if (!r.ok) throw new Error() })
+      .catch(() => window.open(printUrl, '_blank'))
   }
 
   function handleCopyToClipboard() {

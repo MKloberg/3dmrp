@@ -69,7 +69,7 @@ def open_spoolman(db: Session = Depends(get_db)):
 
 @router.get("/open-browser")
 async def open_browser(url: str):
-    if not (url.startswith("http://localhost") or url.startswith("http://127.0.0.1")):
+    if not any(url.startswith(p) for p in ("http://localhost", "https://localhost", "http://127.0.0.1", "https://127.0.0.1")):
         raise HTTPException(status_code=400, detail="Only localhost URLs allowed")
     try:
         # cmd /c start activates the new window via ShellExecuteEx; webbrowser.open does not

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { getSpoolmanStock, getSettings, setSetting, SpoolmanSpool, createNfcSession, patchSpoolmanLotNr, patchSpoolmanLocation, getSpoolmanLocationOptions } from '../../api/client'
+import { getSpoolmanStock, getSettings, setSetting, SpoolmanSpool, createNfcSession, patchSpoolmanLotNr, patchSpoolmanLocation, getSpoolmanLocationOptions, getSpoolWeighLog } from '../../api/client'
 import { ArrowLeft, WifiOff, MapPin, LayoutList, LayoutGrid, QrCode, Plus, Nfc, Loader2, Check, Scale, ChevronUp, ChevronDown } from 'lucide-react'
 import { SpoolIcon } from '../../components/SpoolIcon'
 import { QRCodeSVG } from 'qrcode.react'
@@ -13,7 +13,7 @@ import SpoolWeighModal from '../../components/SpoolWeighModal'
 import { useMobileSession } from '../../contexts/MobileSessionContext'
 
 type View = 'list' | 'details'
-type SortKey = 'brand' | 'id' | 'material' | 'color' | 'location' | 'remaining'
+type SortKey = 'brand' | 'id' | 'material' | 'color' | 'location' | 'remaining' | 'accuracy'
 type SortDir = 'asc' | 'desc'
 
 function normalizeHex(hex: string | null | undefined): string {
@@ -33,8 +33,7 @@ function spoolColor(spool: SpoolmanSpool): string {
   return normalizeHex(raw)
 }
 
-function spoolBarStyle(spool: SpoolmanSpool, pct: number, isLow: boolean): React.CSSProperties {
-  if (isLow) return { width: `${pct}%`, backgroundColor: '#ef4444' }
+function spoolBarStyle(spool: SpoolmanSpool, pct: number): React.CSSProperties {
   const hexes = spool.filament.multi_color_hexes?.split(/[,;]/).map(h => `#${h.replace('#', '')}`)
   if (hexes && hexes.length > 1) {
     return { width: `${pct}%`, backgroundImage: `linear-gradient(to right, ${hexes.join(', ')})` }
@@ -43,9 +42,36 @@ function spoolBarStyle(spool: SpoolmanSpool, pct: number, isLow: boolean): React
 }
 
 
-function SpoolRow({ spool, onPrintLabel, onTag, onWeigh, onLocationChange, allLocations, selectWidth }: {
+type WeighConfidence = 'high' | 'medium' | 'low'
+
+function weighConfidence(spool: SpoolmanSpool, weighLog: Record<number, string>): WeighConfidence {
+  const candidates: number[] = []
+  if (weighLog[spool.id]) candidates.push(new Date(weighLog[spool.id]).getTime())
+  if (spool.last_used) candidates.push(new Date(spool.last_used).getTime())
+  if (candidates.length === 0) return 'low'
+  const ageMs = Date.now() - Math.max(...candidates)
+  const days = ageMs / 86_400_000
+  if (days <= 7) return 'high'
+  if (days <= 30) return 'medium'
+  return 'low'
+}
+
+const CONFIDENCE_COLOR: Record<WeighConfidence, string> = {
+  high: '#22c55e',
+  medium: '#eab308',
+  low: '#ef4444',
+}
+
+const CONFIDENCE_TITLE: Record<WeighConfidence, string> = {
+  high: 'Weight accurate — weighed or used within 7 days',
+  medium: 'Weight may have drifted — last updated 7–30 days ago',
+  low: 'Weight unknown or stale — never weighed or over 30 days ago',
+}
+
+function SpoolRow({ spool, onPrintLabel, onTag, onWeigh, onLocationChange, allLocations, selectWidth, confidence }: {
   spool: SpoolmanSpool; onPrintLabel: () => void; onTag: () => void; onWeigh: () => void
   onLocationChange: (location: string | null) => void; allLocations: string[]; selectWidth: number
+  confidence: WeighConfidence
 }) {
   const color = spoolColor(spool)
   const pct = spool.filament.weight && spool.remaining_weight != null
@@ -80,12 +106,25 @@ function SpoolRow({ spool, onPrintLabel, onTag, onWeigh, onLocationChange, allLo
                 {allLocations.map(l => <option key={l} value={l}>{l}</option>)}
               </select>
             </div>
-            <span className={`text-sm font-semibold tabular-nums text-right w-16 ${isLow ? 'text-red-500' : 'text-gray-800 dark:text-gray-100'}`}>
-              {weightLabel(spool.remaining_weight)}
-            </span>
-            <span className={`text-xs tabular-nums text-right w-7 ${pct !== null && isLow ? 'text-red-400' : 'text-gray-400'}`}>
-              {pct !== null ? `${Math.round(pct)}%` : ''}
-            </span>
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                onClick={onWeigh}
+                title={CONFIDENCE_TITLE[confidence]}
+                className="p-0.5 hover:opacity-70 transition-opacity relative"
+                style={{ color: CONFIDENCE_COLOR[confidence] }}
+              >
+                {confidence === 'low' && (
+                  <span className="absolute inset-[10%] rounded-full bg-red-500/55 animate-ping" />
+                )}
+                <Scale size={14} />
+              </button>
+              <span className={`text-sm font-semibold tabular-nums w-16 ${isLow ? 'text-red-500' : 'text-gray-800 dark:text-gray-100'}`}>
+                {weightLabel(spool.remaining_weight)}
+              </span>
+              <span className={`text-xs tabular-nums w-7 ${pct !== null && isLow ? 'text-red-400' : 'text-gray-400'}`}>
+                {pct !== null ? `${Math.round(pct)}%` : ''}
+              </span>
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-2 mt-0.5 flex-wrap">
@@ -104,19 +143,12 @@ function SpoolRow({ spool, onPrintLabel, onTag, onWeigh, onLocationChange, allLo
           >
             <div
               className="h-full rounded-full transition-all duration-300"
-              style={spoolBarStyle(spool, pct, isLow)}
+              style={spoolBarStyle(spool, pct)}
             />
           </div>
         )}
       </div>
       <div className="flex items-center gap-0.5 shrink-0">
-        <button
-          onClick={onWeigh}
-          title="Update weight"
-          className="p-1.5 text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 transition-colors"
-        >
-          <Scale size={16} />
-        </button>
         <button
           onClick={onTag}
           title="Tag spool with NFC"
@@ -136,9 +168,10 @@ function SpoolRow({ spool, onPrintLabel, onTag, onWeigh, onLocationChange, allLo
   )
 }
 
-function SpoolCard({ spool, onPrintLabel, onTag, onWeigh, onLocationChange, allLocations, selectWidth }: {
+function SpoolCard({ spool, onPrintLabel, onTag, onWeigh, onLocationChange, allLocations, selectWidth, confidence }: {
   spool: SpoolmanSpool; onPrintLabel: () => void; onTag: () => void; onWeigh: () => void
   onLocationChange: (location: string | null) => void; allLocations: string[]; selectWidth: number
+  confidence: WeighConfidence
 }) {
   const color = spoolColor(spool)
   const pct = spool.filament.weight && spool.remaining_weight != null
@@ -153,9 +186,13 @@ function SpoolCard({ spool, onPrintLabel, onTag, onWeigh, onLocationChange, allL
         <div className="absolute top-2 right-2 flex items-center gap-0.5">
           <button
             onClick={onWeigh}
-            title="Update weight"
-            className="p-1.5 rounded-lg text-gray-400 hover:text-brand-600 dark:hover:text-brand-400 hover:bg-white/60 dark:hover:bg-gray-900/40 transition-colors"
+            title={CONFIDENCE_TITLE[confidence]}
+            className="p-1.5 rounded-lg hover:bg-white/60 dark:hover:bg-gray-900/40 hover:opacity-70 transition-opacity relative"
+            style={{ color: CONFIDENCE_COLOR[confidence] }}
           >
+            {confidence === 'low' && (
+              <span className="absolute inset-[10%] rounded-full bg-red-500/70 animate-ping" />
+            )}
             <Scale size={15} />
           </button>
           <button
@@ -218,7 +255,7 @@ function SpoolCard({ spool, onPrintLabel, onTag, onWeigh, onLocationChange, allL
         <div className="h-3 relative" style={{ backgroundColor: `${color}28` }}>
           <div
             className="absolute inset-y-0 left-0 transition-all duration-300"
-            style={{ width: `${pct}%`, backgroundColor: isLow ? '#ef4444' : color }}
+            style={{ width: `${pct}%`, backgroundColor: color }}
           />
         </div>
       )}
@@ -250,6 +287,7 @@ export default function SpoolInventory() {
   })
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: getSettings })
   const { data: locationData } = useQuery({ queryKey: ['spoolman-location-options'], queryFn: getSpoolmanLocationOptions })
+  const { data: weighLogData } = useQuery({ queryKey: ['spool-weigh-log'], queryFn: getSpoolWeighLog })
 
   const { data: webhookData } = useQuery({
     queryKey: ['spoolman-webhook-version'],
@@ -333,6 +371,7 @@ export default function SpoolInventory() {
   const activeSpools = (data?.spools ?? []).filter(s => !s.archived)
 
   const allLocations = useMemo(() => locationData?.locations ?? [], [locationData])
+  const weighLog = useMemo(() => weighLogData?.log ?? {}, [weighLogData])
 
   const sizerRef = useRef<HTMLSelectElement>(null)
   const [selectWidth, setSelectWidth] = useState(100)
@@ -379,6 +418,10 @@ export default function SpoolInventory() {
       else if (sortKey === 'color') cmp = (a.filament.color_hex ?? '').localeCompare(b.filament.color_hex ?? '')
       else if (sortKey === 'location') cmp = (a.location ?? '').localeCompare(b.location ?? '')
       else if (sortKey === 'remaining') cmp = (a.remaining_weight ?? 0) - (b.remaining_weight ?? 0)
+      else if (sortKey === 'accuracy') {
+        const order = { high: 2, medium: 1, low: 0 }
+        cmp = order[weighConfidence(a, weighLog)] - order[weighConfidence(b, weighLog)]
+      }
       return sortDir === 'asc' ? cmp : -cmp
     })
 
@@ -399,7 +442,10 @@ export default function SpoolInventory() {
         <SpoolWeighModal
           spool={weighSpool}
           onClose={() => setWeighSpool(null)}
-          onSaved={() => qc.invalidateQueries({ queryKey: ['spoolman-stock'] })}
+          onSaved={() => {
+            qc.invalidateQueries({ queryKey: ['spoolman-stock'] })
+            qc.invalidateQueries({ queryKey: ['spool-weigh-log'] })
+          }}
         />
       )}
       {showWizard && <SpoolReceiveWizard onClose={() => setShowWizard(false)} />}
@@ -499,7 +545,7 @@ export default function SpoolInventory() {
               onChange={e => setSearch(e.target.value)}
             />
             <div className="flex items-center gap-1 flex-wrap">
-              {([['brand', 'Brand'], ['id', 'ID'], ['material', 'Material'], ['color', 'Color'], ['location', 'Location'], ['remaining', 'Remaining']] as [SortKey, string][]).map(([key, label]) => (
+              {([['brand', 'Brand'], ['id', 'ID'], ['material', 'Material'], ['color', 'Color'], ['location', 'Location'], ['remaining', 'Remaining'], ['accuracy', 'Accuracy']] as [SortKey, string][]).map(([key, label]) => (
                 <button
                   key={key}
                   onClick={() => handleSort(key)}
@@ -545,13 +591,13 @@ export default function SpoolInventory() {
           ) : view === 'list' ? (
             <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
               {filteredSpools.map(spool => (
-                <SpoolRow key={spool.id} spool={spool} onPrintLabel={() => setLabelSpool(spool)} onTag={() => handleTag(spool)} onWeigh={() => setWeighSpool(spool)} onLocationChange={loc => handleLocationChange(spool, loc)} allLocations={allLocations} selectWidth={selectWidth} />
+                <SpoolRow key={spool.id} spool={spool} onPrintLabel={() => setLabelSpool(spool)} onTag={() => handleTag(spool)} onWeigh={() => setWeighSpool(spool)} onLocationChange={loc => handleLocationChange(spool, loc)} allLocations={allLocations} selectWidth={selectWidth} confidence={weighConfidence(spool, weighLog)} />
               ))}
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
               {filteredSpools.map(spool => (
-                <SpoolCard key={spool.id} spool={spool} onPrintLabel={() => setLabelSpool(spool)} onTag={() => handleTag(spool)} onWeigh={() => setWeighSpool(spool)} onLocationChange={loc => handleLocationChange(spool, loc)} allLocations={allLocations} selectWidth={selectWidth} />
+                <SpoolCard key={spool.id} spool={spool} onPrintLabel={() => setLabelSpool(spool)} onTag={() => handleTag(spool)} onWeigh={() => setWeighSpool(spool)} onLocationChange={loc => handleLocationChange(spool, loc)} allLocations={allLocations} selectWidth={selectWidth} confidence={weighConfidence(spool, weighLog)} />
               ))}
             </div>
           )}

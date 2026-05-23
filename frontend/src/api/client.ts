@@ -393,6 +393,7 @@ export interface SpoolmanSpool {
   remaining_length: number | null
   used_length: number | null
   archived: boolean
+  price: number | null
   location: string | null
   lot_nr: string | null
   comment: string | null
@@ -815,6 +816,26 @@ export const patchSpoolmanRemainingWeight = (spoolId: number, remainingWeight: n
   req<{ id: number }>(`/spoolman/spools/${spoolId}/remaining-weight`, {
     method: 'PATCH',
     body: JSON.stringify({ remaining_weight: remainingWeight }),
+  })
+
+export const getSpoolWeighLog = () =>
+  req<{ log: Record<number, string> }>('/spoolman/weigh-log')
+
+export const patchSpoolmanFilamentSpoolWeight = (filamentId: number, spoolWeight: number) =>
+  req<{ id: number }>(`/spoolman/filaments/${filamentId}/spool-weight`, {
+    method: 'PATCH',
+    body: JSON.stringify({ spool_weight: spoolWeight }),
+  })
+
+export const cloneSpoolmanSpool = (source: SpoolmanSpool) =>
+  req<SpoolmanSpool>('/spoolman/clone-spool', {
+    method: 'POST',
+    body: JSON.stringify({
+      filament_id: source.filament.id,
+      price: source.price ?? null,
+      location: source.location ?? null,
+      comment: source.comment ?? null,
+    }),
   })
 
 // --- Mobile Session (WebSocket) ---

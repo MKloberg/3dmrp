@@ -6,7 +6,8 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 
 from ..database import get_db
-from ..models import FilamentSpec, Printer
+from datetime import datetime
+from ..models import FilamentSpec, Printer, SpoolWeighLog
 from .settings import get_setting
 
 _ASIN_RE = re.compile(r'^B[0-9A-Z]{9}$')
@@ -331,6 +332,37 @@ async def create_spools_wizard(body: CreateSpoolsWizardRequest, db: Session = De
     return {"spools": created, "spoolman_url": base}
 
 
+class CloneSpoolRequest(BaseModel):
+    filament_id: int
+    price: Optional[float] = None
+    location: Optional[str] = None
+    comment: Optional[str] = None
+
+
+@router.post("/clone-spool")
+async def clone_spool(body: CloneSpoolRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    url = get_setting(db, "spoolman_url")
+    if not url:
+        raise HTTPException(status_code=400, detail="Spoolman URL not configured")
+    base = url.rstrip("/")
+    spool_payload: Dict[str, Any] = {"filament_id": body.filament_id}
+    if body.price is not None:
+        spool_payload["price"] = body.price
+    if body.location:
+        spool_payload["location"] = body.location
+    if body.comment:
+        spool_payload["comment"] = body.comment
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(f"{base}/api/v1/spool", json=spool_payload)
+            resp.raise_for_status()
+            return resp.json()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Spoolman error: {e.response.text}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Spoolman: {e}")
+
+
 class PatchLotNrRequest(BaseModel):
     card_uids: List[str]
 
@@ -392,6 +424,42 @@ async def patch_spool_remaining_weight(spool_id: int, body: PatchRemainingWeight
             resp = await client.patch(
                 f"{url.rstrip('/')}/api/v1/spool/{spool_id}",
                 json={"remaining_weight": body.remaining_weight},
+            )
+            resp.raise_for_status()
+            result = resp.json()
+        db.add(SpoolWeighLog(spool_id=spool_id, weighed_at=datetime.utcnow()))
+        db.commit()
+        return result
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=502, detail=f"Spoolman error: {e.response.text}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Spoolman: {e}")
+
+
+@router.get("/weigh-log")
+async def get_weigh_log(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    rows = db.query(SpoolWeighLog).order_by(SpoolWeighLog.weighed_at.desc()).all()
+    latest: dict[int, str] = {}
+    for row in rows:
+        if row.spool_id not in latest:
+            latest[row.spool_id] = row.weighed_at.isoformat()
+    return {"log": latest}
+
+
+class PatchFilamentSpoolWeightRequest(BaseModel):
+    spool_weight: float
+
+
+@router.patch("/filaments/{filament_id}/spool-weight")
+async def patch_filament_spool_weight(filament_id: int, body: PatchFilamentSpoolWeightRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+    url = get_setting(db, "spoolman_url")
+    if not url:
+        raise HTTPException(status_code=400, detail="Spoolman URL not configured")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.patch(
+                f"{url.rstrip('/')}/api/v1/filament/{filament_id}",
+                json={"spool_weight": body.spool_weight},
             )
             resp.raise_for_status()
             return resp.json()

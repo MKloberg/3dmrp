@@ -6,6 +6,8 @@ A self-hosted web app for managing 3D print items, filament inventory, orders, a
 
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-mkloberg-yellow?logo=buy-me-a-coffee&logoColor=white)](https://buymeacoffee.com/mkloberg)
 
+> **v0.5.0:** Clone Tagging — duplicate a spool in Spoolman and walk it through the full intake sequence (NFC tagging, QR label, weighing) in one continuous flow, entirely from your phone. Mobile app gains three new standalone actions: Label a Spool, Weigh a Spool, and Clone Tag a Spool. Spool picker adds NFC scan-to-select, wrapping filter pills, multi-color support in the color filter, and ID sort. Weigh screen shows current gross weight in the accept button and a before/after/change breakdown on the success screen.
+>
 > **v0.4.9:** Spool weigh modal now includes an inline guide explaining the process, where the empty spool tare comes from (Spoolman's filament type definition), and the drift risk if tare isn't kept up to date. Location sort now correctly separates storage locations from printer-named locations. Dropdown focus clears immediately after selection. Spool inventory refresh interval tightened to 15 s.
 >
 > **v0.4.8:** Live two-way spool location sync between 3DMRP and Spoolman — the foundation for RFID-based spool tracking across your printer fleet. Plus spool weighing workflow, inventory sort pills, and more.
@@ -168,6 +170,28 @@ The Filament Slots section below the media area shows what's loaded in each slot
 
 A dedicated single-page app that turns your phone into a hands-free spool management terminal. Scan the QR code in the sidebar once and your phone stays paired — across page refreshes, new browser tabs, and backend restarts.
 
+#### Home screen actions
+
+The mobile app home screen has four actions. Each opens a spool picker — scroll the list or tap the NFC button in the top-right corner to identify a spool by scanning its tag instead.
+
+- **Tag a Spool** — write the spool ID to one or two NFC tags. Tag both sides of the spool so it can be identified at the printer regardless of which way it faces.
+- **Label a Spool** — send a QR code label directly to the configured Windows label printer. The label comes out immediately; a success screen confirms which spool was labeled.
+- **Weigh a Spool** — enter the gross weight from your scale; the app subtracts the empty spool tare and saves the remaining weight to Spoolman. If the weight hasn't changed, tap **Accept** — the button shows the expected gross weight (tare + last recorded filament weight) so you can confirm at a glance without doing the math. The success screen shows the before weight, the new weight, and the change.
+- **Clone Tag a Spool** — see below.
+
+#### Clone Tag a Spool
+
+The headline feature of v0.5.0. When a new spool of a filament you already stock arrives, this flow registers it and walks you through the full intake sequence without leaving the phone.
+
+1. **Pick the source spool** from the list — or scan its NFC tag to jump straight to it.
+2. A confirmation screen shows the spool's filament type, color, ID, and which fields will be copied (filament type, price, storage location, and any notes). The new spool is created as a full spool; the old spool's remaining weight is not carried over.
+3. Tap **Clone Spool** — a new spool is created in Spoolman immediately.
+4. The app transitions directly into **NFC tagging** for the new spool: write Tag A, optionally write Tag B on the other side.
+5. After tagging, tap **Print QR Label** to send the label to the printer — it comes out with the new spool's ID.
+6. Tap **Weigh this spool** if you want to record the opening weight before putting it away.
+
+The entire sequence — clone, tag ×2, label, weigh — runs start to finish from a single flow on your phone, with no desktop interaction required.
+
 #### Spool intake workflow
 
 Walk up to a new spool delivery and complete the entire intake without touching a keyboard:
@@ -191,6 +215,7 @@ Load filament at a printer without touching a computer:
 - **Persistent pairing** — scan once, stay connected. The session token is stored in the database and survives backend restarts; the phone reconnects automatically with no re-scan needed
 - **Real-time WebSocket bridge** — tasks and results flow instantly between phone and desktop via a dedicated relay channel
 - **NFC tag writing** — write Spoolman spool IDs to NFC tags (write both sides for convenience); tags can be scanned at any printer to identify the spool without hunting for the QR label
+- **NFC scan-to-select** — in the spool picker, tap the NFC button to identify a spool by scanning its tag rather than scrolling the list; works in all four home screen flows
 - **Direct label printing** — configure a Windows label printer in **Settings → Mobile Access**; labels triggered from the mobile app bypass the browser print dialog and print immediately
 - Live camera viewfinder with real-time QR decode — no button press needed
 - Parses both plain spool IDs and full Spoolman QR URLs
@@ -419,6 +444,42 @@ Set the Spoolman URL in **Settings → General** (e.g. `http://192.168.1.100:791
 - The **Mobile Filament Loader** looks up scanned spool QR codes against Spoolman and writes slot assignments back to Moonraker
 - The **Printers** page shows live Spoolman slot assignments per printer when Spoolman is active
 - AFC-equipped printers automatically enrich their lane data with Spoolman spool names, weights, and IDs
+
+---
+
+## What's new in v0.5.0
+
+### Clone Tag a Spool
+
+When a new spool of a filament you already carry arrives, you no longer need to open Spoolman on a desktop to register it. The new **Clone Tag a Spool** action on the mobile home screen handles the full intake in one uninterrupted flow.
+
+Pick a spool from inventory — or hold it up and scan its NFC tag to jump straight to it. A confirmation screen shows the filament type, color, ID, and exactly which fields will be copied: filament type, price, storage location, and notes. Tap **Clone Spool** and the new entry is created in Spoolman immediately as a full spool. From there the flow continues seamlessly into NFC tagging: write Tag A on one side, optionally write Tag B on the other — so the spool can be identified at the printer from either angle. Once tagged, print the QR label with one tap (it comes straight out of the label printer, no dialog) and optionally weigh the spool before putting it away.
+
+From the moment you tap Clone Tag a Spool to the moment the label hits the tray: new Spoolman record, two NFC tags written, QR label printed. All from the phone. No keyboard, no browser tab, no desktop.
+
+### Standalone mobile actions
+
+The mobile home screen now has four standalone actions, each useful without starting a full intake flow:
+
+- **Label a Spool** — pick a spool (or scan its tag) and fire the QR label directly to the printer. A success screen confirms the spool name and ID.
+- **Weigh a Spool** — pick a spool and enter the gross weight from your scale. The app subtracts the tare, saves to Spoolman, and shows a before / after / change breakdown. If the weight is unchanged, the **Accept** button shows the expected gross weight (empty spool tare + last recorded filament weight) — one tap, no math, no typing.
+- **Clone Tag a Spool** — see above.
+
+### NFC scan-to-select in the spool picker
+
+Every flow that opens the spool picker — Tag, Label, Weigh, Clone — now has a round NFC button in the top-right corner. Tap it, hold the spool to the back of the phone, and the app identifies the spool from its tag and selects it automatically. No scrolling, no filtering, no typing. Particularly useful in a high-density storage area where you have the spool in hand anyway.
+
+### Spool picker improvements
+
+- Filter pills now wrap to multiple lines instead of running off the right edge of the screen
+- Multi-color filaments (Silk Rainbow, etc.) are now correctly included in the color filter — previously only solid-color spools appeared
+- Sort by ID with a single tap; tap again to reverse; ascending by default
+
+### Weigh screen refinements
+
+- The **Accept** button label now shows the expected gross weight — the sum of the empty spool tare and the last recorded filament weight. This is what the scale will read if nothing has changed, so you can confirm with a glance instead of doing the arithmetic in your head.
+- The success screen shows the previous weight, the new weight, and the delta — so you can see at a glance how much filament was used since the last weighing.
+- Spool name, vendor, material, and ID are all shown on the success screen so there's no ambiguity about which spool was just updated.
 
 ---
 

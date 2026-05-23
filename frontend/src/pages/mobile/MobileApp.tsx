@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { useParams } from 'react-router-dom'
-import { getNfcSession, postNfcTagA, postNfcResult, getSpoolmanStock, createNfcSession, patchSpoolmanLotNr, patchSpoolmanRemainingWeight, patchSpoolmanFilamentSpoolWeight, type NfcSession, type SpoolmanSpool } from '../../api/client'
-import { Check, Loader2, X, AlertTriangle, WifiOff, Nfc, ChevronRight, ArrowLeft, Scale, Sparkles, Info, QrCode } from 'lucide-react'
+import { getNfcSession, postNfcTagA, postNfcResult, getSpoolmanStock, createNfcSession, patchSpoolmanLotNr, patchSpoolmanRemainingWeight, patchSpoolmanFilamentSpoolWeight, cloneSpoolmanSpool, type NfcSession, type SpoolmanSpool } from '../../api/client'
+import { Check, Loader2, X, AlertTriangle, WifiOff, Nfc, ChevronRight, ArrowLeft, Scale, Sparkles, Info, QrCode, Copy } from 'lucide-react'
 
 declare global {
   interface Window {
@@ -39,6 +39,7 @@ type AppPhase =
   | 'nfc_done'
   | 'label_done'
   | 'weigh_spool'
+  | 'clone_confirm'
   | 'nfc_error'
   | 'disconnected'
   | 'session_error'
@@ -109,7 +110,7 @@ export default function MobileApp() {
   // Spool picker state
   const [spools, setSpools] = useState<SpoolmanSpool[]>([])
   const [spoolsLoading, setSpoolsLoading] = useState(false)
-  const [pickerIntent, setPickerIntent] = useState<'nfc' | 'label' | 'weigh'>('nfc')
+  const [pickerIntent, setPickerIntent] = useState<'nfc' | 'label' | 'weigh' | 'clone'>('nfc')
   const phoneInitiatedRef = useRef(false)
 
   // Label done state
@@ -119,6 +120,11 @@ export default function MobileApp() {
   const [weighSpool, setWeighSpool] = useState<SpoolmanSpool | null>(null)
   const [weighLoading, setWeighLoading] = useState(false)
   const weighReturnPhaseRef = useRef<'idle' | 'nfc_done'>('idle')
+
+  // Clone spool state
+  const [cloneSpool, setCloneSpool] = useState<SpoolmanSpool | null>(null)
+  const [cloning, setCloning] = useState(false)
+  const [cloneError, setCloneError] = useState<string | null>(null)
 
   const nfcSupported = typeof window !== 'undefined' && 'NDEFReader' in window
 
@@ -366,7 +372,7 @@ export default function MobileApp() {
     phoneInitiatedRef.current = false
   }
 
-  async function openSpoolPicker(intent: 'nfc' | 'label' | 'weigh' = 'nfc') {
+  async function openSpoolPicker(intent: 'nfc' | 'label' | 'weigh' | 'clone' = 'nfc') {
     setPickerIntent(intent)
     setSpoolsLoading(true)
     _setPhase('spool_picker')
@@ -426,6 +432,27 @@ export default function MobileApp() {
     weighReturnPhaseRef.current = 'idle'
     setWeighSpool(spool)
     _setPhase('weigh_spool')
+  }
+
+  function handleSpoolPickClone(spool: SpoolmanSpool) {
+    setCloneSpool(spool)
+    setCloneError(null)
+    _setPhase('clone_confirm')
+  }
+
+  async function handleCloneConfirm() {
+    if (!cloneSpool || cloning) return
+    setCloning(true)
+    setCloneError(null)
+    try {
+      const newSpool = await cloneSpoolmanSpool(cloneSpool)
+      setCloneSpool(null)
+      setCloning(false)
+      await handleSpoolPick(newSpool)
+    } catch (e: unknown) {
+      setCloneError(e instanceof Error ? e.message : 'Failed to clone spool')
+      setCloning(false)
+    }
   }
 
   async function handleWeighYes() {
@@ -499,7 +526,7 @@ export default function MobileApp() {
           </div>
         </div>
 
-        <div className="flex-1 px-4 py-6 space-y-2">
+        <div className="flex-1 overflow-y-auto px-4 py-6 space-y-2">
           <p className="text-xs font-medium text-gray-500 uppercase tracking-widest px-2 mb-3">Actions</p>
 
           <button
@@ -543,6 +570,20 @@ export default function MobileApp() {
             </div>
             <ChevronRight size={16} className="text-gray-600 shrink-0" />
           </button>
+
+          <button
+            onClick={() => openSpoolPicker('clone')}
+            className="w-full flex items-center gap-4 px-4 py-4 rounded-2xl bg-gray-900 border border-gray-800 hover:border-brand-500/50 hover:bg-gray-800 active:bg-gray-700 transition-colors text-left"
+          >
+            <div className="w-11 h-11 rounded-xl bg-brand-500/15 flex items-center justify-center shrink-0">
+              <Copy size={22} className="text-brand-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-white">Clone Tag a Spool</p>
+              <p className="text-xs text-gray-400 mt-0.5">Duplicate a spool in Spoolman and tag it</p>
+            </div>
+            <ChevronRight size={16} className="text-gray-600 shrink-0" />
+          </button>
         </div>
 
         <div className="px-6 pb-safe pb-8 pt-2 text-center">
@@ -556,6 +597,7 @@ export default function MobileApp() {
   if (phase === 'spool_picker') {
     const onPick = pickerIntent === 'label' ? handleSpoolPickLabel
       : pickerIntent === 'weigh' ? handleSpoolPickWeigh
+      : pickerIntent === 'clone' ? handleSpoolPickClone
       : handleSpoolPick
     return <SpoolPickerScreen
       spools={spools}
@@ -592,6 +634,70 @@ export default function MobileApp() {
             className="w-full py-4 rounded-2xl bg-brand-600 hover:bg-brand-700 active:bg-brand-800 text-white font-semibold text-base transition-colors"
           >
             Done
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // Clone confirm
+  if (phase === 'clone_confirm' && cloneSpool) {
+    const name = cloneSpool.filament.name || `Spool #${cloneSpool.id}`
+    const sub = [cloneSpool.filament.material, cloneSpool.filament.vendor?.name].filter(Boolean).join(' · ')
+    const rawHex = cloneSpool.filament.multi_color_hexes
+      ? cloneSpool.filament.multi_color_hexes.split(/[,;]/)[0]
+      : cloneSpool.filament.color_hex
+    const hex = rawHex ? (rawHex.startsWith('#') ? rawHex : `#${rawHex}`) : '#888888'
+    return (
+      <div className="min-h-dvh bg-gray-950 flex flex-col text-white select-none">
+        <div className="flex items-center gap-3 px-4 pt-safe pt-10 pb-4 border-b border-gray-800">
+          <button
+            onClick={() => { setCloneSpool(null); setCloneError(null); _setPhase('idle') }}
+            className="w-9 h-9 rounded-xl bg-gray-900 border border-gray-800 flex items-center justify-center shrink-0"
+          >
+            <ArrowLeft size={16} className="text-gray-300" />
+          </button>
+          <div>
+            <p className="text-xs text-gray-500 uppercase tracking-widest">3DMRP Mobile</p>
+            <p className="text-sm font-semibold text-white">Clone Tag a Spool</p>
+          </div>
+        </div>
+        <div className="flex-1 flex flex-col items-center justify-center gap-6 px-6">
+          <div className="w-full bg-gray-900 border border-gray-800 rounded-2xl px-5 py-5 flex items-center gap-4">
+            <div className="w-12 h-12 rounded-full shrink-0 border border-black/20" style={{ backgroundColor: hex }} />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-white truncate">{name}</p>
+              {sub && <p className="text-xs text-gray-500 truncate">{sub}</p>}
+            </div>
+            <p className="text-2xl font-bold text-gray-300 shrink-0">#{cloneSpool.id}</p>
+          </div>
+          <div className="w-full space-y-2 text-sm text-gray-400 bg-gray-900/60 border border-gray-800 rounded-xl px-4 py-4">
+            <p className="font-medium text-gray-200">A new spool will be created in Spoolman with:</p>
+            <ul className="space-y-1 pl-1">
+              <li>· Same filament type</li>
+              {cloneSpool.price != null && <li>· Price: {cloneSpool.price}</li>}
+              {cloneSpool.location && <li>· Location: {cloneSpool.location}</li>}
+              {cloneSpool.comment && <li>· Comment: {cloneSpool.comment}</li>}
+              <li>· Full spool (weight not copied)</li>
+            </ul>
+            <p className="text-gray-500 text-xs pt-1">You'll then tag it with NFC using the new spool's ID.</p>
+          </div>
+          {cloneError && <p className="text-sm text-red-400 text-center">{cloneError}</p>}
+        </div>
+        <div className="px-6 pb-safe pb-10 pt-4 space-y-3">
+          <button
+            onClick={handleCloneConfirm}
+            disabled={cloning}
+            className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-brand-600 hover:bg-brand-700 active:bg-brand-800 text-white font-semibold text-base transition-colors disabled:opacity-50"
+          >
+            {cloning ? <Loader2 size={18} className="animate-spin" /> : <Copy size={18} />}
+            {cloning ? 'Creating…' : 'Clone Spool'}
+          </button>
+          <button
+            onClick={() => { setCloneSpool(null); setCloneError(null); _setPhase('idle') }}
+            className="w-full py-3 text-gray-500 text-sm font-medium hover:text-gray-300 transition-colors"
+          >
+            Cancel
           </button>
         </div>
       </div>

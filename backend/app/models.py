@@ -315,3 +315,11 @@ class PostProcessingCost(Base):
     sort_order = Column(Integer, nullable=False, default=0)
 
     item = relationship("Item", back_populates="post_processing_costs")
+
+
+class SpoolWeighLog(Base):
+    __tablename__ = "spool_weigh_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    spool_id = Column(Integer, nullable=False, index=True)
+    weighed_at = Column(DateTime, nullable=False, default=datetime.utcnow)
