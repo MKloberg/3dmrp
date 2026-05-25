@@ -95,7 +95,7 @@ async def get_location_options(db: Session = Depends(get_db)) -> Dict[str, Any]:
     storage_locs = sorted(l for l in spoolman_locs if l.lower() not in printer_names_lower)
     printer_locs = sorted(set(printer_names) | {l for l in spoolman_locs if l.lower() in printer_names_lower})
 
-    return {"locations": storage_locs + printer_locs}
+    return {"locations": storage_locs + printer_locs, "storage_locations": storage_locs}
 
 
 @router.get("/filaments")

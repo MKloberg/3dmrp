@@ -444,19 +444,24 @@ function PrinterAvatar({ printer }: { printer: Printer }) {
   )
 }
 
-function CameraFeed({ cam, onUnavailable }: { cam: WebcamInfo; onUnavailable: () => void }) {
+function proxySnapshotUrl(printerId: number, snapshotUrl: string): string {
+  return `/api/printers/${printerId}/webcam-snapshot?url=${encodeURIComponent(snapshotUrl)}`
+}
+
+function CameraFeed({ printerId, cam, onUnavailable }: { printerId: number; cam: WebcamInfo; onUnavailable: () => void }) {
   const [src, setSrc] = useState('')
   const [error, setError] = useState(false)
   const imgRef = useRef<HTMLImageElement>(null)
 
   useEffect(() => {
+    const base = proxySnapshotUrl(printerId, cam.snapshot_url)
     setError(false)
-    setSrc(`${cam.snapshot_url}${cam.snapshot_url.includes('?') ? '&' : '?'}_t=${Date.now()}`)
+    setSrc(`${base}&_t=${Date.now()}`)
     const id = setInterval(() => {
-      setSrc(`${cam.snapshot_url}${cam.snapshot_url.includes('?') ? '&' : '?'}_t=${Date.now()}`)
+      setSrc(`${base}&_t=${Date.now()}`)
     }, 500)
     return () => clearInterval(id)
-  }, [cam.snapshot_url])
+  }, [printerId, cam.snapshot_url])
 
   const transform = [
     cam.flip_horizontal ? 'scaleX(-1)' : '',
@@ -545,6 +550,7 @@ function PrinterMediaSection({ printer }: { printer: Printer }) {
                 <div key={cam.name}>
                   {visibleCams.length > 1 && <p className="text-xs text-gray-400 mb-1">{cam.name}</p>}
                   <CameraFeed
+                    printerId={printer.id}
                     cam={cam}
                     onUnavailable={() => setUnavailable(prev => new Set([...prev, cam.name]))}
                   />
@@ -1537,7 +1543,7 @@ function AfcLaneCard({ lane, spool, printerId, isPrinting, activeExtruder }: { l
         {lane.tool_loaded ? (
           <button
             disabled={actionDisabled}
-            onClick={() => handleAction('TOOL_UNLOAD', 'unload')}
+            onClick={() => handleAction(`TOOL_UNLOAD LANE=${lane.name}`, 'unload')}
             title={isPrinting ? 'Disabled while printing' : 'Unload filament'}
             className="w-full flex items-center justify-center gap-1 px-2 py-1 rounded-md border border-red-300 dark:border-red-700 text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-xs"
           >
@@ -1561,6 +1567,7 @@ function AfcLaneCard({ lane, spool, printerId, isPrinting, activeExtruder }: { l
 }
 
 function AfcLanesPanel({ printer }: { printer: Printer }) {
+  const qc = useQueryClient()
   const { data } = useAfcLanes(printer.id)
   const spoolMap = useSpoolMap()
   const wsMode = useWsMode()
@@ -1574,14 +1581,44 @@ function AfcLanesPanel({ printer }: { printer: Printer }) {
   })
   const isPrinting = status?.state === 'printing' || status?.state === 'paused'
   const activeExtruder = status?.active_extruder ?? null
+  const [unloadingAll, setUnloadingAll] = useState(false)
 
   if (!data || data.lanes.length === 0) return null
 
+  const loadedLanes = data.lanes.filter(l => l.tool_loaded || l.loaded_to_hub)
+
+  async function handleUnloadAll() {
+    if (!loadedLanes.length || unloadingAll) return
+    setUnloadingAll(true)
+    const targetNames = new Set(loadedLanes.map(l => l.name))
+    try {
+      const script = loadedLanes.map(l => `TOOL_UNLOAD LANE=${l.name}`).join('\n')
+      await sendAfcCommand(printer.id, script)
+      const poll = setInterval(async () => {
+        const fresh = await qc.fetchQuery({ queryKey: ['printer-afc-lanes', printer.id], queryFn: () => getPrinterAfcLanes(printer.id), staleTime: 0 })
+        const allDone = (fresh?.lanes ?? []).filter(l => targetNames.has(l.name)).every(l => !l.tool_loaded && !l.loaded_to_hub)
+        if (allDone) { clearInterval(poll); setUnloadingAll(false) }
+      }, 2000)
+      setTimeout(() => { clearInterval(poll); setUnloadingAll(false) }, 360_000)
+    } catch { setUnloadingAll(false) }
+  }
+
   return (
     <div className="border-t dark:border-gray-700 px-4 py-3">
-      <h3 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-3">
-        AFC Lanes
-      </h3>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">
+          AFC Lanes
+        </h3>
+        <button
+          onClick={handleUnloadAll}
+          disabled={isPrinting || unloadingAll || loadedLanes.length === 0}
+          title={loadedLanes.length === 0 ? 'No lanes loaded' : 'Unload all loaded lanes'}
+          className="flex items-center gap-1 px-2 py-1 rounded-md border border-red-300 dark:border-red-700 text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-xs"
+        >
+          <LogOut size={10} />
+          {unloadingAll ? '…' : 'Unload All'}
+        </button>
+      </div>
       <div className={`grid gap-2 ${data.lanes.length === 4 ? 'grid-cols-4' : data.lanes.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
         {data.lanes.map(lane => (
           <AfcLaneCard

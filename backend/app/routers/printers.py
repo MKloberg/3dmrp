@@ -218,6 +218,28 @@ async def get_webcams(printer_id: int, db: Session = Depends(get_db)):
     return result
 
 
+@router.get("/{printer_id}/webcam-snapshot")
+async def webcam_snapshot_proxy(printer_id: int, url: str, db: Session = Depends(get_db)):
+    printer = db.query(Printer).filter(Printer.id == printer_id).first()
+    if not printer:
+        raise HTTPException(status_code=404, detail="Printer not found")
+    # Only allow URLs that match to this printer's host to prevent open proxy abuse
+    from urllib.parse import urlparse
+    printer_host = urlparse(printer.url).hostname
+    req_host = urlparse(url).hostname
+    if req_host != printer_host:
+        raise HTTPException(status_code=403, detail="URL host does not match printer host")
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+    except (httpx.RequestError, httpx.HTTPStatusError) as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch snapshot: {e}")
+    content_type = resp.headers.get("content-type", "image/jpeg")
+    from fastapi.responses import Response
+    return Response(content=resp.content, media_type=content_type)
+
+
 @router.get("/{printer_id}/status", response_model=PrinterStatus)
 async def get_printer_status(printer_id: int, db: Session = Depends(get_db)):
     printer = db.query(Printer).filter(Printer.id == printer_id).first()
@@ -775,3 +797,4 @@ async def set_spoolman_slots(printer_id: int, body: SpoolmanSlotsSetRequest, db:
             except Exception as e:
                 errors.append({"tool_index": slot.get("tool_index"), "error": str(e)})
     return {"ok": True, "errors": errors}
+

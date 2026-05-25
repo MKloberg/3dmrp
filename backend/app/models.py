@@ -61,6 +61,7 @@ class FilamentSpec(Base):
     extra = Column(JSON, default=dict)             # custom Spoolman extra fields
     spoolman_id = Column(Integer, nullable=True, index=True)
     purchase_url = Column(String, default="")
+    quality_rating = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     model_filaments = relationship("ModelFilament", back_populates="filament_spec", cascade="all, delete-orphan")

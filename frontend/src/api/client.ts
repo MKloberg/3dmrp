@@ -33,6 +33,7 @@ export interface FilamentSpec {
   extra: Record<string, unknown> | null
   spoolman_id: number | null
   purchase_url: string
+  quality_rating: number | null
   created_at: string
 }
 
@@ -405,6 +406,7 @@ export interface SpoolmanSpool {
     material: string | null
     color_hex: string | null
     multi_color_hexes: string | null
+    comment: string | null
     vendor: { id: number; name: string } | null
     weight: number | null
     spool_weight: number | null
@@ -703,6 +705,7 @@ export interface GcodeFileMetadata {
   filament_slots: GcodeSlotInfo[]
   filament_weight_total: number | null
   estimated_time: number | null
+  has_exclude_objects: boolean
   error: string | null
 }
 export const getGcodeFileMetadata = (
@@ -804,7 +807,7 @@ export const patchSpoolmanLotNr = (spoolId: number, cardUids: string[]) =>
   })
 
 export const getSpoolmanLocationOptions = () =>
-  req<{ locations: string[] }>('/spoolman/location-options')
+  req<{ locations: string[]; storage_locations: string[] }>('/spoolman/location-options')
 
 export const patchSpoolmanLocation = (spoolId: number, location: string | null) =>
   req<{ id: number }>(`/spoolman/spools/${spoolId}/location`, {

@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { getSpoolmanStock, getSettings, setSetting, SpoolmanSpool, createNfcSession, patchSpoolmanLotNr, patchSpoolmanLocation, getSpoolmanLocationOptions, getSpoolWeighLog } from '../../api/client'
-import { ArrowLeft, WifiOff, MapPin, LayoutList, LayoutGrid, QrCode, Plus, Nfc, Loader2, Check, Scale, ChevronUp, ChevronDown } from 'lucide-react'
+import { getSpoolmanStock, getSettings, setSetting, SpoolmanSpool, createNfcSession, patchSpoolmanLotNr, patchSpoolmanLocation, getSpoolmanLocationOptions, getSpoolWeighLog, getFilaments, updateFilament, FilamentSpec } from '../../api/client'
+import { ArrowLeft, WifiOff, MapPin, LayoutList, LayoutGrid, QrCode, Plus, Nfc, Loader2, Check, Scale, ChevronUp, ChevronDown, X } from 'lucide-react'
 import { SpoolIcon } from '../../components/SpoolIcon'
 import { QRCodeSVG } from 'qrcode.react'
 import Modal from '../../components/Modal'
@@ -68,10 +68,56 @@ const CONFIDENCE_TITLE: Record<WeighConfidence, string> = {
   low: 'Weight unknown or stale — never weighed or over 30 days ago',
 }
 
-function SpoolRow({ spool, onPrintLabel, onTag, onWeigh, onLocationChange, allLocations, selectWidth, confidence }: {
+function RatingBadge({ rating }: { rating: number | null | undefined }) {
+  if (!rating) return null
+  if (rating > 0) return <span className="text-amber-500 text-xs leading-none tracking-tighter" title={`Quality rating: +${rating}`}>{'★'.repeat(rating)}</span>
+  return <span className="text-red-500 text-xs leading-none tracking-tighter" title={`Quality rating: ${rating}`}>{'☠'.repeat(-rating)}</span>
+}
+
+function SpoolRatingPicker({ f, onClose }: { f: FilamentSpec; onClose: () => void }) {
+  const qc = useQueryClient()
+  const { id: _id, created_at: _ca, ...specInput } = f
+  const mut = useMutation({
+    mutationFn: (r: number | null) => updateFilament(f.id, { ...specInput, quality_rating: r }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['filaments'] }); onClose() },
+  })
+  const cur = f.quality_rating
+  return (
+    <div
+      className="flex flex-wrap items-center gap-1 px-4 py-2 bg-gray-50 dark:bg-gray-700/40 border-t dark:border-gray-700"
+      onClick={e => e.stopPropagation()}
+    >
+      {([-5, -4, -3, -2, -1, 1, 2, 3, 4, 5] as number[]).map(v => (
+        <button key={v} disabled={mut.isPending}
+          onClick={() => mut.mutate(cur === v ? null : v)}
+          className={[
+            'w-8 h-7 text-xs rounded border font-medium transition-colors',
+            v < 0
+              ? `border-red-300 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/50 ${cur === v ? 'bg-red-100 dark:bg-red-900/50' : ''}`
+              : `border-amber-300 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/50 ${cur === v ? 'bg-amber-100 dark:bg-amber-900/50' : ''}`,
+          ].join(' ')}
+        >
+          {v > 0 ? `+${v}` : v}
+        </button>
+      ))}
+      {cur != null && (
+        <button disabled={mut.isPending}
+          onClick={() => mut.mutate(null)}
+          className="w-8 h-7 text-xs rounded border border-gray-300 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 ml-1">
+          ✕
+        </button>
+      )}
+      <span className="text-xs text-gray-400 ml-2">
+        {cur != null ? `Current: ${cur > 0 ? '+' : ''}${cur}` : 'Unrated'}
+      </span>
+    </div>
+  )
+}
+
+function SpoolRow({ spool, onPrintLabel, onTag, onWeigh, onLocationChange, allLocations, selectWidth, confidence, localFilament, ratingPickerOpen, onToggleRating }: {
   spool: SpoolmanSpool; onPrintLabel: () => void; onTag: () => void; onWeigh: () => void
   onLocationChange: (location: string | null) => void; allLocations: string[]; selectWidth: number
-  confidence: WeighConfidence
+  confidence: WeighConfidence; localFilament?: FilamentSpec; ratingPickerOpen: boolean; onToggleRating: () => void
 }) {
   const color = spoolColor(spool)
   const pct = spool.filament.weight && spool.remaining_weight != null
@@ -80,7 +126,8 @@ function SpoolRow({ spool, onPrintLabel, onTag, onWeigh, onLocationChange, allLo
   const isLow = pct !== null && pct < 20
 
   return (
-    <div className="flex items-center gap-3 px-4 py-3 border-b dark:border-gray-700 last:border-0">
+    <div className="border-b dark:border-gray-700 last:border-0">
+      <div className="flex items-center gap-3 px-4 py-3">
       <SpoolIcon color={color} size={35} />
       <p className="text-xl font-black text-brand-600 dark:text-brand-400 leading-none shrink-0 w-12">
         #{spool.id}
@@ -94,6 +141,23 @@ function SpoolRow({ spool, onPrintLabel, onTag, onWeigh, onLocationChange, allLo
             )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={onToggleRating}
+              className="focus:outline-none leading-none"
+              title={(() => {
+                const rating = localFilament?.quality_rating
+                const comment = spool.filament.comment || localFilament?.comment || spool.comment
+                const base = rating != null
+                  ? `Rating: ${rating > 0 ? '+' : ''}${rating}${comment ? `\n${comment}` : ''} — click to edit`
+                  : localFilament ? 'Set quality rating' : 'Not in local catalog'
+                return base
+              })()}
+              disabled={!localFilament}
+            >
+              {localFilament?.quality_rating
+                ? <RatingBadge rating={localFilament.quality_rating} />
+                : <span className="text-gray-300 dark:text-gray-600 text-sm">☆</span>}
+            </button>
             <div className="flex items-center gap-1">
               <MapPin size={11} className="text-gray-400 shrink-0" />
               <select
@@ -164,14 +228,18 @@ function SpoolRow({ spool, onPrintLabel, onTag, onWeigh, onLocationChange, allLo
           <QrCode size={16} />
         </button>
       </div>
+      </div>
+      {ratingPickerOpen && localFilament && (
+        <SpoolRatingPicker f={localFilament} onClose={onToggleRating} />
+      )}
     </div>
   )
 }
 
-function SpoolCard({ spool, onPrintLabel, onTag, onWeigh, onLocationChange, allLocations, selectWidth, confidence }: {
+function SpoolCard({ spool, onPrintLabel, onTag, onWeigh, onLocationChange, allLocations, selectWidth, confidence, localFilament, ratingPickerOpen, onToggleRating }: {
   spool: SpoolmanSpool; onPrintLabel: () => void; onTag: () => void; onWeigh: () => void
   onLocationChange: (location: string | null) => void; allLocations: string[]; selectWidth: number
-  confidence: WeighConfidence
+  confidence: WeighConfidence; localFilament?: FilamentSpec; ratingPickerOpen: boolean; onToggleRating: () => void
 }) {
   const color = spoolColor(spool)
   const pct = spool.filament.weight && spool.remaining_weight != null
@@ -219,6 +287,26 @@ function SpoolCard({ spool, onPrintLabel, onTag, onWeigh, onLocationChange, allL
           </p>
           {spool.filament.vendor?.name && (
             <p className="text-xs text-gray-400 mt-0.5">{spool.filament.vendor.name}</p>
+          )}
+          <button
+            onClick={onToggleRating}
+            className="focus:outline-none leading-none mt-0.5"
+            title={(() => {
+                const rating = localFilament?.quality_rating
+                const comment = spool.filament.comment || localFilament?.comment || spool.comment
+                const base = rating != null
+                  ? `Rating: ${rating > 0 ? '+' : ''}${rating}${comment ? `\n${comment}` : ''} — click to edit`
+                  : localFilament ? 'Set quality rating' : 'Not in local catalog'
+                return base
+              })()}
+            disabled={!localFilament}
+          >
+            {localFilament?.quality_rating
+              ? <RatingBadge rating={localFilament.quality_rating} />
+              : <span className="text-gray-300 dark:text-gray-600 text-sm">☆</span>}
+          </button>
+          {ratingPickerOpen && localFilament && (
+            <SpoolRatingPicker f={localFilament} onClose={onToggleRating} />
           )}
         </div>
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -288,6 +376,7 @@ export default function SpoolInventory() {
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: getSettings })
   const { data: locationData } = useQuery({ queryKey: ['spoolman-location-options'], queryFn: getSpoolmanLocationOptions })
   const { data: weighLogData } = useQuery({ queryKey: ['spool-weigh-log'], queryFn: getSpoolWeighLog })
+  const { data: localFilaments = [] } = useQuery({ queryKey: ['filaments'], queryFn: getFilaments })
 
   const { data: webhookData } = useQuery({
     queryKey: ['spoolman-webhook-version'],
@@ -372,6 +461,14 @@ export default function SpoolInventory() {
 
   const allLocations = useMemo(() => locationData?.locations ?? [], [locationData])
   const weighLog = useMemo(() => weighLogData?.log ?? {}, [weighLogData])
+  const ratingMap = useMemo(() => {
+    const m = new Map<number, FilamentSpec>()
+    for (const f of localFilaments) {
+      if (f.spoolman_id != null) m.set(f.spoolman_id, f)
+    }
+    return m
+  }, [localFilaments])
+  const [ratingPickerOpen, setRatingPickerOpen] = useState<number | null>(null)
 
   const sizerRef = useRef<HTMLSelectElement>(null)
   const [selectWidth, setSelectWidth] = useState(100)
@@ -538,12 +635,23 @@ export default function SpoolInventory() {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            <input
-              className="flex-1 min-w-48 border rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-200"
-              placeholder="Filter by ID, name, material, vendor, location, lot…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-            />
+            <div className="relative flex-1 min-w-48">
+              <input
+                className="w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-200 pr-8"
+                placeholder="Filter by ID, name, material, vendor, location, lot…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
+              {search && (
+                <button
+                  onClick={() => setSearch('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                  aria-label="Clear search"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
             <div className="flex items-center gap-1 flex-wrap">
               {([['brand', 'Brand'], ['id', 'ID'], ['material', 'Material'], ['color', 'Color'], ['location', 'Location'], ['remaining', 'Remaining'], ['accuracy', 'Accuracy']] as [SortKey, string][]).map(([key, label]) => (
                 <button
@@ -591,13 +699,13 @@ export default function SpoolInventory() {
           ) : view === 'list' ? (
             <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
               {filteredSpools.map(spool => (
-                <SpoolRow key={spool.id} spool={spool} onPrintLabel={() => setLabelSpool(spool)} onTag={() => handleTag(spool)} onWeigh={() => setWeighSpool(spool)} onLocationChange={loc => handleLocationChange(spool, loc)} allLocations={allLocations} selectWidth={selectWidth} confidence={weighConfidence(spool, weighLog)} />
+                <SpoolRow key={spool.id} spool={spool} onPrintLabel={() => setLabelSpool(spool)} onTag={() => handleTag(spool)} onWeigh={() => setWeighSpool(spool)} onLocationChange={loc => handleLocationChange(spool, loc)} allLocations={allLocations} selectWidth={selectWidth} confidence={weighConfidence(spool, weighLog)} localFilament={ratingMap.get(spool.filament.id)} ratingPickerOpen={ratingPickerOpen === spool.id} onToggleRating={() => setRatingPickerOpen(ratingPickerOpen === spool.id ? null : spool.id)} />
               ))}
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
               {filteredSpools.map(spool => (
-                <SpoolCard key={spool.id} spool={spool} onPrintLabel={() => setLabelSpool(spool)} onTag={() => handleTag(spool)} onWeigh={() => setWeighSpool(spool)} onLocationChange={loc => handleLocationChange(spool, loc)} allLocations={allLocations} selectWidth={selectWidth} confidence={weighConfidence(spool, weighLog)} />
+                <SpoolCard key={spool.id} spool={spool} onPrintLabel={() => setLabelSpool(spool)} onTag={() => handleTag(spool)} onWeigh={() => setWeighSpool(spool)} onLocationChange={loc => handleLocationChange(spool, loc)} allLocations={allLocations} selectWidth={selectWidth} confidence={weighConfidence(spool, weighLog)} localFilament={ratingMap.get(spool.filament.id)} ratingPickerOpen={ratingPickerOpen === spool.id} onToggleRating={() => setRatingPickerOpen(ratingPickerOpen === spool.id ? null : spool.id)} />
               ))}
             </div>
           )}

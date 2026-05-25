@@ -22,6 +22,7 @@ class FilamentSpecBase(BaseModel):
     extra: Optional[dict] = None
     spoolman_id: Optional[int] = None
     purchase_url: str = ""
+    quality_rating: Optional[int] = None
 
 
 class FilamentSpecCreate(FilamentSpecBase):

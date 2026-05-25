@@ -1,16 +1,16 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { QRCodeSVG } from 'qrcode.react'
-import { ChevronRight, ChevronLeft, Check, Loader2, Plus, Search, Nfc, Package, AlertTriangle, QrCode, HelpCircle } from 'lucide-react'
+import { ChevronRight, ChevronLeft, Check, Loader2, Search, Nfc, Package, AlertTriangle, QrCode, HelpCircle } from 'lucide-react'
 import Modal from './Modal'
+import { useMobileSession } from '../contexts/MobileSessionContext'
 import {
   getSpoolmanFilaments,
   getSettings,
-  createSpoolmanFilament,
+  getSpoolmanLocationOptions,
   createSpoolmanSpoolsWizard,
   patchSpoolmanLotNr,
   createNfcSession,
-  getNfcSession,
   SpoolmanSpool,
   SpoolmanFilament,
 } from '../api/client'
@@ -18,18 +18,6 @@ import {
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 type Route = 'manual' | 'nfc'
-type FilamentTab = 'existing' | 'new'
-
-interface NewFilamentForm {
-  name: string
-  material: string
-  color_hex: string
-  vendor_name: string
-  weight: string
-  price: string
-  settings_extruder_temp: string
-  settings_bed_temp: string
-}
 
 interface SpoolDetails {
   count: number
@@ -55,8 +43,6 @@ function filamentLabel(f: SpoolmanFilament): string {
   if (f.vendor?.name) parts.push(f.vendor.name)
   return parts.join(' · ')
 }
-
-const COMMON_MATERIALS = ['PLA', 'PETG', 'ABS', 'ASA', 'TPU', 'PC', 'Nylon', 'HIPS', 'PVA', 'Carbon Fiber']
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -85,16 +71,8 @@ export default function SpoolReceiveWizard({ onClose }: { onClose: () => void })
   const [route, setRoute] = useState<Route | null>(null)
 
   // ── Step 2: filament ──
-  const [filamentTab, setFilamentTab] = useState<FilamentTab>('existing')
   const [selectedFilamentId, setSelectedFilamentId] = useState<number | null>(null)
   const [filamentSearch, setFilamentSearch] = useState('')
-  const [newFilament, setNewFilament] = useState<NewFilamentForm>({
-    name: '', material: 'PLA', color_hex: '#888888',
-    vendor_name: '', weight: '', price: '',
-    settings_extruder_temp: '', settings_bed_temp: '',
-  })
-  const [creatingFilament, setCreatingFilament] = useState(false)
-  const [createdFilament, setCreatedFilament] = useState<SpoolmanFilament | null>(null)
 
   // ── Step 3: spool details ──
   const [details, setDetails] = useState<SpoolDetails>({ count: 1, price: '', location: '', comment: '' })
@@ -107,13 +85,11 @@ export default function SpoolReceiveWizard({ onClose }: { onClose: () => void })
   // ── NFC tagging loop ──
   const [nfcStarted, setNfcStarted] = useState(false)
   const [currentSpoolIdx, setCurrentSpoolIdx] = useState(0)
-  const [nfcToken, setNfcToken] = useState<string | null>(null)
-  const [nfcSlot, setNfcSlot] = useState<'A' | 'B'>('A')
-  const [nfcPollStatus, setNfcPollStatus] = useState<'waiting' | 'done'>('waiting')
-  const [askSecondTag, setAskSecondTag] = useState(false)
   const [spoolResults, setSpoolResults] = useState<Record<number, NfcSlotResult[]>>({})
-  const [patchingLot, setPatchingLot] = useState(false)
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [nfcWaiting, setNfcWaiting] = useState(false)
+
+  // ── Mobile session ──
+  const { phoneConnected, pushTask, token: mobileToken } = useMobileSession()
 
   // ── Data queries ──
   const { data: filaments } = useQuery({
@@ -122,6 +98,7 @@ export default function SpoolReceiveWizard({ onClose }: { onClose: () => void })
   })
 
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: getSettings })
+  const { data: locationData } = useQuery({ queryKey: ['spoolman-location-options'], queryFn: getSpoolmanLocationOptions })
 
   const { data: lanIpData } = useQuery({
     queryKey: ['lan-ip'],
@@ -141,9 +118,6 @@ export default function SpoolReceiveWizard({ onClose }: { onClose: () => void })
     return `http://${ip}${port ? `:${port}` : ''}`
   }, [lanIpData, settings])
 
-  // ── Clean up polling on unmount ──
-  useEffect(() => () => { if (pollingRef.current) clearInterval(pollingRef.current) }, [])
-
   // ── Derived ──
   const filamentList = filaments?.filaments ?? []
   const spoolmanConnected = filaments?.connected ?? false
@@ -158,10 +132,9 @@ export default function SpoolReceiveWizard({ onClose }: { onClose: () => void })
     )
   }, [filamentList, filamentSearch])
 
-  const activeFilamentId = createdFilament?.id ?? selectedFilamentId
+  const activeFilamentId = selectedFilamentId
 
   function filamentDisplayName(): string {
-    if (createdFilament) return filamentLabel(createdFilament)
     const f = filamentList.find(f => f.id === selectedFilamentId)
     return f ? filamentLabel(f) : '—'
   }
@@ -170,34 +143,10 @@ export default function SpoolReceiveWizard({ onClose }: { onClose: () => void })
 
   // ── Step navigation ──
   function canAdvanceStep2(): boolean {
-    if (filamentTab === 'existing') return selectedFilamentId !== null
-    return newFilament.name.trim() !== '' && newFilament.material.trim() !== ''
+    return selectedFilamentId !== null
   }
 
-  async function handleAdvanceStep2() {
-    if (filamentTab === 'new' && !createdFilament) {
-      setCreatingFilament(true)
-      try {
-        const payload: Parameters<typeof createSpoolmanFilament>[0] = {
-          name: newFilament.name.trim(),
-          material: newFilament.material.trim(),
-        }
-        if (newFilament.color_hex) payload.color_hex = newFilament.color_hex
-        if (newFilament.vendor_name.trim()) payload.vendor_name = newFilament.vendor_name.trim()
-        if (newFilament.weight) payload.weight = parseFloat(newFilament.weight)
-        if (newFilament.price) payload.price = parseFloat(newFilament.price)
-        if (newFilament.settings_extruder_temp) payload.settings_extruder_temp = parseInt(newFilament.settings_extruder_temp)
-        if (newFilament.settings_bed_temp) payload.settings_bed_temp = parseInt(newFilament.settings_bed_temp)
-        const created = await createSpoolmanFilament(payload)
-        setCreatedFilament(created)
-        qc.invalidateQueries({ queryKey: ['spoolman-filaments'] })
-      } catch (e) {
-        alert(e instanceof Error ? e.message : 'Failed to create filament type')
-        return
-      } finally {
-        setCreatingFilament(false)
-      }
-    }
+  function handleAdvanceStep2() {
     setStep(3)
   }
 
@@ -224,47 +173,8 @@ export default function SpoolReceiveWizard({ onClose }: { onClose: () => void })
     }
   }
 
-  // ── NFC session management ──
-  const startNfcSession = useCallback(async (spoolId: number, spoolLabel: string, slot: 'A' | 'B', filamentMeta?: { type?: string; color_hex?: string; brand?: string; subtype?: string; min_temp?: number; max_temp?: number; bed_temp?: number }) => {
-    const session = await createNfcSession({
-      spool_id: spoolId,
-      spool_label: spoolLabel,
-      slot,
-      mode: 'read_write',
-      filament_type: filamentMeta?.type,
-      color_hex: filamentMeta?.color_hex,
-      brand: filamentMeta?.brand,
-      subtype: filamentMeta?.subtype,
-      min_temp: filamentMeta?.min_temp,
-      max_temp: filamentMeta?.max_temp,
-      bed_temp: filamentMeta?.bed_temp,
-    })
-    setNfcToken(session.token)
-    setNfcSlot(slot)
-    setNfcPollStatus('waiting')
-
-    if (pollingRef.current) clearInterval(pollingRef.current)
-    pollingRef.current = setInterval(async () => {
-      try {
-        const s = await getNfcSession(session.token)
-        if (s.status === 'completed' && s.card_uid) {
-          clearInterval(pollingRef.current!)
-          pollingRef.current = null
-          setNfcPollStatus('done')
-          setSpoolResults(prev => {
-            const existing = prev[spoolId] ?? []
-            return { ...prev, [spoolId]: [...existing, { card_uid: s.card_uid!, wrote_tag: s.wrote_tag ?? false }] }
-          })
-          if (slot === 'A') {
-            setAskSecondTag(true)
-          }
-        }
-      } catch { /* ignore poll errors */ }
-    }, 1000)
-  }, [])
-
   function getFilamentMeta() {
-    const f = createdFilament ?? filamentList.find(f => f.id === selectedFilamentId)
+    const f = filamentList.find(f => f.id === selectedFilamentId)
     if (!f) return undefined
     const hex = f.color_hex ? (f.color_hex.startsWith('#') ? f.color_hex.slice(1) : f.color_hex) : undefined
     return {
@@ -277,44 +187,54 @@ export default function SpoolReceiveWizard({ onClose }: { onClose: () => void })
     }
   }
 
-  async function beginNfcTagging() {
+  async function tagSpool(idx: number) {
+    const spool = createdSpools[idx]
+    if (!spool) { setCurrentSpoolIdx(createdSpools.length); return }
+    setCurrentSpoolIdx(idx)
+    setNfcWaiting(true)
+    const spoolLabel = spool.filament.name ? `${spool.filament.name} #${spool.id}` : `Spool #${spool.id}`
+    try {
+      const meta = getFilamentMeta()
+      const session = await createNfcSession({
+        spool_id: spool.id,
+        spool_label: spoolLabel,
+        slot: 'A',
+        mode: 'read_write',
+        filament_type: meta?.type,
+        color_hex: meta?.color_hex,
+        brand: meta?.brand,
+        min_temp: meta?.min_temp,
+        max_temp: meta?.max_temp,
+        bed_temp: meta?.bed_temp,
+      })
+      pushTask({ task_type: 'nfc_write', nfc_token: session.token }, async (result) => {
+        if (result.success) {
+          const uids = [result.card_uid, result.card_uid_b].filter(Boolean) as string[]
+          const normalized = uids.map(u => u.replace(/:/g, '').toLowerCase())
+          setSpoolResults(prev => ({
+            ...prev,
+            [spool.id]: normalized.map(uid => ({ card_uid: uid, wrote_tag: true })),
+          }))
+          if (normalized.length > 0) {
+            patchSpoolmanLotNr(spool.id, normalized).catch(() => { /* non-fatal */ })
+          }
+        }
+        setNfcWaiting(false)
+        const next = idx + 1
+        if (next < createdSpools.length) {
+          tagSpool(next)
+        } else {
+          setCurrentSpoolIdx(createdSpools.length)
+        }
+      })
+    } catch {
+      setNfcWaiting(false)
+    }
+  }
+
+  function beginNfcTagging() {
     setNfcStarted(true)
-    const spool = createdSpools[0]
-    if (!spool) return
-    await startNfcSession(spool.id, `Spool #${spool.id}`, 'A', getFilamentMeta())
-  }
-
-  async function handleSecondTag(yes: boolean) {
-    setAskSecondTag(false)
-    const spool = createdSpools[currentSpoolIdx]
-    if (yes && spool) {
-      await startNfcSession(spool.id, `Spool #${spool.id}`, 'B', getFilamentMeta())
-    } else {
-      await finishCurrentSpool()
-    }
-  }
-
-  async function finishCurrentSpool() {
-    const spool = createdSpools[currentSpoolIdx]
-    if (!spool) return
-    const results = spoolResults[spool.id] ?? []
-    const uids = results.map(r => r.card_uid)
-    if (uids.length > 0) {
-      setPatchingLot(true)
-      try { await patchSpoolmanLotNr(spool.id, uids) } catch { /* non-fatal */ }
-      setPatchingLot(false)
-    }
-    setNfcToken(null)
-    setNfcPollStatus('waiting')
-    const nextIdx = currentSpoolIdx + 1
-    if (nextIdx < createdSpools.length) {
-      setCurrentSpoolIdx(nextIdx)
-      const nextSpool = createdSpools[nextIdx]
-      await startNfcSession(nextSpool.id, `Spool #${nextSpool.id}`, 'A', getFilamentMeta())
-    } else {
-      // All done
-      setCurrentSpoolIdx(createdSpools.length) // sentinel
-    }
+    tagSpool(0)
   }
 
   const allTagged = nfcStarted && currentSpoolIdx >= createdSpools.length
@@ -408,166 +328,50 @@ export default function SpoolReceiveWizard({ onClose }: { onClose: () => void })
       {/* ── Step 2: Filament selection ── */}
       {step === 2 && (
         <div className="space-y-4 py-2">
-          {/* Tab switcher */}
-          <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-            <button
-              onClick={() => setFilamentTab('existing')}
-              className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${
-                filamentTab === 'existing'
-                  ? 'bg-brand-600 text-white'
-                  : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
-              }`}
-            >
-              Pick existing
-            </button>
-            <button
-              onClick={() => setFilamentTab('new')}
-              className={`flex-1 px-3 py-2 text-sm font-medium border-l border-gray-200 dark:border-gray-700 transition-colors ${
-                filamentTab === 'new'
-                  ? 'bg-brand-600 text-white'
-                  : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
-              }`}
-            >
-              <Plus size={13} className="inline mr-1" />
-              Create new type
-            </button>
-          </div>
-
-          {filamentTab === 'existing' ? (
-            <div className="space-y-2">
-              {!spoolmanConnected && (
-                <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs text-amber-700 dark:text-amber-300">
-                  <AlertTriangle size={13} className="shrink-0" />
-                  Spoolman is not connected. Configure the URL in Settings.
-                </div>
-              )}
-              <div className="relative">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input
-                  className="w-full pl-8 pr-3 py-2 text-sm border rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-gray-200"
-                  placeholder="Search filaments…"
-                  value={filamentSearch}
-                  onChange={e => setFilamentSearch(e.target.value)}
-                />
+          <div className="space-y-2">
+            {!spoolmanConnected && (
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs text-amber-700 dark:text-amber-300">
+                <AlertTriangle size={13} className="shrink-0" />
+                Spoolman is not connected. Configure the URL in Settings.
               </div>
-              <div className="max-h-56 overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-700">
-                {filteredFilaments.length === 0 ? (
-                  <p className="text-sm text-gray-400 italic text-center py-6">
-                    {spoolmanConnected ? 'No filaments match your search' : 'No filaments available'}
-                  </p>
-                ) : filteredFilaments.map(f => (
-                  <button
-                    key={f.id}
-                    onClick={() => setSelectedFilamentId(f.id)}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors ${
-                      selectedFilamentId === f.id
-                        ? 'bg-brand-50 dark:bg-brand-950/30'
-                        : 'hover:bg-gray-50 dark:hover:bg-gray-800'
-                    }`}
-                  >
-                    <span
-                      className="w-5 h-5 rounded-full shrink-0 border border-black/10 dark:border-white/10"
-                      style={{ backgroundColor: normalizeHex(f.color_hex) }}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate dark:text-gray-200">{f.name || `#${f.id}`}</p>
-                      <p className="text-xs text-gray-400 truncate">{[f.material, f.vendor?.name].filter(Boolean).join(' · ')}</p>
-                    </div>
-                    {selectedFilamentId === f.id && <Check size={15} className="text-brand-600 shrink-0" />}
-                  </button>
-                ))}
-              </div>
+            )}
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                className="w-full pl-8 pr-3 py-2 text-sm border rounded-lg dark:bg-gray-800 dark:border-gray-600 dark:text-gray-200"
+                placeholder="Search filaments…"
+                value={filamentSearch}
+                onChange={e => setFilamentSearch(e.target.value)}
+              />
             </div>
-          ) : (
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="col-span-2">
-                  <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Name *</label>
-                  <input
-                    className="mt-1 w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-200"
-                    placeholder="e.g. Hyper Speed PLA"
-                    value={newFilament.name}
-                    onChange={e => setNewFilament(p => ({ ...p, name: e.target.value }))}
+            <div className="max-h-56 overflow-y-auto rounded-xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-700">
+              {filteredFilaments.length === 0 ? (
+                <p className="text-sm text-gray-400 italic text-center py-6">
+                  {spoolmanConnected ? 'No filaments match your search' : 'No filaments available'}
+                </p>
+              ) : filteredFilaments.map(f => (
+                <button
+                  key={f.id}
+                  onClick={() => setSelectedFilamentId(f.id)}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors ${
+                    selectedFilamentId === f.id
+                      ? 'bg-brand-50 dark:bg-brand-950/30'
+                      : 'hover:bg-gray-50 dark:hover:bg-gray-800'
+                  }`}
+                >
+                  <span
+                    className="w-5 h-5 rounded-full shrink-0 border border-black/10 dark:border-white/10"
+                    style={{ backgroundColor: normalizeHex(f.color_hex) }}
                   />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Material *</label>
-                  <select
-                    className="mt-1 w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-200"
-                    value={newFilament.material}
-                    onChange={e => setNewFilament(p => ({ ...p, material: e.target.value }))}
-                  >
-                    {COMMON_MATERIALS.map(m => <option key={m}>{m}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Color</label>
-                  <div className="mt-1 flex items-center gap-2">
-                    <input
-                      type="color"
-                      className="h-9 w-12 rounded-lg border border-gray-300 dark:border-gray-600 cursor-pointer"
-                      value={newFilament.color_hex}
-                      onChange={e => setNewFilament(p => ({ ...p, color_hex: e.target.value }))}
-                    />
-                    <input
-                      className="flex-1 border rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-200"
-                      value={newFilament.color_hex}
-                      onChange={e => setNewFilament(p => ({ ...p, color_hex: e.target.value }))}
-                    />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate dark:text-gray-200">{f.name || `#${f.id}`}</p>
+                    <p className="text-xs text-gray-400 truncate">{[f.material, f.vendor?.name].filter(Boolean).join(' · ')}</p>
                   </div>
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Brand</label>
-                  <input
-                    className="mt-1 w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-200"
-                    placeholder="e.g. Bambu"
-                    value={newFilament.vendor_name}
-                    onChange={e => setNewFilament(p => ({ ...p, vendor_name: e.target.value }))}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Spool weight (g)</label>
-                  <input
-                    type="number" min="0"
-                    className="mt-1 w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-200"
-                    placeholder="1000"
-                    value={newFilament.weight}
-                    onChange={e => setNewFilament(p => ({ ...p, weight: e.target.value }))}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Price per spool</label>
-                  <input
-                    type="number" min="0" step="0.01"
-                    className="mt-1 w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-200"
-                    placeholder="0.00"
-                    value={newFilament.price}
-                    onChange={e => setNewFilament(p => ({ ...p, price: e.target.value }))}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Extruder temp (°C)</label>
-                  <input
-                    type="number"
-                    className="mt-1 w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-200"
-                    placeholder="220"
-                    value={newFilament.settings_extruder_temp}
-                    onChange={e => setNewFilament(p => ({ ...p, settings_extruder_temp: e.target.value }))}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Bed temp (°C)</label>
-                  <input
-                    type="number"
-                    className="mt-1 w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-200"
-                    placeholder="60"
-                    value={newFilament.settings_bed_temp}
-                    onChange={e => setNewFilament(p => ({ ...p, settings_bed_temp: e.target.value }))}
-                  />
-                </div>
-              </div>
+                  {selectedFilamentId === f.id && <Check size={15} className="text-brand-600 shrink-0" />}
+                </button>
+              ))}
             </div>
-          )}
+          </div>
 
           <div className="flex items-center justify-between pt-1">
             <button
@@ -578,12 +382,10 @@ export default function SpoolReceiveWizard({ onClose }: { onClose: () => void })
             </button>
             <button
               onClick={handleAdvanceStep2}
-              disabled={!canAdvanceStep2() || creatingFilament}
+              disabled={!canAdvanceStep2()}
               className="flex items-center gap-1.5 px-5 py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium disabled:opacity-40"
             >
-              {creatingFilament && <Loader2 size={14} className="animate-spin" />}
-              {creatingFilament ? 'Creating…' : 'Next'}
-              {!creatingFilament && <ChevronRight size={16} />}
+              Next <ChevronRight size={16} />
             </button>
           </div>
         </div>
@@ -629,12 +431,14 @@ export default function SpoolReceiveWizard({ onClose }: { onClose: () => void })
             </div>
             <div>
               <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Storage location</label>
-              <input
+              <select
                 className="mt-1 w-full border rounded-lg px-3 py-2 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-200"
-                placeholder="e.g. Shelf A"
                 value={details.location}
                 onChange={e => setDetails(p => ({ ...p, location: e.target.value }))}
-              />
+              >
+                <option value="">— None —</option>
+                {(locationData?.storage_locations ?? []).map(l => <option key={l} value={l}>{l}</option>)}
+              </select>
             </div>
             <div className="col-span-2">
               <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Comment</label>
@@ -749,7 +553,7 @@ export default function SpoolReceiveWizard({ onClose }: { onClose: () => void })
               </button>
             </div>
           ) : !nfcStarted ? (
-            /* Pre-start: show spool list, offer to begin */
+            /* Pre-start */
             <div className="space-y-4">
               <div className="p-3 rounded-xl bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
                 <p className="text-xs text-gray-500 dark:text-gray-400">Spools created</p>
@@ -757,23 +561,49 @@ export default function SpoolReceiveWizard({ onClose }: { onClose: () => void })
                   {createdSpools.map(s => `#${s.id}`).join(', ')}
                 </p>
               </div>
-              <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 text-xs text-blue-700 dark:text-blue-300 space-y-1 leading-relaxed">
-                <p className="font-semibold">How NFC tagging works</p>
-                <p>For each spool, a QR code will appear. Scan it with your Android phone to open the NFC writer. Hold a tag to the back of your phone — the desktop will advance automatically when the tag is read.</p>
-              </div>
+              {!phoneConnected && mobileToken && (
+                <div className="flex flex-col items-center gap-3 p-4 rounded-xl bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
+                  <div className="p-2 bg-white rounded-lg shadow-sm">
+                    <QRCodeSVG
+                      value={`${mobileBase}/mobile/app/${mobileToken}`}
+                      size={140}
+                      bgColor="#ffffff"
+                      fgColor="#111827"
+                      level="M"
+                    />
+                  </div>
+                  <div className="text-center space-y-0.5">
+                    <div className="flex items-center gap-1.5 justify-center">
+                      <QrCode size={13} className="text-gray-400" />
+                      <p className="text-sm font-medium text-gray-800 dark:text-gray-200">Connect your phone first</p>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Scan to open the mobile app — Android Chrome required.</p>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-gray-400">
+                    <span className="w-2 h-2 rounded-full bg-brand-500 animate-pulse" />
+                    Waiting for phone to connect…
+                  </div>
+                </div>
+              )}
               <button
                 onClick={beginNfcTagging}
-                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium"
+                disabled={!phoneConnected}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium disabled:opacity-40"
               >
                 <Nfc size={16} /> Begin tagging
               </button>
+              {phoneConnected && (
+                <p className="text-xs text-green-600 dark:text-green-400 text-center flex items-center justify-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-green-500" />
+                  Phone connected
+                </p>
+              )}
             </div>
           ) : (
             /* Active tagging */
             <div className="space-y-4">
-              {/* Progress */}
               <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-                <span>Spool {currentSpoolIdx + 1} of {createdSpools.length}</span>
+                <span>Spool {Math.min(currentSpoolIdx + 1, createdSpools.length)} of {createdSpools.length}</span>
                 <span className="font-bold text-brand-600 dark:text-brand-400">#{createdSpools[currentSpoolIdx]?.id}</span>
               </div>
               <div className="h-1.5 rounded-full bg-gray-100 dark:bg-gray-800">
@@ -782,91 +612,27 @@ export default function SpoolReceiveWizard({ onClose }: { onClose: () => void })
                   style={{ width: `${(currentSpoolIdx / createdSpools.length) * 100}%` }}
                 />
               </div>
-
-              {/* Ask second tag */}
-              {askSecondTag ? (
-                <div className="space-y-4 py-2">
-                  <div className="text-center space-y-1">
-                    <p className="font-semibold text-gray-900 dark:text-gray-100">Tag A scanned</p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      Is there a tag on the other side of the spool?
-                    </p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      onClick={() => handleSecondTag(true)}
-                      className="py-3 rounded-xl border-2 border-brand-500 bg-brand-50 dark:bg-brand-950/30 text-brand-700 dark:text-brand-300 font-semibold text-sm hover:bg-brand-100 dark:hover:bg-brand-950/50 transition-colors"
-                    >
-                      Yes
-                    </button>
-                    <button
-                      onClick={() => handleSecondTag(false)}
-                      className="py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-semibold text-sm hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-                    >
-                      No
-                    </button>
-                  </div>
-                  <p className="text-xs text-gray-400 dark:text-gray-500 text-center">
-                    Some spool types have an NFC tag on each side.
+              <div className="flex flex-col items-center gap-3 py-4">
+                <div className="w-14 h-14 rounded-full bg-brand-50 dark:bg-brand-900/20 flex items-center justify-center">
+                  {nfcWaiting
+                    ? <Nfc size={26} className="text-brand-600 dark:text-brand-400" />
+                    : <Loader2 size={26} className="text-brand-500 animate-spin" />}
+                </div>
+                <div className="text-center space-y-1">
+                  <p className="text-sm font-semibold text-gray-800 dark:text-gray-200">
+                    {nfcWaiting ? 'Waiting for phone…' : 'Preparing next spool…'}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Hold an NFC tag to the back of your phone. The phone will ask about a second tag.
                   </p>
                 </div>
-              ) : patchingLot ? (
-                <div className="flex items-center justify-center gap-2 py-6">
-                  <Loader2 size={18} className="animate-spin text-brand-500" />
-                  <span className="text-sm text-gray-500 dark:text-gray-400">Updating lot number…</span>
-                </div>
-              ) : nfcToken ? (
-                /* QR code for phone */
-                <div className="space-y-4">
-                  <div className="flex flex-col items-center gap-4 p-4 rounded-xl bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700">
-                    <div className="p-2 bg-white rounded-lg shadow-sm">
-                      <QRCodeSVG
-                        value={`${mobileBase}/mobile/nfc/${nfcToken}`}
-                        size={160}
-                        bgColor="#ffffff"
-                        fgColor="#111827"
-                        level="M"
-                      />
-                    </div>
-                    <div className="text-center space-y-1">
-                      <div className="flex items-center gap-1.5 justify-center">
-                        <QrCode size={13} className="text-gray-400" />
-                        <p className="text-sm font-medium text-gray-800 dark:text-gray-200">Scan with your phone</p>
-                      </div>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        {nfcSlot === 'A' ? 'Hold an NFC tag to the back of your phone' : 'Hold the second tag to the back of your phone'}
-                      </p>
-                    </div>
-
-                    {nfcPollStatus === 'waiting' ? (
-                      <div className="flex items-center gap-2 text-xs text-gray-400">
-                        <span className="w-2 h-2 rounded-full bg-brand-500 animate-pulse" />
-                        Waiting for tag scan…
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2 text-xs text-green-600 dark:text-green-400">
-                        <Check size={13} />
-                        Tag {nfcSlot} scanned
-                      </div>
-                    )}
+                {nfcWaiting && (
+                  <div className="flex items-center gap-2 text-xs text-gray-400">
+                    <span className="w-2 h-2 rounded-full bg-brand-500 animate-pulse" />
+                    NFC task sent to phone
                   </div>
-
-                  <p className="text-xs text-gray-400 dark:text-gray-500 text-center">
-                    Tagging spool #{createdSpools[currentSpoolIdx]?.id}
-                    {nfcSlot === 'B' ? ' — tag B' : ''}
-                  </p>
-                </div>
-              ) : null}
-
-              {/* Skip button (if user wants to tag manually later) */}
-              {!askSecondTag && !patchingLot && nfcPollStatus === 'waiting' && (
-                <button
-                  onClick={() => finishCurrentSpool()}
-                  className="w-full text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 py-1 transition-colors"
-                >
-                  Skip this spool
-                </button>
-              )}
+                )}
+              </div>
             </div>
           )}
         </div>

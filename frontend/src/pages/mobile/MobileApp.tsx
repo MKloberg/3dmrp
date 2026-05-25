@@ -95,6 +95,7 @@ export default function MobileApp() {
   const [wroteTagB, setWroteTagB] = useState(false)
   const [writeErrorB, setWriteErrorB] = useState<string | null>(null)
   const [nfcErrorMsg, setNfcErrorMsg] = useState<string | null>(null)
+  const [labelPrinted, setLabelPrinted] = useState(false)
 
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -171,6 +172,7 @@ export default function MobileApp() {
           setWroteTagB(false)
           setWriteErrorB(null)
           setNfcErrorMsg(null)
+          setLabelPrinted(false)
           setNfcToken(msg.nfc_token)
           nfcTokenRef.current = msg.nfc_token
           setNfcSession(null)
@@ -363,6 +365,22 @@ export default function MobileApp() {
     _setPhase('nfc_done')
   }
 
+  async function retryTagA() {
+    const tok = nfcTokenRef.current
+    const uid = cardUidARef.current
+    const wrote = wroteTagARef.current
+    if (!tok || !uid) return
+    _setPhase('nfc_scanning')
+    setNfcErrorMsg(null)
+    try {
+      await postNfcTagA(tok, { card_uid: uid, wrote_tag: wrote })
+      _setPhase('nfc_ask_second')
+    } catch {
+      _setPhase('nfc_error')
+      setNfcErrorMsg('Session lost — try again from desktop.')
+    }
+  }
+
   function returnToIdle() {
     _setPhase('idle')
     setNfcSession(null)
@@ -370,6 +388,7 @@ export default function MobileApp() {
     setNfcToken(null)
     nfcTokenRef.current = null
     phoneInitiatedRef.current = false
+    setLabelPrinted(false)
   }
 
   async function openSpoolPicker(intent: 'nfc' | 'label' | 'weigh' | 'clone' = 'nfc') {
@@ -392,6 +411,7 @@ export default function MobileApp() {
     setWriteErrorA(null)
     setCardUidB(null); setWroteTagB(false); setWriteErrorB(null)
     setNfcErrorMsg(null)
+    setLabelPrinted(false)
     _setPhase('nfc_loading')
 
     try {
@@ -728,8 +748,8 @@ export default function MobileApp() {
     function sendPrintLabel() {
       if (nfcSession) {
         wsRef.current?.send(JSON.stringify({ type: 'task', task_type: 'print_label', spool_id: nfcSession.spool_id }))
+        setLabelPrinted(true)
       }
-      returnToIdle()
     }
 
     return (
@@ -768,12 +788,18 @@ export default function MobileApp() {
                 {weighLoading ? <Loader2 size={18} className="animate-spin" /> : <Scale size={18} />}
                 Weigh this spool
               </button>
-              <button
-                onClick={sendPrintLabel}
-                className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl border border-gray-700 text-gray-300 font-medium text-sm hover:bg-gray-900 transition-colors"
-              >
-                Print QR label
-              </button>
+              {labelPrinted ? (
+                <div className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl border border-green-700/40 text-green-400 text-sm font-medium">
+                  <Check size={14} /> Label sent
+                </div>
+              ) : (
+                <button
+                  onClick={sendPrintLabel}
+                  className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl border border-gray-700 text-gray-300 font-medium text-sm hover:bg-gray-900 transition-colors"
+                >
+                  <QrCode size={15} /> Print QR label
+                </button>
+              )}
               <button
                 onClick={returnToIdle}
                 className="w-full py-3 text-gray-500 text-sm font-medium hover:text-gray-300 transition-colors"
@@ -910,7 +936,7 @@ export default function MobileApp() {
       {nfcSupported && (
         <div className="px-6 pb-safe pb-10 pt-4">
           <button
-            onClick={isError && cardUidA ? startScanB : startScanA}
+            onClick={isError && cardUidA ? retryTagA : startScanA}
             disabled={isScanning}
             className="w-full py-4 rounded-2xl bg-brand-600 hover:bg-brand-700 active:bg-brand-800 text-white font-semibold text-base disabled:opacity-50 transition-colors"
           >

@@ -73,11 +73,11 @@ def gcode_file_metadata(
 ):
     root = _repo_root(db)
     if not root:
-        return {"filament_weights": [], "filament_weight_total": None, "estimated_time": None, "error": "Repository not configured"}
+        return {"filament_weights": [], "filament_slots": [], "filament_weight_total": None, "estimated_time": None, "has_exclude_objects": False, "error": "Repository not configured"}
 
     file_path = os.path.join(root, slicer_name, printer_type_name, item_name, filename)
     if not os.path.isfile(file_path):
-        return {"filament_weights": [], "filament_weight_total": None, "estimated_time": None, "error": "File not found"}
+        return {"filament_weights": [], "filament_slots": [], "filament_weight_total": None, "estimated_time": None, "has_exclude_objects": False, "error": "File not found"}
 
     filament_weights: list[float] = []
     filament_weight_total: float | None = None
@@ -162,12 +162,30 @@ def gcode_file_metadata(
                         for v in raw
                     ]
 
+    has_exclude_objects = False
+
     try:
         file_size = os.path.getsize(file_path)
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             # Read first 200 lines (PrusaSlicer puts metadata in header)
             head = [f.readline() for _ in range(200)]
             _parse_lines(head)
+
+            # Check head for EXCLUDE_OBJECT_DEFINE (Klipper bare command, not a comment)
+            for line in head:
+                if line.strip().upper().startswith("EXCLUDE_OBJECT_DEFINE"):
+                    has_exclude_objects = True
+                    break
+
+            # Not in first 200 lines — scan up to 1800 more (objects defined right after header comments)
+            if not has_exclude_objects:
+                for _ in range(1800):
+                    line = f.readline()
+                    if not line:
+                        break
+                    if line.strip().upper().startswith("EXCLUDE_OBJECT_DEFINE"):
+                        has_exclude_objects = True
+                        break
 
             # If not found yet, also scan last 512 KB (Snapmaker Orca puts metadata at end of large files)
             if not filament_weights or filament_weight_total is None or estimated_time is None:
@@ -198,6 +216,7 @@ def gcode_file_metadata(
         "filament_slots": filament_slots,
         "filament_weight_total": filament_weight_total,
         "estimated_time": estimated_time,
+        "has_exclude_objects": has_exclude_objects,
         "error": None,
     }
 

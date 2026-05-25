@@ -201,6 +201,10 @@ with engine.connect() as conn:
     if "has_mainsail_spoolman" not in existing_pt3:
         conn.execute(text("ALTER TABLE printer_types ADD COLUMN has_mainsail_spoolman BOOLEAN NOT NULL DEFAULT 0"))
 
+    existing_fs2 = {row[1] for row in conn.execute(text("PRAGMA table_info(filament_specs)"))}
+    if "quality_rating" not in existing_fs2:
+        conn.execute(text("ALTER TABLE filament_specs ADD COLUMN quality_rating INTEGER"))
+
     conn.commit()
 
 app = FastAPI(title="3DMRP", version="1.0.0")

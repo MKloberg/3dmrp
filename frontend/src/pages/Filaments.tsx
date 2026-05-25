@@ -26,6 +26,7 @@ function emptyForm(): FilamentSpecInput {
     price: null, density: null, diameter: 1.75, weight: null, spool_weight: null,
     settings_extruder_temp: null, settings_bed_temp: null,
     article_number: '', comment: '', external_id: '', extra: null, spoolman_id: null, purchase_url: '',
+    quality_rating: null,
   }
 }
 
@@ -48,6 +49,7 @@ function spoolmanToInput(sf: SpoolmanFilament): FilamentSpecInput {
     extra: Object.keys(sf.extra ?? {}).length ? sf.extra : null,
     spoolman_id: sf.id,
     purchase_url: '',
+    quality_rating: null,
   }
 }
 
@@ -62,6 +64,51 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
     <div>
       <dt className="text-xs text-gray-400">{label}</dt>
       <dd className="text-sm font-medium text-gray-800 dark:text-gray-200">{value}</dd>
+    </div>
+  )
+}
+
+function RatingDisplay({ rating }: { rating: number | null | undefined }) {
+  if (!rating) return null
+  if (rating > 0) return <span className="text-amber-500 leading-none tracking-tighter text-sm">{'★'.repeat(rating)}</span>
+  return <span className="text-red-500 leading-none tracking-tighter text-sm">{'☠'.repeat(-rating)}</span>
+}
+
+function RatingPicker({ f, onClose }: { f: FilamentSpec; onClose: () => void }) {
+  const qc = useQueryClient()
+  const mut = useMutation({
+    mutationFn: (r: number | null) => updateFilament(f.id, { ...specToInput(f), quality_rating: r }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['filaments'] }); onClose() },
+  })
+  const cur = f.quality_rating
+  return (
+    <div
+      className="flex flex-wrap items-center gap-1 px-4 py-2 bg-gray-50 dark:bg-gray-700/40 border-t dark:border-gray-700"
+      onClick={e => e.stopPropagation()}
+    >
+      {([-5, -4, -3, -2, -1, 1, 2, 3, 4, 5] as number[]).map(v => (
+        <button key={v} disabled={mut.isPending}
+          onClick={() => mut.mutate(cur === v ? null : v)}
+          className={[
+            'w-8 h-7 text-xs rounded border font-medium transition-colors',
+            v < 0
+              ? `border-red-300 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/50 ${cur === v ? 'bg-red-100 dark:bg-red-900/50' : ''}`
+              : `border-amber-300 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/50 ${cur === v ? 'bg-amber-100 dark:bg-amber-900/50' : ''}`,
+          ].join(' ')}
+        >
+          {v > 0 ? `+${v}` : v}
+        </button>
+      ))}
+      {cur != null && (
+        <button disabled={mut.isPending}
+          onClick={() => mut.mutate(null)}
+          className="w-8 h-7 text-xs rounded border border-gray-300 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 ml-1">
+          ✕
+        </button>
+      )}
+      <span className="text-xs text-gray-400 ml-2">
+        {cur != null ? `Current: ${cur > 0 ? '+' : ''}${cur}` : 'Unrated'}
+      </span>
     </div>
   )
 }
@@ -237,6 +284,14 @@ function FilamentForm({
             <textarea rows={2} className="w-full border rounded-lg px-3 py-2 text-sm"
               value={form.comment} onChange={e => set({ comment: e.target.value })} />
           </div>
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">Quality rating (−5 to +5)</label>
+            <input type="number" min="-5" max="5" step="1"
+              className="w-full border rounded-lg px-3 py-2 text-sm"
+              placeholder="blank = unrated"
+              value={form.quality_rating ?? ''}
+              onChange={e => set({ quality_rating: e.target.value === '' ? null : Math.max(-5, Math.min(5, parseInt(e.target.value))) })} />
+          </div>
         </div>
       </div>
 
@@ -326,6 +381,8 @@ export default function Filaments() {
   const [filterSpoolman, setFilterSpoolman] = useState<'' | 'linked' | 'unlinked'>('')
   const [sortBy, setSortBy] = useState<'color_name' | 'brand' | 'material'>('color_name')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [ratingPickerOpen, setRatingPickerOpen] = useState<number | null>(null)
+  const [warnFilament, setWarnFilament] = useState<FilamentSpec | null>(null)
 
   function clearFilters() {
     setFilterMaterial(''); setFilterBrand(''); setFilterColor(''); setFilterSpoolman('')
@@ -572,19 +629,34 @@ export default function Filaments() {
                         />
                         <span className="font-medium text-sm">{f.color_name}</span>
                         {f.brand && <span className="text-xs text-gray-400">{f.brand}</span>}
-
                         {f.weight && <span className="text-xs text-gray-400">{f.weight}g</span>}
                         {f.settings_extruder_temp && (
                           <span className="text-xs text-gray-400">{f.settings_extruder_temp}°C / {f.settings_bed_temp}°C</span>
                         )}
                       </div>
                       <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                        <button
+                          onClick={e => { e.stopPropagation(); setRatingPickerOpen(ratingPickerOpen === f.id ? null : f.id) }}
+                          className="focus:outline-none leading-none"
+                          title={f.quality_rating != null ? `Rating: ${f.quality_rating > 0 ? '+' : ''}${f.quality_rating}${f.comment ? `\n${f.comment}` : ''} — click to edit` : 'Set quality rating'}
+                        >
+                          {f.quality_rating
+                            ? <RatingDisplay rating={f.quality_rating} />
+                            : <span className="text-gray-300 dark:text-gray-600 text-sm">☆</span>}
+                        </button>
                         {f.purchase_url && (
-                          <a href={f.purchase_url} target="_blank" rel="noopener noreferrer"
+                          <button
+                            onClick={() => {
+                              if (f.quality_rating != null && f.quality_rating < 0) {
+                                setWarnFilament(f)
+                              } else {
+                                window.open(f.purchase_url, '_blank')
+                              }
+                            }}
                             title="Order"
                             className="text-gray-400 hover:text-green-600">
                             <ShoppingCart size={14} />
-                          </a>
+                          </button>
                         )}
                         <button onClick={() => openEdit(f)} className="text-gray-400 hover:text-brand-600" title="Edit">
                           <Pencil size={14} />
@@ -596,6 +668,9 @@ export default function Filaments() {
                         </button>
                       </div>
                     </div>
+                    {ratingPickerOpen === f.id && (
+                      <RatingPicker f={f} onClose={() => setRatingPickerOpen(null)} />
+                    )}
                     {isOpen && <FilamentDetail f={f} />}
                   </div>
                 )
@@ -625,6 +700,37 @@ export default function Filaments() {
           onImport={(ids) => importMutation.mutate(ids)}
           importing={importMutation.isPending}
         />
+      )}
+
+      {warnFilament && (
+        <Modal title="Low-rated filament" onClose={() => setWarnFilament(null)}>
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <RatingDisplay rating={warnFilament.quality_rating} />
+              <span className="text-sm font-medium text-gray-800 dark:text-gray-200">{warnFilament.color_name}</span>
+              {warnFilament.brand && <span className="text-sm text-gray-500">{warnFilament.brand}</span>}
+            </div>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              This filament has a negative quality rating ({warnFilament.quality_rating}). Are you sure you want to order it again?
+            </p>
+            {warnFilament.comment && (
+              <p className="text-sm text-gray-700 dark:text-gray-300 italic border-l-2 border-red-300 pl-3">
+                "{warnFilament.comment}"
+              </p>
+            )}
+            <div className="flex justify-end gap-2 pt-1">
+              <button onClick={() => setWarnFilament(null)} className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">
+                Cancel
+              </button>
+              <button
+                onClick={() => { window.open(warnFilament.purchase_url, '_blank'); setWarnFilament(null) }}
+                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 text-sm rounded-lg"
+              >
+                Go anyway
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   )
