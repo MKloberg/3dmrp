@@ -6,6 +6,8 @@ A self-hosted web app for managing 3D print items, filament inventory, orders, a
 
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-mkloberg-yellow?logo=buy-me-a-coffee&logoColor=white)](https://buymeacoffee.com/mkloberg)
 
+> **v0.6.0:** Exclude Objects Awareness — 3DMRP now detects when a G-code file was sliced without the Label Objects / Exclude Objects setting enabled and warns you before you send the job. Filament quality ratings (−5 to +5) stored in your local catalog and shown in both the Filaments page and Spool Inventory. Analyze wizard now writes G-code weight changes and filament slot reassignments back to the BOM on close, with a new pencil icon to override any existing slot assignment inline. Auto-assign rebuilt with CIE LAB perceptual color matching. AFC Unload All button. Webcam snapshot proxy for cross-origin feeds.
+>
 > **v0.5.0:** Clone Tagging — duplicate a spool in Spoolman and walk it through the full intake sequence (NFC tagging, QR label, weighing) in one continuous flow, entirely from your phone. Mobile app gains three new standalone actions: Label a Spool, Weigh a Spool, and Clone Tag a Spool. Spool picker adds NFC scan-to-select, wrapping filter pills, multi-color support in the color filter, and ID sort. Weigh screen shows current gross weight in the accept button and a before/after/change breakdown on the success screen.
 >
 > **v0.4.9:** Spool weigh modal now includes an inline guide explaining the process, where the empty spool tare comes from (Spoolman's filament type definition), and the drift risk if tare isn't kept up to date. Location sort now correctly separates storage locations from printer-named locations. Dropdown focus clears immediately after selection. Spool inventory refresh interval tightened to 15 s.
@@ -83,9 +85,11 @@ Send G-Code files to printers directly from within each production step.
   - Zoom in / out in 10% steps (10%–400% range); click the percentage label to reset to 150%
   - Drag inside the modal to reposition the image — the offset is mirrored back to the inline thumbnail so both stay in sync
 - **Send** uploads the file to the printer via Moonraker; a progress bar tracks the upload
+- **Exclude Objects warning** — if the selected G-code file was sliced without the Label Objects / Exclude Objects setting enabled, a red warning badge appears below the weight readout. Clicking it explains what Exclude Objects does, why it matters for mid-print failure recovery, and the exact Orca Slicer setting to enable
 - **Analyze / Send / Send & Start** each open a two-step wizard:
-  - **Step 1 — G-Code vs. BOM**: compares per-slot G-Code filament weights against the item's BOM spec. Weight mismatches and missing BOM entries are flagged. An "Update BOM to match G-Code" button syncs weights in one click. The printer's currently-loaded state is intentionally not shown here — this step is purely about the file and the spec
+  - **Step 1 — G-Code vs. BOM**: compares per-slot G-Code filament weights against the item's BOM spec. Weight mismatches and missing BOM entries are flagged. Existing BOM slots show a pencil icon — click to reassign which filament spec covers that slot inline. **Auto-assign** maps unmatched G-code slots to catalog filaments using CIE LAB perceptual color matching with color-group bonuses
   - **Step 2 — Filament Check**: slot-by-slot comparison of what is physically loaded in the printer vs. what the BOM requires. Refreshes every 3 seconds; turns green when all slots match. Analyze mode stops here; Send and Send & Start proceed to upload the file
+  - **Write-back on close**: closing the Analyze wizard automatically saves detected weight changes and slot reassignments back to the step BOM — no separate manual update step required
 - Live printer status is shown inline for each printer: current state dot, active filename, and print progress bar
 
 ---
@@ -97,6 +101,7 @@ Manage your filament library and track stock.
 - Store specs with material, color, brand, temperature settings, and purchase URL
 - Sync specs directly from a [Spoolman](https://github.com/Donkie/Spoolman) instance
 - Live stock levels pulled from Spoolman for forecasting
+- **Quality ratings** — rate any filament −5 to +5; positive ratings show as amber stars (★★★), negative as red skulls (☠☠). Accessible from both the Filaments page and Spool Inventory, stored in the local catalog
 
 ![Filaments](docs/screenshots/filaments.png)
 
@@ -127,10 +132,11 @@ For printers running an Automated Filament Changer (AFC), 3DMRP shows a live lan
 - One card per lane showing: filament color swatch, tool mapping (T0–T3), material, spool name and number, remaining weight and percentage, and a color-matched progress bar
 - **Load / Unload controls** — small pill buttons on each lane card:
   - Load button triggers the lane's gcode mapping command (e.g. `T0`) and remains disabled until the printer confirms the filament is in the toolhead
-  - Unload button sends `TOOL_UNLOAD` and waits for the printer to confirm the lane is clear
+  - Unload button sends `TOOL_UNLOAD LANE=x` and waits for the printer to confirm the lane is clear
   - Both buttons are disabled while a print is in progress, and re-enable automatically when the print ends
   - The button shows `…` for the full duration of the operation (typically 60–90 seconds), not just the brief HTTP acknowledgment
   - A 120-second safety timeout releases the lock if the printer never responds
+- **Unload All** — one button unloads every loaded lane simultaneously; polls Klipper until all lanes confirm clear
 - AFC lane color pills also appear in the printer card header and in the compact list view, giving an at-a-glance view of all loaded filaments
 
 ![AFC Lanes](docs/screenshots/printer-afc.png)
@@ -140,7 +146,7 @@ For printers running an Automated Filament Changer (AFC), 3DMRP shows a live lan
 
 Each expanded printer card shows a live media section below the AFC lanes.
 
-- **Camera feeds** — snapshot-polled webcam streams from Moonraker's camera API, displayed in the left column. Multiple cameras tile in a 2-column sub-grid.
+- **Camera feeds** — snapshot-polled webcam streams from Moonraker's camera API, displayed in the left column. Multiple cameras tile in a 2-column sub-grid. Snapshots are proxied through the 3DMRP backend to avoid cross-origin browser restrictions when the printer and 3DMRP run on different ports or hosts.
 - **Interactive touchscreen mirror** — for printers running the [paxx12](https://github.com/paxx13/snapmaker-moonraker) extended firmware (Snapmaker U1), the right column shows a live mirror of the printer's touchscreen:
   - Refreshed at 300ms intervals via the printer's framebuffer HTTP endpoint
   - **Click to tap** — a single click sends a `tap` action at the correct screen coordinates
