@@ -343,77 +343,6 @@ The frontend runs in Docker behind nginx. The backend runs natively on the host 
 
 ---
 
-## Setup
-
-### Prerequisites
-
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (for the frontend) — make sure it is running before you start 3DMRP
-- [uv](https://github.com/astral-sh/uv) (Python package manager, for the backend) — install once, then forget about it
-
-### Starting 3DMRP
-
-The easiest way to start everything is with the `start.bat` file in the root of the repo.
-
-**Option A — double-click (no terminal needed):**
-Open the repo folder in File Explorer and double-click `start.bat`.
-
-**Option B — from a Command Prompt or PowerShell terminal:**
-```cmd
-start.bat
-```
-
-Either way, `start.bat` does two things automatically:
-
-1. **Starts the backend** in a new, separate window titled "3DMRP Backend". This window shows the API logs and must stay open while you use the app. To stop the backend, simply close that window.
-2. **Starts the frontend** (Docker containers) in the background via `docker compose up -d`. The nginx server and frontend assets are served from Docker, so there is no visible window for this — it runs silently.
-
-Once both are running, the app is available at:
-
-- **Desktop browser:** `http://localhost:7891` — plain HTTP, no certificate warning
-- **Mobile / camera features:** `https://your-lan-ip:7892` — HTTPS required for camera access; uses a self-signed certificate (see [Mobile Filament Loader](#mobile-filament-loader) for the one-time phone trust setup)
-
-> **If Docker fails to start**, you'll see an error message in the terminal. Make sure Docker Desktop is open and has finished starting before running `start.bat` again.
-
----
-
-### Starting each part manually
-
-If you need to start only the backend or only the frontend (e.g. after a Docker rebuild), you can start them individually.
-
-**Backend only — from a terminal:**
-```cmd
-cd backend
-start.bat
-```
-
-**Backend only — PowerShell:**
-```powershell
-cd backend
-powershell -ExecutionPolicy Bypass -File .\start.ps1
-```
-
-> **Note on PowerShell execution policy:** Running `.\start.ps1` directly in a PowerShell window can fail (or open the script for editing) depending on your system's execution policy. This is a Windows security default and not a bug. Using `start.bat` or the explicit `powershell -ExecutionPolicy Bypass -File` command above always works regardless of that setting.
-
-**Frontend only:**
-```powershell
-docker compose up -d
-```
-
----
-
-### Environment variables
-
-Copy `.env.example` to `.env` and adjust as needed:
-
-```
-PORT=7891        # HTTP port for desktop browser access
-HTTPS_PORT=7892  # HTTPS port for mobile camera access
-```
-
-The backend reads `DATABASE_URL` and `DATA_DIR` from the environment — these are set automatically by `start.ps1` / `start.bat` and do not need to be configured manually under normal use.
-
----
-
 ## Data
 
 All data is stored in `backend/data/`:
@@ -450,6 +379,96 @@ Set the Spoolman URL in **Settings → General** (e.g. `http://192.168.1.100:791
 - The **Mobile Filament Loader** looks up scanned spool QR codes against Spoolman and writes slot assignments back to Moonraker
 - The **Printers** page shows live Spoolman slot assignments per printer when Spoolman is active
 - AFC-equipped printers automatically enrich their lane data with Spoolman spool names, weights, and IDs
+
+---
+
+## Installation
+
+3DMRP runs on a Windows PC — the same machine you slice on. The frontend is a web app served from Docker; the backend runs natively on Windows. Both start with a single double-click on `start.bat`.
+
+### Step 1 — Install Docker Desktop
+
+Docker runs the 3DMRP frontend in a container. You don't need to know anything about Docker to use it — it just needs to be installed and running.
+
+1. Download [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/)
+2. Run the installer and follow the prompts. It may ask you to enable **WSL 2** (Windows Subsystem for Linux) — click through and restart your PC if prompted. This is normal and required.
+3. After your PC restarts, launch **Docker Desktop** from the Start menu and wait until the whale icon in your system tray is steady (not animated). That means it's ready.
+
+> Docker Desktop is free for personal use. You do not need to create an account to use it.
+
+### Step 2 — Install uv
+
+`uv` manages the Python environment for the backend. It installs Python automatically — you do not need to install Python separately.
+
+Open **PowerShell** (search for it in the Start menu) and paste this command:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+Press Enter, wait for it to finish, then close PowerShell. That's the only time you'll ever interact with `uv` directly.
+
+### Step 3 — Download 3DMRP
+
+**Option A — Download ZIP (easiest, no Git needed):**
+1. Go to [github.com/MKloberg/3dmrp](https://github.com/MKloberg/3dmrp)
+2. Click the green **Code** button → **Download ZIP**
+3. Extract the ZIP to a permanent location, e.g. `C:\3dmrp`
+
+**Option B — Clone with Git:**
+```cmd
+git clone https://github.com/MKloberg/3dmrp.git C:\3dmrp
+```
+
+### Step 4 — Start 3DMRP
+
+Open the `C:\3dmrp` folder in File Explorer and **double-click `start.bat`**.
+
+`start.bat` does two things:
+1. Opens a window titled **"3DMRP Backend"** — this is the API server. Keep it open while using the app. Close it to stop the backend.
+2. Starts the frontend Docker containers silently in the background.
+
+> **First run only:** Docker downloads the frontend image (~50 MB). This takes about a minute and only happens once.
+
+Once both are running, open your browser to:
+
+| URL | Use |
+|---|---|
+| `http://localhost:7891` | Desktop browser — no warnings |
+| `https://your-lan-ip:7892` | Phone / mobile features — self-signed cert |
+
+Your LAN IP is shown automatically in the app's sidebar QR widget. For the mobile HTTPS URL, your phone will show a certificate warning the first time — this is expected. Tap **Advanced → Proceed** (Chrome) or **Show Details → visit this website** (Safari) to continue. You only do this once.
+
+> **If Docker fails to start:** Make sure Docker Desktop is open and showing a green "Engine running" status, then double-click `start.bat` again.
+
+### Changing ports
+
+To run on different ports, copy `.env.example` to `.env` in the root folder and edit:
+
+```
+PORT=7891        # desktop HTTP port
+HTTPS_PORT=7892  # mobile HTTPS port
+```
+
+### Starting components individually
+
+If you need to restart just the backend (e.g. after pulling an update):
+
+```cmd
+cd backend
+start.bat
+```
+
+Or via PowerShell:
+```powershell
+cd backend
+powershell -ExecutionPolicy Bypass -File .\start.ps1
+```
+
+Frontend only:
+```powershell
+docker compose up -d
+```
 
 ---
 
