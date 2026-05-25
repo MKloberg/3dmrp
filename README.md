@@ -384,91 +384,55 @@ Set the Spoolman URL in **Settings → General** (e.g. `http://192.168.1.100:791
 
 ## Installation
 
-3DMRP runs on a Windows PC — the same machine you slice on. The frontend is a web app served from Docker; the backend runs natively on Windows. Both start with a single double-click on `start.bat`.
+### One-command setup
 
-### Step 1 — Install Docker Desktop
-
-Docker runs the 3DMRP frontend in a container. You don't need to know anything about Docker to use it — it just needs to be installed and running.
-
-1. Download [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/)
-2. Run the installer and follow the prompts. It may ask you to enable **WSL 2** (Windows Subsystem for Linux) — click through and restart your PC if prompted. This is normal and required.
-3. After your PC restarts, launch **Docker Desktop** from the Start menu and wait until the whale icon in your system tray is steady (not animated). That means it's ready.
-
-> Docker Desktop is free for personal use. You do not need to create an account to use it.
-
-### Step 2 — Install uv
-
-`uv` manages the Python environment for the backend. It installs Python automatically — you do not need to install Python separately.
-
-Open **PowerShell** (search for it in the Start menu) and paste this command:
+Open **PowerShell** (search for it in the Start menu) and paste this:
 
 ```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/MKloberg/3dmrp/main/setup.ps1 | iex"
 ```
 
-Press Enter, wait for it to finish, then close PowerShell. That's the only time you'll ever interact with `uv` directly.
+The setup script handles everything:
+- Installs **Docker Desktop** if missing (downloads the installer and walks you through it)
+- Installs **uv** (Python environment manager) silently — no separate Python install needed
+- Downloads the latest 3DMRP release from GitHub
+- Creates a **3DMRP shortcut on your Desktop**
 
-### Step 3 — Download 3DMRP
+If Docker needs to be installed, you'll be asked to restart your PC. A copy of the setup script is placed on your Desktop automatically — right-click it and choose **Run with PowerShell** after restarting to finish.
 
-**Option A — Download ZIP (easiest, no Git needed):**
-1. Go to [github.com/MKloberg/3dmrp](https://github.com/MKloberg/3dmrp)
-2. Click the green **Code** button → **Download ZIP**
-3. Extract the ZIP to a permanent location, e.g. `C:\3dmrp`
+Once setup completes, double-click the **3DMRP** shortcut on your Desktop. Then open your browser to `http://localhost:7891`.
 
-**Option B — Clone with Git:**
-```cmd
-git clone https://github.com/MKloberg/3dmrp.git C:\3dmrp
-```
+> **Docker Desktop is free** for personal use. You do not need a Docker account.
 
-### Step 4 — Start 3DMRP
+---
 
-Open the `C:\3dmrp` folder in File Explorer and **double-click `start.bat`**.
+### Updating
 
-`start.bat` does two things:
-1. Opens a window titled **"3DMRP Backend"** — this is the API server. Keep it open while using the app. Close it to stop the backend.
-2. Starts the frontend Docker containers silently in the background.
+Run the same setup command again (or re-run the script from your Desktop). It detects the existing install, asks to confirm, backs up your database, downloads the latest release, and restores your data.
 
-> **First run only:** Docker downloads the frontend image (~50 MB). This takes about a minute and only happens once.
+---
 
-Once both are running, open your browser to:
+### Manual setup (advanced)
 
-| URL | Use |
-|---|---|
-| `http://localhost:7891` | Desktop browser — no warnings |
-| `https://your-lan-ip:7892` | Phone / mobile features — self-signed cert |
+If you prefer to install prerequisites yourself:
 
-Your LAN IP is shown automatically in the app's sidebar QR widget. For the mobile HTTPS URL, your phone will show a certificate warning the first time — this is expected. Tap **Advanced → Proceed** (Chrome) or **Show Details → visit this website** (Safari) to continue. You only do this once.
+1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and start it
+2. Install uv: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
+3. Download the [latest release ZIP](https://github.com/MKloberg/3dmrp/releases/latest) and extract it
+4. Double-click `start.bat` in the extracted folder
 
-> **If Docker fails to start:** Make sure Docker Desktop is open and showing a green "Engine running" status, then double-click `start.bat` again.
+### Ports
 
-### Changing ports
-
-To run on different ports, copy `.env.example` to `.env` in the root folder and edit:
+To run on different ports, copy `.env.example` to `.env` and edit:
 
 ```
 PORT=7891        # desktop HTTP port
 HTTPS_PORT=7892  # mobile HTTPS port
 ```
 
-### Starting components individually
+### Mobile / phone access
 
-If you need to restart just the backend (e.g. after pulling an update):
-
-```cmd
-cd backend
-start.bat
-```
-
-Or via PowerShell:
-```powershell
-cd backend
-powershell -ExecutionPolicy Bypass -File .\start.ps1
-```
-
-Frontend only:
-```powershell
-docker compose up -d
-```
+The app also serves HTTPS on port `7892` for features that require camera access (QR scanning). Your phone will show a certificate warning the first time — tap **Advanced → Proceed** (Chrome) or **Show Details → visit this website** (Safari). You only do this once. The correct URL is shown in the app's sidebar QR widget.
 
 ---
 
