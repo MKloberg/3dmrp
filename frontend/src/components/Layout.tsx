@@ -4,7 +4,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
   LayoutDashboard, Box, ClipboardList, TrendingUp, Printer,
-  Settings, Users, FileText, ChevronRight, SlidersHorizontal, Layers, Database, X, Disc2,
+  Settings, Users, FileText, ChevronRight, SlidersHorizontal, Layers, Database, X, Disc2, Wrench, Sparkles,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { QRCodeSVG } from 'qrcode.react'
@@ -14,7 +14,7 @@ import { getPrinters, getSpoolmanStock, getSettings, type Printer as PrinterType
 import { useMobileSession } from '../contexts/MobileSessionContext'
 import { SpoolIcon } from './SpoolIcon'
 
-type Child = { to: string; label: string; icon?: React.ElementType }
+type Child = { to: string; label: string; icon?: React.ElementType; isSection?: boolean; badge?: string }
 type NavItemDef = {
   to: string
   label: string
@@ -43,6 +43,13 @@ const nav: NavItemDef[] = [
     ],
   },
   {
+    to: '/tools', label: 'Tools', icon: Wrench,
+    children: [
+      { to: '', label: 'Advanced', isSection: true, badge: '$' },
+      { to: '/tools', label: 'Import Filament from Listing' },
+    ],
+  },
+  {
     to: '/settings', label: 'Settings', icon: Settings,
     children: [
       { to: '/settings/general', label: 'General', icon: SlidersHorizontal },
@@ -50,6 +57,7 @@ const nav: NavItemDef[] = [
       { to: '/settings/printer-types', label: 'Printer Types', icon: Printer },
       { to: '/settings/database', label: 'Database', icon: Database },
       { to: '/settings/mobile', label: 'Mobile Access', icon: Printer },
+      { to: '/settings/ai', label: 'AI', icon: Sparkles },
     ],
   },
 ]
@@ -59,7 +67,7 @@ function NavTreeItem({ item }: { item: NavItemDef }) {
   const hasChildren = !!item.children?.length
 
   const isOnChildRoute = hasChildren
-    ? item.children!.some(c => location.pathname.startsWith(c.to))
+    ? item.children!.filter(c => !c.isSection && c.to).some(c => location.pathname.startsWith(c.to))
     : false
 
   const [open, setOpen] = useState(isOnChildRoute)
@@ -121,23 +129,30 @@ function NavTreeItem({ item }: { item: NavItemDef }) {
 
       {open && (
         <div className="mt-0.5 ml-6 pl-3 border-l border-gray-700 space-y-0.5">
-          {item.children!.map(child => (
-            <NavLink
-              key={child.to}
-              to={child.to}
-              className={({ isActive }) =>
-                clsx(
-                  'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-colors',
-                  isActive
-                    ? 'bg-brand-600 text-white font-medium'
-                    : 'text-gray-400 hover:text-white hover:bg-gray-800',
-                )
-              }
-            >
-              {child.icon && <child.icon size={13} />}
-              {child.label}
-            </NavLink>
-          ))}
+          {item.children!.map((child, idx) =>
+            child.isSection ? (
+              <div key={`section-${idx}`} className="flex items-center gap-1.5 px-3 pt-2 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500 select-none">
+                {child.label}
+                {child.badge && <span className="text-amber-400">{child.badge}</span>}
+              </div>
+            ) : (
+              <NavLink
+                key={child.to}
+                to={child.to}
+                className={({ isActive }) =>
+                  clsx(
+                    'flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-colors',
+                    isActive
+                      ? 'bg-brand-600 text-white font-medium'
+                      : 'text-gray-400 hover:text-white hover:bg-gray-800',
+                  )
+                }
+              >
+                {child.icon && <child.icon size={13} />}
+                {child.label}
+              </NavLink>
+            )
+          )}
         </div>
       )}
     </div>

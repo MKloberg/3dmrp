@@ -819,12 +819,32 @@ export interface CreateFilamentData {
   color_hex?: string
   vendor_name?: string
   weight?: number
+  spool_weight?: number
   diameter?: number
   density?: number
   price?: number
   settings_extruder_temp?: number
   settings_bed_temp?: number
+  article_number?: string
 }
+
+export interface ParsedFilamentSpec {
+  name?: string | null
+  material?: string | null
+  brand?: string | null
+  color_hex?: string | null
+  diameter?: number | null
+  weight?: number | null
+  spool_weight?: number | null
+  extruder_temp?: number | null
+  bed_temp?: number | null
+  price?: number | null
+  asin?: string | null
+  density?: number | null
+}
+
+export const parseFilamentListing = (text: string) =>
+  req<ParsedFilamentSpec>('/tools/parse-filament', { method: 'POST', body: JSON.stringify({ text }) })
 
 export const createSpoolmanFilament = (data: CreateFilamentData) =>
   req<SpoolmanFilament>('/spoolman/filaments', { method: 'POST', body: JSON.stringify(data) })

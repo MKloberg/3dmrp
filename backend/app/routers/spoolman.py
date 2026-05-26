@@ -248,11 +248,13 @@ class CreateFilamentRequest(BaseModel):
     color_hex: Optional[str] = None
     vendor_name: Optional[str] = None
     weight: Optional[float] = None
+    spool_weight: Optional[float] = None
     diameter: Optional[float] = 1.75
     density: Optional[float] = None
     price: Optional[float] = None
     settings_extruder_temp: Optional[int] = None
     settings_bed_temp: Optional[int] = None
+    article_number: Optional[str] = None
 
 
 @router.post("/filaments")
@@ -266,6 +268,8 @@ async def create_spoolman_filament(body: CreateFilamentRequest, db: Session = De
         payload["color_hex"] = body.color_hex.lstrip("#")
     if body.weight is not None:
         payload["weight"] = body.weight
+    if body.spool_weight is not None:
+        payload["spool_weight"] = body.spool_weight
     if body.diameter is not None:
         payload["diameter"] = body.diameter
     if body.density is not None:
@@ -276,12 +280,15 @@ async def create_spoolman_filament(body: CreateFilamentRequest, db: Session = De
         payload["settings_extruder_temp"] = body.settings_extruder_temp
     if body.settings_bed_temp is not None:
         payload["settings_bed_temp"] = body.settings_bed_temp
+    if body.article_number:
+        payload["article_number"] = body.article_number
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             if body.vendor_name:
-                vresp = await client.get(f"{base}/api/v1/vendor")
-                vendors = vresp.json() if vresp.status_code == 200 else []
-                existing = next((v for v in vendors if v.get("name", "").lower() == body.vendor_name.lower()), None)
+                vresp = await client.get(f"{base}/api/v1/vendor", params={"limit": 1000})
+                raw = vresp.json() if vresp.status_code == 200 else []
+                vendors = raw.get("items", raw) if isinstance(raw, dict) else raw
+                existing = next((v for v in vendors if isinstance(v, dict) and v.get("name", "").lower() == body.vendor_name.lower()), None)
                 if existing:
                     payload["vendor_id"] = existing["id"]
                 else:

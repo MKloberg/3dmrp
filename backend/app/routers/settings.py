@@ -24,7 +24,7 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 SETTING_KEYS = {"spoolman_url", "amazon_domain", "gcode_repo_path", "square_api_token", "mobile_protocol", "currency",
                 "ui_printers_view", "ui_spool_inventory_view", "ui_printer_label_size_index", "label_printer_name",
                 "label_print_quantity", "nfc_write_mode", "machine_hourly_rate", "electricity_cost_kwh",
-                "markup_multiplier", "printer_ws_mode", "mobile_base_url"}
+                "markup_multiplier", "printer_ws_mode", "mobile_base_url", "anthropic_api_key"}
 
 
 def get_setting(db: Session, key: str) -> str:
@@ -119,6 +119,30 @@ async def restore_database(file: UploadFile = File(...)):
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
         raise
+
+
+@router.post("/anthropic/test")
+async def test_anthropic(db: Session = Depends(get_db)) -> Dict[str, object]:
+    api_key = get_setting(db, "anthropic_api_key")
+    if not api_key:
+        return {"ok": False, "error": "No API key configured"}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={"model": "claude-haiku-4-5-20251001", "max_tokens": 5, "messages": [{"role": "user", "content": "Hi"}]},
+            )
+        if resp.status_code == 200:
+            return {"ok": True}
+        data = resp.json()
+        return {"ok": False, "error": data.get("error", {}).get("message", f"HTTP {resp.status_code}")}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @router.post("/spoolman/test")

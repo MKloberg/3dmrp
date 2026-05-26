@@ -2933,7 +2933,7 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
         ) : (
           <div
             onClick={() => setEditingDesc(true)}
-            className="min-h-[2rem] text-sm text-gray-700 dark:text-gray-300 cursor-text rounded-lg px-3 py-2 -mx-3 hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors"
+            className="min-h-[2rem] text-sm text-gray-700 dark:text-gray-300 cursor-text rounded-lg px-3 py-2 -mx-3 hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors whitespace-pre-wrap"
           >
             {item.description
               ? item.description
@@ -3661,6 +3661,8 @@ export default function Items() {
   const { data: allTags = [] } = useQuery({ queryKey: ['tags'], queryFn: getTags })
   const { data: printerTypes = [] } = useQuery({ queryKey: ['printer-types'], queryFn: getPrinterTypes })
   const { data: printers = [] } = useQuery({ queryKey: ['printers'], queryFn: getPrinters })
+  const { data: printingOrders = [] } = useQuery({ queryKey: ['orders', 'printing'], queryFn: () => getOrders('printing'), refetchInterval: 30_000 })
+  const printingItemIds = useMemo(() => new Set(printingOrders.map(o => o.item_id)), [printingOrders])
 
   const [searchParams, setSearchParams] = useSearchParams()
   const [expanded, setExpanded] = useState<number | null>(() => {
@@ -3671,7 +3673,7 @@ export default function Items() {
   const [showTagManager, setShowTagManager] = useState(false)
   const [filterTagIds, setFilterTagIds] = useState<Set<number>>(new Set())
   const [search, setSearch] = useState('')
-  const [sortBy, setSortBy] = useState<'name_asc' | 'name_desc' | 'recent'>('name_asc')
+  const [sortBy, setSortBy] = useState<'name_asc' | 'name_desc' | 'recent'>('recent')
   const [editing, setEditing] = useState<Item | null>(null)
   const [form, setForm] = useState({ name: '', sku: '', description: '', notes: '', stl_source_url: '' })
   const [gcodeRenamePrompt, setGcodeRenamePrompt] = useState<{ oldName: string; newName: string } | null>(null)
@@ -3705,7 +3707,12 @@ export default function Items() {
     .sort((a, b) => {
       if (sortBy === 'name_asc') return a.name.localeCompare(b.name)
       if (sortBy === 'name_desc') return b.name.localeCompare(a.name)
-      if (sortBy === 'recent') return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      if (sortBy === 'recent') {
+        const pa = printingItemIds.has(a.id) ? 0 : 1
+        const pb = printingItemIds.has(b.id) ? 0 : 1
+        if (pa !== pb) return pa - pb
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      }
       return 0
     })
 

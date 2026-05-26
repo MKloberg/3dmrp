@@ -13,9 +13,11 @@ import Settings from './pages/Settings'
 import General from './pages/settings/General'
 import Database from './pages/settings/Database'
 import MobileAccess from './pages/settings/MobileAccess'
+import AISettings from './pages/settings/AI'
 import Reports from './pages/Reports'
 import FilamentInventory from './pages/reports/FilamentInventory'
 import PrintJobsReport from './pages/reports/PrintJobsReport'
+import Tools from './pages/Tools'
 import SpoolInventory from './pages/filaments/SpoolInventory'
 import MobileLanding from './pages/mobile/MobileLanding'
 import MobilePrinterLoad from './pages/mobile/MobilePrinterLoad'
@@ -54,9 +56,11 @@ export default function App() {
         <Route path="settings/slicers" element={<Slicers />} />
         <Route path="settings/database" element={<Database />} />
         <Route path="settings/mobile" element={<MobileAccess />} />
+        <Route path="settings/ai" element={<AISettings />} />
         <Route path="reports" element={<Reports />} />
         <Route path="reports/filament-inventory" element={<FilamentInventory />} />
         <Route path="reports/print-jobs" element={<PrintJobsReport />} />
+        <Route path="tools" element={<Tools />} />
         <Route path="filaments/spools" element={<SpoolInventory />} />
       </Route>
     </Routes>

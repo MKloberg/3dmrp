@@ -61,14 +61,31 @@ function StepDots({ total, current }: { total: number; current: number }) {
   )
 }
 
+interface FilamentMeta {
+  type?: string
+  color_hex?: string
+  brand?: string
+  min_temp?: number
+  max_temp?: number
+  bed_temp?: number
+}
+
+interface SpoolReceiveWizardProps {
+  onClose: () => void
+  initialSpools?: SpoolmanSpool[]
+  initialFilamentMeta?: FilamentMeta
+}
+
 // ─── Main wizard ──────────────────────────────────────────────────────────────
 
-export default function SpoolReceiveWizard({ onClose }: { onClose: () => void }) {
+export default function SpoolReceiveWizard({ onClose, initialSpools, initialFilamentMeta }: SpoolReceiveWizardProps) {
   const qc = useQueryClient()
 
+  const hasInitialSpools = !!initialSpools?.length
+
   // ── Step state ──
-  const [step, setStep] = useState(0)
-  const [route, setRoute] = useState<Route | null>(null)
+  const [step, setStep] = useState(hasInitialSpools ? 4 : 0)
+  const [route, setRoute] = useState<Route | null>(hasInitialSpools ? 'nfc' : null)
 
   // ── Step 2: filament ──
   const [selectedFilamentId, setSelectedFilamentId] = useState<number | null>(null)
@@ -79,7 +96,7 @@ export default function SpoolReceiveWizard({ onClose }: { onClose: () => void })
 
   // ── Step 4: created spools ──
   const [creatingSpools, setCreatingSpools] = useState(false)
-  const [createdSpools, setCreatedSpools] = useState<SpoolmanSpool[]>([])
+  const [createdSpools, setCreatedSpools] = useState<SpoolmanSpool[]>(initialSpools ?? [])
   const [createError, setCreateError] = useState<string | null>(null)
 
   // ── NFC tagging loop ──
@@ -135,6 +152,13 @@ export default function SpoolReceiveWizard({ onClose }: { onClose: () => void })
   const activeFilamentId = selectedFilamentId
 
   function filamentDisplayName(): string {
+    if (initialSpools?.length) {
+      const f = initialSpools[0].filament
+      if (!f) return `Spool #${initialSpools[0].id}`
+      const parts = [f.name || `#${f.id}`, f.material].filter(Boolean)
+      if (f.vendor?.name) parts.push(f.vendor.name)
+      return parts.join(' · ')
+    }
     const f = filamentList.find(f => f.id === selectedFilamentId)
     return f ? filamentLabel(f) : '—'
   }
@@ -174,6 +198,7 @@ export default function SpoolReceiveWizard({ onClose }: { onClose: () => void })
   }
 
   function getFilamentMeta() {
+    if (initialFilamentMeta) return initialFilamentMeta
     const f = filamentList.find(f => f.id === selectedFilamentId)
     if (!f) return undefined
     const hex = f.color_hex ? (f.color_hex.startsWith('#') ? f.color_hex.slice(1) : f.color_hex) : undefined
