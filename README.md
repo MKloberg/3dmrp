@@ -6,6 +6,8 @@ A self-hosted web app for managing 3D print items, filament inventory, orders, a
 
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-mkloberg-yellow?logo=buy-me-a-coffee&logoColor=white)](https://buymeacoffee.com/mkloberg)
 
+> **v0.7.0:** Print Job Tracking & Order Automation — 3DMRP now maintains a persistent WebSocket connection to every Moonraker printer and tracks print jobs in real time. Completed jobs are automatically credited to the oldest open order (FIFO), advancing order status from printing → complete without any manual input. The Orders page shows a printed/total progress bar and +/− adjustment buttons for manual corrections (with a warning if active prints exist). The PrintWizard step 2 shows which open order the current print will count toward. A new **Print Jobs** report exposes the full job history with sortable columns, status/printer/filename filters, and links to related orders, items, and printers.
+>
 > **v0.6.0:** Exclude Objects Awareness — 3DMRP now detects when a G-code file was sliced without the Label Objects / Exclude Objects setting enabled and warns you before you send the job. Filament quality ratings (−5 to +5) stored in your local catalog and shown in both the Filaments page and Spool Inventory. Analyze wizard now writes G-code weight changes and filament slot reassignments back to the BOM on close, with a new pencil icon to override any existing slot assignment inline. Auto-assign rebuilt with CIE LAB perceptual color matching. AFC Unload All button. Webcam snapshot proxy for cross-origin feeds.
 >
 > **v0.5.0:** Clone Tagging — duplicate a spool in Spoolman and walk it through the full intake sequence (NFC tagging, QR label, weighing) in one continuous flow, entirely from your phone. Mobile app gains three new standalone actions: Label a Spool, Weigh a Spool, and Clone Tag a Spool. Spool picker adds NFC scan-to-select, wrapping filter pills, multi-color support in the color filter, and ID sort. Weigh screen shows current gross weight in the accept button and a before/after/change breakdown on the success screen.
@@ -88,7 +90,7 @@ Send G-Code files to printers directly from within each production step.
 - **Exclude Objects warning** — if the selected G-code file was sliced without the Label Objects / Exclude Objects setting enabled, a red warning badge appears below the weight readout. Clicking it explains what Exclude Objects does, why it matters for mid-print failure recovery, and the exact Orca Slicer setting to enable
 - **Analyze / Send / Send & Start** each open a two-step wizard:
   - **Step 1 — G-Code vs. BOM**: compares per-slot G-Code filament weights against the item's BOM spec. Weight mismatches and missing BOM entries are flagged. Existing BOM slots show a pencil icon — click to reassign which filament spec covers that slot inline. **Auto-assign** maps unmatched G-code slots to catalog filaments using CIE LAB perceptual color matching with color-group bonuses
-  - **Step 2 — Filament Check**: slot-by-slot comparison of what is physically loaded in the printer vs. what the BOM requires. Refreshes every 3 seconds; turns green when all slots match. Analyze mode stops here; Send and Send & Start proceed to upload the file
+  - **Step 2 — Filament Check**: slot-by-slot comparison of what is physically loaded in the printer vs. what the BOM requires. Refreshes every 3 seconds; turns green when all slots match. Analyze mode stops here; Send and Send & Start proceed to upload the file. An info banner shows which open order this print will count toward (FIFO — oldest unfilled order first), so you can confirm the attribution before starting
   - **Write-back on close**: closing the Analyze wizard automatically saves detected weight changes and slot reassignments back to the step BOM — no separate manual update step required
 - Live printer status is shown inline for each printer: current state dot, active filename, and print progress bar
 
@@ -260,6 +262,8 @@ Track print orders from intake to delivery.
 - **STL Source URL** — pre-filled from the linked item, editable per order, and written back to the item on save
 - **Item thumbnail** in the edit modal — the linked item's first photo is shown next to the item name so you can quickly confirm you have the right item selected
 - **Open Item** button in the edit modal — jumps directly to the Items page, auto-expands the linked item's accordion, and scrolls it into view
+- **Print progress** — each order row shows a printed/total counter and progress bar, updated automatically as jobs complete. Use the +/− buttons to adjust manually; if active prints are running on the order you'll be asked to confirm before the change is applied
+- **Automatic status advancement** — when completed Moonraker jobs are credited to an order via FIFO attribution, the order status advances from printing → complete automatically once the quantity is met
 
 ![Orders](docs/screenshots/orders.png)
 
@@ -296,6 +300,17 @@ Predict filament demand before you run out.
 Live view of all active Spoolman spools — spool count, remaining weight per filament, color swatches, and progress bars. Grouped by material. Auto-refreshes every 60 seconds.
 
 ![Filament Inventory](docs/screenshots/filament-inventory.png)
+
+#### Print Jobs
+
+Full history of every print job recorded by 3DMRP, including jobs synced automatically from Moonraker.
+
+- All fields exposed: ID, status, printer, filename, Moonraker job UID, order, item, routing step, quantity credited, start/end/created timestamps
+- Compact `text-xs` layout so all columns fit on one screen without horizontal scrolling; long filenames truncate with a tooltip
+- **Sortable columns** — click any header to sort ascending/descending
+- **Filters** — status dropdown, printer dropdown, and filename text search
+- **Links** — printer name links to the Printers page; order ID links to the order; item and step links open the item detail; Moonraker job UID links directly to the printer's history tab in Mainsail
+- Auto-refreshes every 15 seconds
 
 ---
 
