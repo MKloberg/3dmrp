@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { Disc2, FileText } from 'lucide-react'
+import { Disc2, FileText, Printer } from 'lucide-react'
 
 const reports = [
   {
@@ -10,6 +10,15 @@ const reports = [
     color: 'text-teal-600',
     bg: 'bg-teal-50 dark:bg-teal-900/20',
     border: 'border-teal-200 dark:border-teal-800',
+  },
+  {
+    to: '/reports/print-jobs',
+    label: 'Print Jobs',
+    description: 'Full print job history — status, filenames, order attribution, and quantity credits.',
+    icon: Printer,
+    color: 'text-indigo-600',
+    bg: 'bg-indigo-50 dark:bg-indigo-900/20',
+    border: 'border-indigo-200 dark:border-indigo-800',
   },
 ]
 

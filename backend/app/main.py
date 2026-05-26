@@ -1,9 +1,14 @@
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from .database import engine, Base
-from .routers import filaments, items, orders, spoolman, forecast, settings, printers, tags, customers, slicers, printer_types, gcode, filepicker, nfc_sessions, mobile_ws, print_labels, webhooks
+from .routers import filaments, items, orders, spoolman, forecast, settings, printers, tags, customers, slicers, printer_types, gcode, filepicker, nfc_sessions, mobile_ws, print_labels, webhooks, print_jobs
+
+logger = logging.getLogger(__name__)
 
 Base.metadata.create_all(bind=engine)
 
@@ -205,9 +210,43 @@ with engine.connect() as conn:
     if "quality_rating" not in existing_fs2:
         conn.execute(text("ALTER TABLE filament_specs ADD COLUMN quality_rating INTEGER"))
 
+    existing_orders4 = {row[1] for row in conn.execute(text("PRAGMA table_info(orders)"))}
+    if "quantity_printed" not in existing_orders4:
+        conn.execute(text("ALTER TABLE orders ADD COLUMN quantity_printed INTEGER NOT NULL DEFAULT 0"))
+
+    existing_tables3 = {row[0] for row in conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))}
+    if "print_jobs" not in existing_tables3:
+        conn.execute(text("""
+            CREATE TABLE print_jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+                item_id INTEGER REFERENCES items(id) ON DELETE SET NULL,
+                routing_step_id INTEGER REFERENCES routing_steps(id) ON DELETE SET NULL,
+                printer_id INTEGER NOT NULL REFERENCES printers(id) ON DELETE CASCADE,
+                moonraker_job_id TEXT,
+                filename TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'in_progress',
+                quantity_credited INTEGER NOT NULL DEFAULT 0,
+                start_time DATETIME,
+                end_time DATETIME,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (printer_id, moonraker_job_id)
+            )
+        """))
+
     conn.commit()
 
-app = FastAPI(title="3DMRP", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from .services.moonraker_ws import start_ws_manager
+    try:
+        await start_ws_manager()
+    except Exception:
+        logger.exception("Failed to start WebSocket manager")
+    yield
+
+
+app = FastAPI(title="3DMRP", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -234,6 +273,7 @@ app.include_router(nfc_sessions.router)
 app.include_router(mobile_ws.router)
 app.include_router(print_labels.router)
 app.include_router(webhooks.router)
+app.include_router(print_jobs.router)
 
 
 @app.get("/api/health")

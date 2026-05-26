@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
-import { getOrders, createOrder, updateOrder, deleteOrder, getItems, updateItem, getCustomers, Order } from '../api/client'
+import { getOrders, createOrder, updateOrder, deleteOrder, getItems, updateItem, getCustomers, adjustQuantityPrinted, Order } from '../api/client'
 import Modal from '../components/Modal'
 import StatusBadge from '../components/StatusBadge'
 import { Plus, Trash2, Pencil, Package, User, ExternalLink, ClipboardList } from 'lucide-react'
@@ -15,9 +15,16 @@ export default function Orders() {
   const { hash } = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const [filterStatus, setFilterStatus] = useState<string>('')
+  const [warningOrderId, setWarningOrderId] = useState<number | null>(null)
+  const [pendingDelta, setPendingDelta] = useState<number>(0)
+
   const { data: orders = [] } = useQuery({
     queryKey: ['orders', filterStatus],
     queryFn: () => getOrders(filterStatus || undefined),
+    refetchInterval: (query) => {
+      const data = query.state.data as Order[] | undefined
+      return data?.some(o => o.status === 'printing') ? 15_000 : false
+    },
   })
   const { data: items = [] } = useQuery({ queryKey: ['items'], queryFn: getItems })
   const { data: customers = [] } = useQuery({ queryKey: ['customers'], queryFn: getCustomers })
@@ -101,6 +108,23 @@ export default function Orders() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['orders'] }),
   })
 
+  const adjustMutation = useMutation({
+    mutationFn: ({ id, delta, force }: { id: number; delta: number; force?: boolean }) =>
+      adjustQuantityPrinted(id, delta, force),
+    onSuccess: (result, variables) => {
+      if ('warning' in result && result.warning) {
+        setWarningOrderId(variables.id)
+        setPendingDelta(variables.delta)
+      } else {
+        qc.invalidateQueries({ queryKey: ['orders'] })
+      }
+    },
+  })
+
+  function doAdjust(orderId: number, delta: number, force = false) {
+    adjustMutation.mutate({ id: orderId, delta, force })
+  }
+
   function resetForm() {
     setForm({ item_id: '', item_name: '', stl_source_url: '', customer_id: '', customer_name: '', customer_notes: '', date_needed: '', quantity: '1' })
     setModelMode('existing')
@@ -157,7 +181,7 @@ export default function Orders() {
               <tr>
                 <th className="px-4 py-2 text-left">Item</th>
                 <th className="px-4 py-2 text-left">Customer</th>
-                <th className="px-4 py-2 text-center">Qty</th>
+                <th className="px-4 py-2 text-center">Progress</th>
                 <th className="px-4 py-2 text-left">Ordered</th>
                 <th className="px-4 py-2 text-left">Needed by</th>
                 <th className="px-4 py-2 text-left">Status</th>
@@ -201,7 +225,41 @@ export default function Orders() {
                         <span className="text-gray-300 dark:text-gray-600">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-center">{order.quantity}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-col items-center gap-1 min-w-[90px]">
+                        <div className="flex items-center gap-1.5">
+                          {order.status !== 'complete' && order.status !== 'cancelled' && (
+                            <button
+                              onClick={() => doAdjust(order.id, -1)}
+                              disabled={adjustMutation.isPending || order.quantity_printed === 0}
+                              className="w-5 h-5 flex items-center justify-center rounded text-xs font-bold text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-30"
+                            >−</button>
+                          )}
+                          <span className="text-sm font-medium tabular-nums">
+                            {order.quantity_printed}
+                            <span className="text-gray-400 font-normal">/{order.quantity}</span>
+                          </span>
+                          {order.status !== 'complete' && order.status !== 'cancelled' && (
+                            <button
+                              onClick={() => doAdjust(order.id, +1)}
+                              disabled={adjustMutation.isPending || order.quantity_printed >= order.quantity}
+                              className="w-5 h-5 flex items-center justify-center rounded text-xs font-bold text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-30"
+                            >+</button>
+                          )}
+                        </div>
+                        {order.quantity > 0 && (
+                          <div className="w-full h-1.5 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${
+                                order.status === 'complete' ? 'bg-green-500' :
+                                order.status === 'printing' ? 'bg-brand-500' : 'bg-gray-300 dark:bg-gray-600'
+                              }`}
+                              style={{ width: `${Math.min(100, (order.quantity_printed / order.quantity) * 100)}%` }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-4 py-3 text-gray-500 dark:text-gray-400">
                       {new Date(order.date_ordered).toLocaleDateString()}
                     </td>
@@ -370,6 +428,29 @@ export default function Orders() {
               >
                 {createMutation.isPending ? 'Saving…' : 'Create Order'}
               </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {warningOrderId !== null && (
+        <Modal title="Active Print in Progress" onClose={() => setWarningOrderId(null)}>
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              A print job for this item is currently running. Adjusting the count manually while printing may cause a double-credit when the job completes.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setWarningOrderId(null)}
+                className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+              >Cancel</button>
+              <button
+                onClick={() => {
+                  doAdjust(warningOrderId, pendingDelta, true)
+                  setWarningOrderId(null)
+                }}
+                className="px-4 py-2 text-sm bg-amber-600 hover:bg-amber-700 text-white rounded-lg"
+              >Adjust Anyway</button>
             </div>
           </div>
         </Modal>

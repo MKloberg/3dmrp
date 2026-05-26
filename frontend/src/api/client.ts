@@ -130,6 +130,7 @@ export interface Order {
   item_id: number
   customer_id: number | null
   quantity: number
+  quantity_printed: number
   customer_name: string
   customer_notes: string
   date_ordered: string
@@ -689,10 +690,21 @@ export const getGcodeRepoStatus = () =>
   req<{ configured: boolean; exists: boolean; root: string | null }>('/gcode/status')
 export const scaffoldGcodeRepo = () =>
   req<{ created: string[]; skipped: string[]; error: string | null }>('/gcode/scaffold', { method: 'POST' })
-export const sendGcodeToPrinter = (printerId: number, filePath: string, startPrint = false) =>
+export const sendGcodeToPrinter = (
+  printerId: number,
+  filePath: string,
+  startPrint = false,
+  ctx?: { item_id?: number; routing_step_id?: number; order_id?: number },
+) =>
   req<{ ok: boolean; filename: string }>(`/printers/${printerId}/send-gcode`, {
     method: 'POST',
-    body: JSON.stringify({ file_path: filePath, start_print: startPrint }),
+    body: JSON.stringify({ file_path: filePath, start_print: startPrint, ...ctx }),
+  })
+
+export const adjustQuantityPrinted = (orderId: number, delta: number, force = false) =>
+  req<Order | { warning: true }>(`/orders/${orderId}/quantity-printed`, {
+    method: 'PATCH',
+    body: JSON.stringify({ delta, force }),
   })
 export interface GcodeSlotInfo {
   color_hex: string | null
@@ -720,6 +732,29 @@ export const renameGcodeItemFolders = (oldName: string, newName: string) =>
     method: 'POST',
     body: JSON.stringify({ old_name: oldName, new_name: newName }),
   })
+
+// --- Print Jobs ---
+export interface PrintJobReport {
+  id: number
+  printer_id: number
+  printer_name: string
+  printer_url: string
+  moonraker_job_id: string | null
+  filename: string
+  status: string
+  quantity_credited: number
+  order_id: number | null
+  order_customer: string | null
+  item_id: number | null
+  item_name: string | null
+  routing_step_id: number | null
+  step_description: string | null
+  start_time: string | null
+  end_time: string | null
+  created_at: string | null
+}
+
+export const getPrintJobs = () => req<PrintJobReport[]>('/print-jobs')
 
 // --- Settings ---
 export const getSettings = () => req<Record<string, string>>('/settings')

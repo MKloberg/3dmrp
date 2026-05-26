@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from ..database import get_db
-from ..models import Order, OrderStatus, Item
+from ..models import Order, OrderStatus, Item, PrintJob
 from ..schemas import OrderCreate, OrderUpdate, OrderOut
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
@@ -71,3 +73,32 @@ def delete_order(order_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Order not found")
     db.delete(order)
     db.commit()
+
+
+class QuantityAdjust(BaseModel):
+    delta: int
+    force: bool = False
+
+
+@router.patch("/{order_id}/quantity-printed", response_model=OrderOut)
+def adjust_quantity_printed(order_id: int, data: QuantityAdjust, db: Session = Depends(get_db)):
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if not data.force:
+        active = (
+            db.query(PrintJob)
+            .filter(PrintJob.item_id == order.item_id, PrintJob.status == "in_progress")
+            .count()
+        )
+        if active > 0:
+            return JSONResponse(content={"warning": True})
+
+    order.quantity_printed = max(0, min(order.quantity_printed + data.delta, order.quantity))
+    if order.quantity_printed >= order.quantity:
+        order.status = OrderStatus.complete
+
+    db.commit()
+    db.refresh(order)
+    return order

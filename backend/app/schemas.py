@@ -327,10 +327,28 @@ class OrderUpdate(BaseModel):
 class OrderOut(OrderBase):
     id: int
     customer_id: Optional[int] = None
+    quantity_printed: int = 0
     date_ordered: datetime
     status: OrderStatus
     item: ItemOut
     customer: Optional[CustomerOut] = None
+
+    model_config = {"from_attributes": True}
+
+
+class PrintJobOut(BaseModel):
+    id: int
+    order_id: Optional[int] = None
+    item_id: Optional[int] = None
+    routing_step_id: Optional[int] = None
+    printer_id: int
+    moonraker_job_id: Optional[str] = None
+    filename: str
+    status: str
+    quantity_credited: int = 0
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    created_at: datetime
 
     model_config = {"from_attributes": True}
 

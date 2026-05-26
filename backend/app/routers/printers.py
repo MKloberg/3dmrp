@@ -10,7 +10,7 @@ from typing import List
 import httpx
 
 from ..database import get_db
-from ..models import Printer, PrinterSlot, FilamentSpec
+from ..models import Printer, PrinterSlot, FilamentSpec, PrintJob
 from ..schemas import PrinterCreate, PrinterUpdate, PrinterOut, PrinterHistoryResponse, MoonrakerJob, PrinterSlotOut, PrinterSlotSet, PrinterSlicerConfig, PrinterStatus, WebcamInfo, FilamentDetectSlot, PrinterCapabilityMismatch
 from pydantic import BaseModel
 from typing import Optional
@@ -23,6 +23,9 @@ class PrinterTypeAssign(BaseModel):
 class SendGcodeRequest(BaseModel):
     file_path: str
     start_print: bool = False
+    order_id: Optional[int] = None
+    item_id: Optional[int] = None
+    routing_step_id: Optional[int] = None
 
 router = APIRouter(prefix="/api/printers", tags=["printers"])
 
@@ -58,11 +61,13 @@ def get_printer_by_name(name: str, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=PrinterOut, status_code=201)
-def create_printer(data: PrinterCreate, db: Session = Depends(get_db)):
+async def create_printer(data: PrinterCreate, db: Session = Depends(get_db)):
     printer = Printer(**data.model_dump())
     db.add(printer)
     db.commit()
     db.refresh(printer)
+    from ..services.moonraker_ws import add_printer_ws
+    add_printer_ws(printer.id, printer.url)
     return printer
 
 
@@ -417,12 +422,31 @@ async def send_gcode(printer_id: int, data: SendGcodeRequest, db: Session = Depe
         except (httpx.RequestError, httpx.HTTPStatusError) as exc:
             raise HTTPException(status_code=502, detail=f"Could not upload to printer: {exc}")
 
+    moonraker_job_id: Optional[str] = None
     if data.start_print:
         async with httpx.AsyncClient(timeout=10.0) as client:
             try:
                 await client.post(f"{url}/printer/print/start", json={"filename": filename})
+                hist = await client.get(f"{url}/server/history/list", params={"limit": 1})
+                if hist.status_code == 200:
+                    jobs = hist.json().get("result", {}).get("jobs", [])
+                    if jobs and jobs[0].get("filename") == filename:
+                        moonraker_job_id = jobs[0].get("job_id")
             except Exception:
                 pass
+
+    if data.start_print and (data.order_id or data.item_id):
+        pj = PrintJob(
+            printer_id=printer_id,
+            order_id=data.order_id,
+            item_id=data.item_id,
+            routing_step_id=data.routing_step_id,
+            moonraker_job_id=moonraker_job_id,
+            filename=filename,
+            status="in_progress",
+        )
+        db.add(pj)
+        db.commit()
 
     return {"ok": True, "filename": filename}
 

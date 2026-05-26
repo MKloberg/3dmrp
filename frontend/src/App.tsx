@@ -15,6 +15,7 @@ import Database from './pages/settings/Database'
 import MobileAccess from './pages/settings/MobileAccess'
 import Reports from './pages/Reports'
 import FilamentInventory from './pages/reports/FilamentInventory'
+import PrintJobsReport from './pages/reports/PrintJobsReport'
 import SpoolInventory from './pages/filaments/SpoolInventory'
 import MobileLanding from './pages/mobile/MobileLanding'
 import MobilePrinterLoad from './pages/mobile/MobilePrinterLoad'
@@ -55,6 +56,7 @@ export default function App() {
         <Route path="settings/mobile" element={<MobileAccess />} />
         <Route path="reports" element={<Reports />} />
         <Route path="reports/filament-inventory" element={<FilamentInventory />} />
+        <Route path="reports/print-jobs" element={<PrintJobsReport />} />
         <Route path="filaments/spools" element={<SpoolInventory />} />
       </Route>
     </Routes>

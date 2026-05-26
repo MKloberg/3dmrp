@@ -239,6 +239,7 @@ class Order(Base):
     item_id = Column(Integer, ForeignKey("items.id"), nullable=False)
     customer_id = Column(Integer, ForeignKey("customers.id", ondelete="SET NULL"), nullable=True)
     quantity = Column(Integer, nullable=False, default=1)
+    quantity_printed = Column(Integer, nullable=False, default=0)
     customer_name = Column(String, default="")
     customer_notes = Column(String, default="")
     date_ordered = Column(DateTime, default=datetime.utcnow)
@@ -324,3 +325,22 @@ class SpoolWeighLog(Base):
     id = Column(Integer, primary_key=True, index=True)
     spool_id = Column(Integer, nullable=False, index=True)
     weighed_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class PrintJob(Base):
+    __tablename__ = "print_jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("orders.id", ondelete="SET NULL"), nullable=True)
+    item_id = Column(Integer, ForeignKey("items.id", ondelete="SET NULL"), nullable=True)
+    routing_step_id = Column(Integer, ForeignKey("routing_steps.id", ondelete="SET NULL"), nullable=True)
+    printer_id = Column(Integer, ForeignKey("printers.id", ondelete="CASCADE"), nullable=False)
+    moonraker_job_id = Column(String, nullable=True)
+    filename = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="in_progress")
+    quantity_credited = Column(Integer, nullable=False, default=0)
+    start_time = Column(DateTime, nullable=True)
+    end_time = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("printer_id", "moonraker_job_id", name="uq_printer_moonraker_job"),)

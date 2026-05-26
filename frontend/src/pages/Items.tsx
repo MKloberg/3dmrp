@@ -12,12 +12,12 @@ import {
   createRouting, updateRouting, deleteRouting,
   createRoutingStep, updateRoutingStep, deleteRoutingStep,
   addRoutingStepFilament, updateRoutingStepFilament, deleteRoutingStepFilament,
-  getGcodeFiles, getGcodeFileMetadata, sendGcodeToPrinter, checkGcodeItemFolders, renameGcodeItemFolders,
+  getOrders, getGcodeFiles, getGcodeFileMetadata, sendGcodeToPrinter, checkGcodeItemFolders, renameGcodeItemFolders,
   getPrinterStatus, getMailsailSpoolman, getSettings, getPrinterAfcLanes, getSpoolmanStock, getPrinterFilamentDetect,
   createPostProcessingCost, updatePostProcessingCost, deletePostProcessingCost,
   setSlicerFile, deleteSlicerFile, openInSlicer, pickModelFile,
   setStepSlicerFile, deleteStepSlicerFile, openStepInSlicer,
-  Item, FilamentSpec, Tag, PrinterType, Printer, Routing, RoutingStepFilament, SlicerFile, StepSlicerFile,
+  Item, Order, FilamentSpec, Tag, PrinterType, Printer, Routing, RoutingStepFilament, SlicerFile, StepSlicerFile,
   AfcLane, AfcLanesResponse, SpoolmanSpool, GcodeSlotInfo, FilamentDetectSlot,
 } from '../api/client'
 import Modal from '../components/Modal'
@@ -246,6 +246,8 @@ function PrintWizard({
   const [slotOverrides, setSlotOverrides] = useState<Record<number, string>>({})
   const [editingSlot, setEditingSlot] = useState<number | null>(null)
   const [safetyBuffer, setSafetyBuffer] = useState(3)
+  const [expandedSuggestions, setExpandedSuggestions] = useState<Set<number>>(new Set())
+  const [step2Selections, setStep2Selections] = useState<Record<number, { bomId: number; specId: number }>>({})
   const qc = useQueryClient()
 
   useEffect(() => {
@@ -283,6 +285,21 @@ function PrintWizard({
     staleTime: 0,
     retry: false,
   })
+  const { data: allOrders = [] } = useQuery({
+    queryKey: ['orders'],
+    queryFn: () => getOrders(),
+    staleTime: 30_000,
+    enabled: mode !== 'analyze',
+  })
+  const fifoOrder: Order | null = allOrders
+    .filter(o =>
+      o.item_id === itemId &&
+      o.status !== 'complete' &&
+      o.status !== 'cancelled' &&
+      o.quantity_printed < o.quantity
+    )
+    .sort((a, b) => new Date(a.date_ordered).getTime() - new Date(b.date_ordered).getTime())[0] ?? null
+
   const afcActive = (afcData?.lanes?.length ?? 0) > 0
   const afcSlotMap = useMemo(() => {
     const map = new Map<number, AfcLane>()
@@ -364,11 +381,18 @@ function PrintWizard({
     || (unhandledMissing.length === 0 && weightDiffs.length === 0 && !timeDiffers)
   const hasWeightDiff = weightDiffs.length > 0 || timeDiffers
 
+  const step2Reassigns = Object.entries(step2Selections).map(([, v]) => ({
+    filId: v.bomId,
+    filament_spec_id: v.specId,
+    grams: stepFilaments.find(f => f.id === v.bomId)?.grams ?? 0,
+  }))
+
   function buildBomPayload() {
     const reassignedFilIds = new Set(reassignedSlots.map(r => r.filId))
+    const allReassigns = [...reassignedSlots, ...step2Reassigns]
     return {
       weights: weightDiffs.filter(r => !reassignedFilIds.has(r.bom!.id)).map(r => ({ filId: r.bom!.id, grams: r.gcodeGrams! })),
-      reassigns: reassignedSlots.length > 0 ? reassignedSlots : undefined,
+      reassigns: allReassigns.length > 0 ? allReassigns : undefined,
       adds: selectedAdds.length > 0 ? selectedAdds : undefined,
       printTime: timeDiffers ? gcodePrintTime! : undefined,
     }
@@ -383,7 +407,7 @@ function PrintWizard({
   }
 
   async function handleAnalyzeClose() {
-    if (hasWeightDiff || selectedAdds.length > 0 || reassignedSlots.length > 0) {
+    if (hasWeightDiff || selectedAdds.length > 0 || reassignedSlots.length > 0 || step2Reassigns.length > 0) {
       setAnalyzeClosing(true)
       try {
         await onUpdateBom(buildBomPayload())
@@ -503,7 +527,18 @@ function PrintWizard({
   type S2Match = 'match' | 'soft_mismatch' | 'color_mismatch' | 'hard_mismatch' | 'none'
   const step2Rows = stepFilaments.map((bom, idx) => {
     const slotNum = idx + 1
-    const loaded = getLoadedForSlot(slotNum)
+    const liveLoaded = getLoadedForSlot(slotNum)
+    const selectedSpec = step2Selections[slotNum]
+      ? filaments.find(f => f.id === step2Selections[slotNum].specId) ?? null
+      : null
+    const loaded = selectedSpec
+      ? {
+          colorHex: normalizeHex(selectedSpec.color_hex) ?? '#888888',
+          label: [selectedSpec.brand, selectedSpec.color_name].filter(Boolean).join(' ') || selectedSpec.material,
+          material: selectedSpec.material,
+          spoolId: null,
+        }
+      : liveLoaded
     const bomMat = bom.filament_spec.material
     const bomHex = normalizeHex(bom.filament_spec.color_hex)
 
@@ -549,12 +584,14 @@ function PrintWizard({
     return { slotNum, bom, loaded, matchStatus, suggestions }
   })
   const step2AllMatch = step2Rows.length > 0 && step2Rows.every(r => r.matchStatus === 'match' || r.matchStatus === 'soft_mismatch')
-  const step2ConfScores = step2Rows.map(r =>
+  const step2ConfScores: number[] = step2Rows.map(r =>
     r.matchStatus === 'match' ? 1.0 :
     r.matchStatus === 'soft_mismatch' ? 0.85 :
     r.matchStatus === 'color_mismatch' ? 0.4 : 0.0
   )
-  const step2ConfPct = step2ConfScores.length > 0 ? Math.round(Math.min(...step2ConfScores) * 100) : null
+  const step2ConfPct = step2ConfScores.length > 0
+    ? Math.round((step2ConfScores.reduce((a, b) => a + b, 0) / step2ConfScores.length) * 100)
+    : null
 
   const modeLabel = mode === 'send_and_start' ? 'Send & Start' : mode === 'send' ? 'Send' : 'Analyze'
 
@@ -821,6 +858,16 @@ function PrintWizard({
               </div>
             )}
 
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+              <span className="relative flex h-2 w-2 shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+              </span>
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                Live — this screen refreshes automatically as you load filament into the printer. Slots update in real time.
+              </span>
+            </div>
+
             {((printer.printer_type?.has_afc && !afcActive) || !spoolStock?.connected || (printer.printer_type?.has_mainsail_spoolman && mainsailSpoolman?.configured === false)) && (
               <div className="space-y-1.5">
                 {printer.printer_type?.has_afc && !afcActive && (
@@ -912,9 +959,30 @@ function PrintWizard({
                               {r.suggestions.length > 0 ? (
                                 <>
                                   <div className="text-xs text-gray-400 dark:text-gray-500 font-medium">Available in inventory:</div>
-                                  {r.suggestions.map(s => {
+                                  {(expandedSuggestions.has(r.slotNum) ? r.suggestions : r.suggestions.slice(0, 3)).map(s => {
                                     const hex = normalizeHex(s.filament.color_hex)
                                     const name = [s.filament.vendor?.name, s.filament.name].filter(Boolean).join(' ') || s.filament.material
+                                    const spec = filaments.find(f => f.spoolman_id === s.filament.id)
+                                    const isSelected = step2Selections[r.slotNum]?.specId === spec?.id
+                                    if (spec) {
+                                      return (
+                                        <button
+                                          key={s.id}
+                                          onClick={() => setStep2Selections(prev =>
+                                            isSelected
+                                              ? Object.fromEntries(Object.entries(prev).filter(([k]) => Number(k) !== r.slotNum))
+                                              : { ...prev, [r.slotNum]: { bomId: r.bom.id, specId: spec.id } }
+                                          )}
+                                          className={`flex items-center gap-1.5 flex-wrap w-full text-left rounded px-1 -mx-1 transition-colors ${isSelected ? 'bg-brand-100 dark:bg-brand-900/40' : 'hover:bg-gray-100 dark:hover:bg-gray-700/50'}`}
+                                        >
+                                          <span className="w-2 h-2 rounded-full shrink-0 border border-black/10 dark:border-white/10" style={{ backgroundColor: hex ?? '#ccc' }} />
+                                          <span className="text-xs text-gray-600 dark:text-gray-300">{name}</span>
+                                          <span className="text-xs font-bold text-brand-600 dark:text-brand-400">#{s.id}</span>
+                                          <span className="text-xs text-gray-400">· {s.remaining_weight?.toFixed(0)}g left</span>
+                                          {isSelected && <Check size={11} className="text-brand-500 ml-auto shrink-0" strokeWidth={3} />}
+                                        </button>
+                                      )
+                                    }
                                     return (
                                       <div key={s.id} className="flex items-center gap-1.5 flex-wrap">
                                         <span className="w-2 h-2 rounded-full shrink-0 border border-black/10 dark:border-white/10" style={{ backgroundColor: hex ?? '#ccc' }} />
@@ -924,6 +992,20 @@ function PrintWizard({
                                       </div>
                                     )
                                   })}
+                                  {r.suggestions.length > 3 && !expandedSuggestions.has(r.slotNum) && (
+                                    <button
+                                      onClick={() => setExpandedSuggestions(prev => new Set([...prev, r.slotNum]))}
+                                      className="text-xs text-brand-500 hover:text-brand-600 dark:text-brand-400 dark:hover:text-brand-300"
+                                    >
+                                      +{r.suggestions.length - 3} more
+                                    </button>
+                                  )}
+                                  {step2Selections[r.slotNum] && (
+                                    <div className="flex items-center gap-1 text-xs text-brand-500 dark:text-brand-400 pt-0.5">
+                                      <Check size={11} strokeWidth={3} />
+                                      BOM will be updated on Close
+                                    </div>
+                                  )}
                                 </>
                               ) : (
                                 <span className="text-xs text-gray-400 italic">No suitable spools in inventory</span>
@@ -947,6 +1029,19 @@ function PrintWizard({
               />
               <span className="text-xs text-gray-500 dark:text-gray-400">g</span>
             </div>
+
+            {mode !== 'analyze' && fifoOrder && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20">
+                <Info size={13} className="text-blue-500 shrink-0" />
+                <span className="text-xs text-blue-700 dark:text-blue-300">
+                  Will count toward <strong>Order #{fifoOrder.id}</strong>
+                  {(fifoOrder.customer?.display_name || fifoOrder.customer_name)
+                    ? ` — ${fifoOrder.customer?.display_name || fifoOrder.customer_name}`
+                    : ''}
+                  {' '}({fifoOrder.quantity_printed}/{fifoOrder.quantity} printed)
+                </span>
+              </div>
+            )}
 
             <div className="flex items-center justify-between pt-2 border-t dark:border-gray-700">
               <button onClick={() => setStep(1)}
@@ -1566,7 +1661,10 @@ function GcodePanel({ itemId, routingId, itemName, slicerName, printerTypeName, 
     setSentPrinterId(null)
     setSendError(null)
     try {
-      await sendGcodeToPrinter(printerId, filePath, startPrint)
+      await sendGcodeToPrinter(printerId, filePath, startPrint, {
+        item_id: itemId,
+        routing_step_id: stepId || undefined,
+      })
       setSentPrinterId(printerId)
       setTimeout(() => { setSentPrinterId(null); setProgress(0) }, 3000)
     } catch (e) {
