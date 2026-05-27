@@ -379,11 +379,31 @@ async def patch_spool_lot_nr(spool_id: int, body: PatchLotNrRequest, db: Session
     url = get_setting(db, "spoolman_url")
     if not url:
         raise HTTPException(status_code=400, detail="Spoolman URL not configured")
-    lot_nr = ",".join(f"card_uid:{uid.replace(':', '').lower()}" for uid in body.card_uids)
+
+    base = url.rstrip("/")
+    normalized = [uid.replace(":", "").lower() for uid in body.card_uids]
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
+            # Read existing lot_nr so we can compare before writing.
+            get_resp = await client.get(f"{base}/api/v1/spool/{spool_id}")
+            get_resp.raise_for_status()
+            existing_lot = get_resp.json().get("lot_nr") or ""
+
+            existing_uids = {
+                part.replace("card_uid:", "").strip()
+                for part in existing_lot.split(",")
+                if part.strip().startswith("card_uid:")
+            }
+
+            # If the scanned UIDs exactly match what's already stored, nothing to do.
+            if set(normalized) == existing_uids:
+                return get_resp.json()
+
+            # Otherwise the physical tags are the new source of truth — replace entirely.
+            lot_nr = ",".join(f"card_uid:{uid}" for uid in normalized)
             resp = await client.patch(
-                f"{url.rstrip('/')}/api/v1/spool/{spool_id}",
+                f"{base}/api/v1/spool/{spool_id}",
                 json={"lot_nr": lot_nr},
             )
             resp.raise_for_status()

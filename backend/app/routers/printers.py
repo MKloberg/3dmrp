@@ -436,17 +436,41 @@ async def send_gcode(printer_id: int, data: SendGcodeRequest, db: Session = Depe
                 pass
 
     if data.start_print and (data.order_id or data.item_id):
-        pj = PrintJob(
-            printer_id=printer_id,
-            order_id=data.order_id,
-            item_id=data.item_id,
-            routing_step_id=data.routing_step_id,
-            moonraker_job_id=moonraker_job_id,
-            filename=filename,
-            status="in_progress",
-        )
-        db.add(pj)
-        db.commit()
+        # If we identified a moonraker_job_id, check whether a record already exists
+        # (e.g. from a previous send attempt for the same job) and update it rather
+        # than inserting a duplicate that would violate the unique constraint.
+        existing_pj = None
+        if moonraker_job_id:
+            existing_pj = (
+                db.query(PrintJob)
+                .filter(
+                    PrintJob.printer_id == printer_id,
+                    PrintJob.moonraker_job_id == moonraker_job_id,
+                )
+                .first()
+            )
+        if existing_pj:
+            if data.item_id and existing_pj.item_id is None:
+                existing_pj.item_id = data.item_id
+            if data.order_id and existing_pj.order_id is None:
+                existing_pj.order_id = data.order_id
+            if data.routing_step_id and existing_pj.routing_step_id is None:
+                existing_pj.routing_step_id = data.routing_step_id
+            existing_pj.status = "in_progress"
+        else:
+            db.add(PrintJob(
+                printer_id=printer_id,
+                order_id=data.order_id,
+                item_id=data.item_id,
+                routing_step_id=data.routing_step_id,
+                moonraker_job_id=moonraker_job_id,
+                filename=filename,
+                status="in_progress",
+            ))
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
 
     return {"ok": True, "filename": filename}
 

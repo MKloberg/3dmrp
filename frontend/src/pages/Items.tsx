@@ -222,11 +222,12 @@ function normalizeHex(h: string | null | undefined): string | null {
 }
 
 function PrintWizard({
-  printer, mode, itemId, routingId, stepId, stepFilaments, filamentWeights, filamentSlots, stepPrintTime, gcodePrintTime, filaments, onUpdateBom, onPrint, onClose,
+  printer, mode, itemId, itemName, routingId, stepId, stepFilaments, filamentWeights, filamentSlots, stepPrintTime, gcodePrintTime, filaments, onUpdateBom, onPrint, onClose,
 }: {
   printer: Printer
   mode: 'analyze' | 'send' | 'send_and_start'
   itemId: number
+  itemName: string
   routingId: number
   stepId: number
   stepFilaments: RoutingStepFilament[]
@@ -248,6 +249,7 @@ function PrintWizard({
   const [safetyBuffer, setSafetyBuffer] = useState(3)
   const [expandedSuggestions, setExpandedSuggestions] = useState<Set<number>>(new Set())
   const [step2Selections, setStep2Selections] = useState<Record<number, { bomId: number; specId: number }>>({})
+  const [step2Override, setStep2Override] = useState(false)
   const qc = useQueryClient()
 
   useEffect(() => {
@@ -321,7 +323,7 @@ function PrintWizard({
       const rawHex = spool?.filament.color_hex ?? lane.color
       const colorHex = rawHex ? (rawHex.startsWith('#') ? rawHex : `#${rawHex}`) : '#888888'
       const label = spool
-        ? [spool.filament.vendor?.name, spool.filament.name].filter(Boolean).join(' ') || lane.material
+        ? [spool.filament.vendor?.name, spool.filament.material, spool.filament.name].filter(Boolean).join(' ') || lane.material
         : lane.material
       return { colorHex, label, material: lane.material, spoolId: lane.spool_id > 0 ? lane.spool_id : null }
     }
@@ -527,6 +529,9 @@ function PrintWizard({
   type S2Match = 'match' | 'soft_mismatch' | 'color_mismatch' | 'hard_mismatch' | 'none'
   const step2Rows = stepFilaments.map((bom, idx) => {
     const slotNum = idx + 1
+    if (bom.grams === 0) {
+      return { slotNum, bom, loaded: null as ReturnType<typeof getLoadedForSlot>, matchStatus: 'match' as S2Match, suggestions: [] as SpoolmanSpool[], notUsed: true }
+    }
     const liveLoaded = getLoadedForSlot(slotNum)
     const selectedSpec = step2Selections[slotNum]
       ? filaments.find(f => f.id === step2Selections[slotNum].specId) ?? null
@@ -534,7 +539,7 @@ function PrintWizard({
     const loaded = selectedSpec
       ? {
           colorHex: normalizeHex(selectedSpec.color_hex) ?? '#888888',
-          label: [selectedSpec.brand, selectedSpec.color_name].filter(Boolean).join(' ') || selectedSpec.material,
+          label: [selectedSpec.brand, selectedSpec.material, selectedSpec.color_name].filter(Boolean).join(' ') || selectedSpec.material,
           material: selectedSpec.material,
           spoolId: null,
         }
@@ -581,7 +586,7 @@ function PrintWizard({
       suggestions.push(...reps.map(r => r.spool))
     }
 
-    return { slotNum, bom, loaded, matchStatus, suggestions }
+    return { slotNum, bom, loaded, matchStatus, suggestions, notUsed: false }
   })
   const step2AllMatch = step2Rows.length > 0 && step2Rows.every(r => r.matchStatus === 'match' || r.matchStatus === 'soft_mismatch')
   const step2ConfScores: number[] = step2Rows.map(r =>
@@ -901,8 +906,10 @@ function PrintWizard({
               </thead>
               <tbody className="divide-y dark:divide-gray-700">
                 {step2Rows.map(r => {
-                  const showSuggestions = r.matchStatus === 'color_mismatch' || r.matchStatus === 'hard_mismatch' || r.matchStatus === 'none'
-                  const statusIcon = r.matchStatus === 'match'
+                  const showSuggestions = !r.notUsed && (r.matchStatus === 'color_mismatch' || r.matchStatus === 'hard_mismatch' || r.matchStatus === 'none')
+                  const statusIcon = r.notUsed
+                    ? null
+                    : r.matchStatus === 'match'
                     ? <Check size={13} className="text-green-500 shrink-0 mt-0.5" strokeWidth={3} />
                     : r.matchStatus === 'soft_mismatch'
                     ? <Check size={13} className="text-yellow-500 shrink-0 mt-0.5" strokeWidth={3} />
@@ -928,16 +935,18 @@ function PrintWizard({
                           <div className="flex items-start gap-1.5">
                             {statusIcon}
                             <div className="space-y-0.5 min-w-0">
-                              {r.loaded ? (
+                              {r.notUsed ? (
+                                <span className="text-xs text-gray-400 italic">Not used</span>
+                              ) : r.loaded ? (
                                 <>
                                   <div className="flex items-center gap-1.5 flex-wrap">
                                     <span className="w-2.5 h-2.5 rounded-full shrink-0 border border-black/10 dark:border-white/10" style={{ backgroundColor: r.loaded.colorHex }} />
-                                    <span className={`text-xs ${r.matchStatus === 'match' ? 'text-gray-700 dark:text-gray-200' : r.matchStatus === 'soft_mismatch' ? 'text-yellow-700 dark:text-yellow-300' : 'text-amber-600 dark:text-amber-400'}`}>
-                                      {r.loaded.label}
-                                    </span>
                                     {r.loaded.spoolId != null && (
                                       <span className="text-xs font-bold text-brand-600 dark:text-brand-400">#{r.loaded.spoolId}</span>
                                     )}
+                                    <span className={`text-xs ${r.matchStatus === 'match' ? 'text-gray-700 dark:text-gray-200' : r.matchStatus === 'soft_mismatch' ? 'text-yellow-700 dark:text-yellow-300' : 'text-amber-600 dark:text-amber-400'}`}>
+                                      {r.loaded.label}
+                                    </span>
                                   </div>
                                   {r.matchStatus === 'soft_mismatch' && (
                                     <div className="text-xs text-yellow-600 dark:text-yellow-400 pl-4">Compatible substitute ({r.loaded.material})</div>
@@ -1035,6 +1044,7 @@ function PrintWizard({
                 <Info size={13} className="text-blue-500 shrink-0" />
                 <span className="text-xs text-blue-700 dark:text-blue-300">
                   Will count toward <strong>Order #{fifoOrder.id}</strong>
+                  {' · '}{itemName}
                   {(fifoOrder.customer?.display_name || fifoOrder.customer_name)
                     ? ` — ${fifoOrder.customer?.display_name || fifoOrder.customer_name}`
                     : ''}
@@ -1043,22 +1053,43 @@ function PrintWizard({
               </div>
             )}
 
+            {mode !== 'analyze' && !step2AllMatch && (
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="step2-override"
+                  checked={step2Override}
+                  onChange={e => setStep2Override(e.target.checked)}
+                  className="rounded border-gray-300 dark:border-gray-600 text-brand-600"
+                />
+                <label htmlFor="step2-override" className="text-xs text-gray-600 dark:text-gray-300 cursor-pointer">
+                  I've verified the filament — send anyway
+                </label>
+              </div>
+            )}
+
             <div className="flex items-center justify-between pt-2 border-t dark:border-gray-700">
               <button onClick={() => setStep(1)}
                 className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200">
                 ← Back
               </button>
-              {mode !== 'analyze' ? (
-                <button onClick={() => onPrint(mode === 'send_and_start')} disabled={!step2AllMatch}
-                  className="px-5 py-2 text-sm bg-green-600 hover:bg-green-700 disabled:bg-gray-200 dark:disabled:bg-gray-700 disabled:text-gray-400 dark:disabled:text-gray-500 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors">
-                  {mode === 'send_and_start' ? '▶ Send & Start Print' : '↑ Send G-Code'}
+              <div className="flex items-center gap-2">
+                <button onClick={onClose}
+                  className="px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
+                  Cancel
                 </button>
-              ) : (
-                <button onClick={handleAnalyzeClose} disabled={analyzeClosing}
-                  className="px-4 py-2 text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-lg disabled:opacity-50">
-                  {analyzeClosing ? 'Saving…' : 'Close'}
-                </button>
-              )}
+                {mode !== 'analyze' ? (
+                  <button onClick={() => onPrint(mode === 'send_and_start')} disabled={!step2AllMatch && !step2Override}
+                    className="px-5 py-2 text-sm bg-green-600 hover:bg-green-700 disabled:bg-gray-200 dark:disabled:bg-gray-700 disabled:text-gray-400 dark:disabled:text-gray-500 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors">
+                    {mode === 'send_and_start' ? '▶ Send & Start Print' : '↑ Send G-Code'}
+                  </button>
+                ) : (
+                  <button onClick={handleAnalyzeClose} disabled={analyzeClosing}
+                    className="px-4 py-2 text-sm bg-brand-600 hover:bg-brand-700 text-white rounded-lg disabled:opacity-50">
+                    {analyzeClosing ? 'Saving…' : 'Close'}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -1820,6 +1851,7 @@ function GcodePanel({ itemId, routingId, itemName, slicerName, printerTypeName, 
           printer={wizardState.printer}
           mode={wizardState.mode}
           itemId={itemId}
+          itemName={itemName}
           routingId={routingId}
           stepId={stepId}
           stepFilaments={stepFilaments}

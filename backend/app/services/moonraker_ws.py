@@ -27,6 +27,20 @@ async def start_ws_manager() -> None:
     finally:
         db.close()
 
+    # Reconcile all printers on startup so in-progress jobs are linked to orders
+    # even when the backend restarts mid-print.
+    db = SessionLocal()
+    try:
+        printers = db.query(Printer).all()
+        for printer in printers:
+            try:
+                await _reconcile(printer.id, db)
+            except Exception:
+                logger.exception("Startup reconcile failed for printer %d", printer.id)
+        db.commit()
+    finally:
+        db.close()
+
 
 def add_printer_ws(printer_id: int, printer_url: str) -> None:
     """Start a WebSocket task for a newly-added printer (called from async context)."""
@@ -133,10 +147,32 @@ def _handle_job_started(printer_id: int, job: dict, db) -> None:
             .first()
         )
 
-    if pj and pj.order_id:
-        order = db.query(Order).filter(Order.id == pj.order_id).first()
+    # Back-fill moonraker_job_id on an orphaned in-progress record (created by
+    # send_gcode before Moonraker history had the new job) so reconciliation
+    # can find and close it correctly when the print finishes.
+    if pj and moonraker_job_id and pj.moonraker_job_id is None:
+        pj.moonraker_job_id = moonraker_job_id
+
+    if pj:
+        item_id = pj.item_id or _resolve_item_by_filename(pj.filename, db)
+        order = None
+        if pj.order_id:
+            order = db.query(Order).filter(Order.id == pj.order_id).first()
+        if order is None and item_id:
+            order = (
+                db.query(Order)
+                .filter(
+                    Order.item_id == item_id,
+                    Order.status.notin_([OrderStatus.complete, OrderStatus.cancelled]),
+                    Order.quantity_printed < Order.quantity,
+                )
+                .order_by(Order.date_ordered.asc(), Order.id.asc())
+                .first()
+            )
         if order and order.status == OrderStatus.pending:
             order.status = OrderStatus.printing
+            if pj.order_id is None and order is not None:
+                pj.order_id = order.id
 
 
 async def _reconcile(printer_id: int, db) -> None:
@@ -177,18 +213,43 @@ async def _reconcile(printer_id: int, db) -> None:
         )
 
         if existing is None:
-            pj = PrintJob(
-                printer_id=printer_id,
-                moonraker_job_id=moonraker_job_id,
-                filename=filename,
-                status=status,
-                start_time=datetime.utcfromtimestamp(start_ts) if start_ts else None,
-                end_time=datetime.utcfromtimestamp(end_ts) if end_ts else None,
+            # Before creating a brand-new record, check for an orphaned in-progress
+            # job (null moonraker_job_id, same filename) left by send_gcode when the
+            # Moonraker history hadn't yet reflected the new job.
+            orphan = (
+                db.query(PrintJob)
+                .filter(
+                    PrintJob.printer_id == printer_id,
+                    PrintJob.filename == filename,
+                    PrintJob.moonraker_job_id.is_(None),
+                    PrintJob.status == "in_progress",
+                )
+                .order_by(PrintJob.created_at.desc())
+                .first()
             )
-            db.add(pj)
-            db.flush()
+            if orphan:
+                orphan.moonraker_job_id = moonraker_job_id
+                orphan.status = status
+                if orphan.start_time is None and start_ts:
+                    orphan.start_time = datetime.utcfromtimestamp(start_ts)
+                if end_ts:
+                    orphan.end_time = datetime.utcfromtimestamp(end_ts)
+                pj = orphan
+            else:
+                pj = PrintJob(
+                    printer_id=printer_id,
+                    moonraker_job_id=moonraker_job_id,
+                    filename=filename,
+                    status=status,
+                    start_time=datetime.utcfromtimestamp(start_ts) if start_ts else None,
+                    end_time=datetime.utcfromtimestamp(end_ts) if end_ts else None,
+                )
+                db.add(pj)
+                db.flush()
             if status == "completed":
                 _credit_and_advance(pj, db)
+            elif status == "in_progress":
+                _handle_job_started(printer_id, job_data, db)
             changed = True
         elif existing.status != status:
             existing.status = status
