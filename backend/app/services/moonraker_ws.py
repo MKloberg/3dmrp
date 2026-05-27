@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import math
 from datetime import datetime
 from typing import Optional
 
@@ -9,7 +8,7 @@ import httpx
 import websockets
 
 from ..database import SessionLocal
-from ..models import Order, OrderStatus, Printer, PrintJob, Routing, RoutingStep
+from ..models import Order, OrderStatus, OrderStepProgress, Printer, PrintJob, Routing, RoutingStep
 
 logger = logging.getLogger(__name__)
 
@@ -273,7 +272,7 @@ def _map_status(moon_status: str) -> str:
 
 
 def _credit_and_advance(print_job: PrintJob, db) -> None:
-    """Compute and apply quantity credit to the linked order, then advance status."""
+    """Credit parts produced to order_step_progress and recompute order completion."""
     item_id = print_job.item_id
     if item_id is None:
         item_id = _resolve_item_by_filename(print_job.filename, db)
@@ -313,17 +312,63 @@ def _credit_and_advance(print_job: PrintJob, db) -> None:
         print_job.quantity_credited = 0
         return
 
-    if step:
-        raw = math.ceil(order.quantity * step.parts_per_item / step.quantity_on_plate)
-    else:
-        raw = 1
+    if step is None:
+        # No routing step — legacy fallback: credit 1 item per completed job
+        order.quantity_printed = min(order.quantity_printed + 1, order.quantity)
+        print_job.quantity_credited = 1
+        print_job.order_id = order.id
+        _advance_status(order)
+        return
 
-    credit = min(raw, order.quantity - order.quantity_printed)
+    # Each completed plate run produces quantity_on_plate parts for this step
+    parts_produced = step.quantity_on_plate
 
-    order.quantity_printed += credit
-    print_job.quantity_credited = credit
+    progress = (
+        db.query(OrderStepProgress)
+        .filter(
+            OrderStepProgress.order_id == order.id,
+            OrderStepProgress.routing_step_id == step.id,
+        )
+        .first()
+    )
+    if progress is None:
+        progress = OrderStepProgress(
+            order_id=order.id,
+            routing_step_id=step.id,
+            parts_printed=0,
+        )
+        db.add(progress)
+        db.flush()
+
+    progress.parts_printed += parts_produced
+    print_job.quantity_credited = parts_produced
     print_job.order_id = order.id
 
+    # Recompute order.quantity_printed as the bottleneck across all steps in this routing.
+    # An item is only complete when every step has produced enough parts.
+    routing = db.query(Routing).filter(Routing.id == step.routing_id).first()
+    if routing is None or not routing.steps:
+        order.quantity_printed = min(order.quantity_printed + 1, order.quantity)
+        _advance_status(order)
+        return
+
+    min_complete: Optional[int] = None
+    for rs in routing.steps:
+        if rs.parts_per_item <= 0:
+            continue
+        sp = (
+            db.query(OrderStepProgress)
+            .filter(
+                OrderStepProgress.order_id == order.id,
+                OrderStepProgress.routing_step_id == rs.id,
+            )
+            .first()
+        )
+        items_complete = (sp.parts_printed if sp else 0) // rs.parts_per_item
+        if min_complete is None or items_complete < min_complete:
+            min_complete = items_complete
+
+    order.quantity_printed = min(min_complete or 0, order.quantity)
     _advance_status(order)
 
 

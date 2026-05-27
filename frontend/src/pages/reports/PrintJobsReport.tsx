@@ -147,7 +147,7 @@ export default function PrintJobsReport() {
               <Th col="order_id" label="Order" />
               <Th col="item_name" label="Item" />
               <th className="px-1.5 py-1 text-left whitespace-nowrap">Step</th>
-              <Th col="quantity_credited" label="Qty" right />
+              <Th col="quantity_credited" label="Parts" right />
               <Th col="start_time" label="Start" />
               <Th col="end_time" label="End" />
               <Th col="created_at" label="Created" />

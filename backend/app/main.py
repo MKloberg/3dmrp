@@ -12,6 +12,8 @@ logger = logging.getLogger(__name__)
 
 Base.metadata.create_all(bind=engine)
 
+_osp_created = False  # set True inside migration block when order_step_progress is first created
+
 # Add any columns introduced after initial schema creation
 _NEW_COLUMNS = [
     ("price",                  "REAL"),
@@ -234,7 +236,74 @@ with engine.connect() as conn:
             )
         """))
 
+    _osp_migration_done = conn.execute(
+        text("SELECT value FROM settings WHERE key = 'migration_order_step_progress_v1'")
+    ).fetchone()
+    if not _osp_migration_done:
+        # Backfill: one completed job = quantity_on_plate parts for that step
+        conn.execute(text("""
+            INSERT OR IGNORE INTO order_step_progress (order_id, routing_step_id, parts_printed)
+            SELECT pj.order_id, pj.routing_step_id, SUM(rs.quantity_on_plate)
+            FROM print_jobs pj
+            JOIN routing_steps rs ON rs.id = pj.routing_step_id
+            WHERE pj.status = 'completed'
+              AND pj.order_id IS NOT NULL
+              AND pj.routing_step_id IS NOT NULL
+            GROUP BY pj.order_id, pj.routing_step_id
+        """))
+        # Fix quantity_credited to mean parts produced (= quantity_on_plate), not items
+        conn.execute(text("""
+            UPDATE print_jobs
+            SET quantity_credited = (
+                SELECT rs.quantity_on_plate FROM routing_steps rs WHERE rs.id = print_jobs.routing_step_id
+            )
+            WHERE status = 'completed' AND routing_step_id IS NOT NULL
+        """))
+        conn.execute(text("INSERT INTO settings (key, value) VALUES ('migration_order_step_progress_v1', '1')"))
+        _osp_created = True
+
     conn.commit()
+
+
+if _osp_created:
+    from .models import Order as _Order, Routing as _Routing, OrderStepProgress as _OSP, OrderStatus as _OS
+    _db = SessionLocal()
+    try:
+        affected = [r[0] for r in _db.execute(text("SELECT DISTINCT order_id FROM order_step_progress")).fetchall()]
+        for _oid in affected:
+            _order = _db.query(_Order).filter(_Order.id == _oid).first()
+            if not _order:
+                continue
+            _routing = (
+                _db.query(_Routing)
+                .filter(_Routing.item_id == _order.item_id)
+                .order_by(_Routing.is_default.desc(), _Routing.sort_order.asc(), _Routing.id.asc())
+                .first()
+            )
+            if not _routing or not _routing.steps:
+                continue
+            _min = None
+            for _rs in _routing.steps:
+                if _rs.parts_per_item <= 0:
+                    continue
+                _sp = _db.query(_OSP).filter(_OSP.order_id == _oid, _OSP.routing_step_id == _rs.id).first()
+                _items = (_sp.parts_printed if _sp else 0) // _rs.parts_per_item
+                if _min is None or _items < _min:
+                    _min = _items
+            if _min is None:
+                continue
+            _new_qty = min(_min, _order.quantity)
+            _order.quantity_printed = _new_qty
+            if _new_qty >= _order.quantity:
+                _order.status = _OS.complete
+            elif _new_qty > 0 and _order.status not in (_OS.cancelled,):
+                _order.status = _OS.printing
+            elif _new_qty == 0 and _order.status == _OS.complete:
+                _order.status = _OS.pending
+        _db.commit()
+    finally:
+        _db.close()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

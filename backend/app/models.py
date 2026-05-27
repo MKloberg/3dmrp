@@ -327,6 +327,17 @@ class SpoolWeighLog(Base):
     weighed_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 
+class OrderStepProgress(Base):
+    __tablename__ = "order_step_progress"
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("orders.id", ondelete="CASCADE"), nullable=False)
+    routing_step_id = Column(Integer, ForeignKey("routing_steps.id", ondelete="CASCADE"), nullable=False)
+    parts_printed = Column(Integer, nullable=False, default=0)
+
+    __table_args__ = (UniqueConstraint("order_id", "routing_step_id", name="uq_order_step_progress"),)
+
+
 class PrintJob(Base):
     __tablename__ = "print_jobs"
 
