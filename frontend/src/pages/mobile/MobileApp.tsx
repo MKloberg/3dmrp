@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { useParams } from 'react-router-dom'
 import { getNfcSession, postNfcTagA, postNfcResult, getSpoolmanStock, createNfcSession, patchSpoolmanLotNr, patchSpoolmanRemainingWeight, patchSpoolmanFilamentSpoolWeight, cloneSpoolmanSpool, type NfcSession, type SpoolmanSpool } from '../../api/client'
-import { Check, Loader2, X, AlertTriangle, WifiOff, Nfc, ChevronRight, ArrowLeft, Scale, Sparkles, Info, QrCode, Copy } from 'lucide-react'
+import { Check, Loader2, X, AlertTriangle, WifiOff, Nfc, ChevronRight, ArrowLeft, Scale, Sparkles, Info, QrCode, Copy, Layers } from 'lucide-react'
+import MobileLoadFilament from './MobileLoadFilament'
 
 declare global {
   interface Window {
@@ -43,6 +44,7 @@ type AppPhase =
   | 'nfc_error'
   | 'disconnected'
   | 'session_error'
+  | 'load_filament'
 
 const VALID_PRINTER_TYPES = new Set([
   'PLA', 'PLA-CF', 'TPU', 'PETG', 'PETG-CF', 'PETG-HF',
@@ -604,6 +606,20 @@ export default function MobileApp() {
             </div>
             <ChevronRight size={16} className="text-gray-600 shrink-0" />
           </button>
+
+          <button
+            onClick={() => _setPhase('load_filament')}
+            className="w-full flex items-center gap-4 px-4 py-4 rounded-2xl bg-gray-900 border border-gray-800 hover:border-brand-500/50 hover:bg-gray-800 active:bg-gray-700 transition-colors text-left"
+          >
+            <div className="w-11 h-11 rounded-xl bg-brand-500/15 flex items-center justify-center shrink-0">
+              <Layers size={22} className="text-brand-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-white">Load Filament</p>
+              <p className="text-xs text-gray-400 mt-0.5">Assign a spool to a printer lane</p>
+            </div>
+            <ChevronRight size={16} className="text-gray-600 shrink-0" />
+          </button>
         </div>
 
         <div className="px-6 pb-safe pb-8 pt-2 text-center">
@@ -611,6 +627,11 @@ export default function MobileApp() {
         </div>
       </div>
     )
+  }
+
+  // Load filament
+  if (phase === 'load_filament') {
+    return <MobileLoadFilament onDone={returnToIdle} />
   }
 
   // Spool picker
