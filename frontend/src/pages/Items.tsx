@@ -1625,6 +1625,21 @@ function GcodePanel({ itemId, routingId, itemName, slicerName, printerTypeName, 
     staleTime: 0,
   })
 
+  const { data: allOrders = [] } = useQuery({
+    queryKey: ['orders'],
+    queryFn: () => getOrders(),
+    staleTime: 30_000,
+  })
+
+  const fifoOrder: Order | null = allOrders
+    .filter(o =>
+      o.item_id === itemId &&
+      o.status !== 'complete' &&
+      o.status !== 'cancelled' &&
+      o.quantity_printed < o.quantity
+    )
+    .sort((a, b) => new Date(a.date_ordered).getTime() - new Date(b.date_ordered).getTime())[0] ?? null
+
   const [selected, setSelected] = useState<string>(savedGcodeFile ?? '')
 
   // Sync when savedGcodeFile arrives from the DB (covers the case where items were still
@@ -1716,6 +1731,7 @@ function GcodePanel({ itemId, routingId, itemName, slicerName, printerTypeName, 
       await sendGcodeToPrinter(printerId, filePath, startPrint, {
         item_id: itemId,
         routing_step_id: stepId || undefined,
+        order_id: fifoOrder?.id,
       })
       setSentPrinterId(printerId)
       setTimeout(() => { setSentPrinterId(null); setProgress(0) }, 3000)

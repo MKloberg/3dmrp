@@ -202,7 +202,11 @@ export default function PrintJobsReport() {
                     </Link>
                   ) : '—'}
                 </td>
-                <td className="px-1.5 py-0.5 text-right tabular-nums">{job.quantity_credited}</td>
+                <td className="px-1.5 py-0.5 text-right tabular-nums">
+                  {job.status === 'in_progress' && job.quantity_on_plate != null
+                    ? <span className="text-gray-400 italic" title="expected when complete">{job.quantity_on_plate}</span>
+                    : job.quantity_credited}
+                </td>
                 <td className="px-1.5 py-0.5 whitespace-nowrap tabular-nums">{fmtDt(job.start_time)}</td>
                 <td className="px-1.5 py-0.5 whitespace-nowrap tabular-nums">{fmtDt(job.end_time)}</td>
                 <td className="px-1.5 py-0.5 whitespace-nowrap tabular-nums">{fmtDt(job.created_at)}</td>

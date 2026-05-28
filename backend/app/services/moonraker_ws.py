@@ -119,6 +119,30 @@ async def _handle_history_changed(printer_id: int, event: dict) -> None:
             db.close()
 
 
+def _link_order_to_job(pj: PrintJob, db) -> None:
+    """Link the earliest open FIFO order for this job's item, and advance pending → printing."""
+    if pj.order_id is not None:
+        return
+    item_id = pj.item_id or _resolve_item_by_filename(pj.filename, db)
+    if item_id is None:
+        return
+    order = (
+        db.query(Order)
+        .filter(
+            Order.item_id == item_id,
+            Order.status.notin_([OrderStatus.complete, OrderStatus.cancelled]),
+            Order.quantity_printed < Order.quantity,
+        )
+        .order_by(Order.date_ordered.asc(), Order.id.asc())
+        .first()
+    )
+    if order is None:
+        return
+    pj.order_id = order.id
+    if order.status == OrderStatus.pending:
+        order.status = OrderStatus.printing
+
+
 def _handle_job_started(printer_id: int, job: dict, db) -> None:
     """Advance linked order from pending → printing when a job goes in_progress."""
     filename = job.get("filename", "")
@@ -153,25 +177,7 @@ def _handle_job_started(printer_id: int, job: dict, db) -> None:
         pj.moonraker_job_id = moonraker_job_id
 
     if pj:
-        item_id = pj.item_id or _resolve_item_by_filename(pj.filename, db)
-        order = None
-        if pj.order_id:
-            order = db.query(Order).filter(Order.id == pj.order_id).first()
-        if order is None and item_id:
-            order = (
-                db.query(Order)
-                .filter(
-                    Order.item_id == item_id,
-                    Order.status.notin_([OrderStatus.complete, OrderStatus.cancelled]),
-                    Order.quantity_printed < Order.quantity,
-                )
-                .order_by(Order.date_ordered.asc(), Order.id.asc())
-                .first()
-            )
-        if order and order.status == OrderStatus.pending:
-            order.status = OrderStatus.printing
-            if pj.order_id is None and order is not None:
-                pj.order_id = order.id
+        _link_order_to_job(pj, db)
 
 
 async def _reconcile(printer_id: int, db) -> None:
@@ -257,6 +263,19 @@ async def _reconcile(printer_id: int, db) -> None:
             if status == "completed" and existing.quantity_credited == 0:
                 _credit_and_advance(existing, db)
             changed = True
+
+        # Unconditional backfill for existing records — runs even when status unchanged
+        if existing is not None:
+            if existing.start_time is None and start_ts:
+                existing.start_time = datetime.utcfromtimestamp(start_ts)
+                changed = True
+            if existing.end_time is None and end_ts:
+                existing.end_time = datetime.utcfromtimestamp(end_ts)
+                changed = True
+            if existing.order_id is None:
+                _link_order_to_job(existing, db)
+                if existing.order_id is not None:
+                    changed = True
 
     if changed:
         db.commit()

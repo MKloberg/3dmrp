@@ -749,6 +749,7 @@ export interface PrintJobReport {
   item_name: string | null
   routing_step_id: number | null
   step_description: string | null
+  quantity_on_plate: number | null
   start_time: string | null
   end_time: string | null
   created_at: string | null

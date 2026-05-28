@@ -34,6 +34,7 @@ class PrintJobEnriched(BaseModel):
     item_name: Optional[str]
     routing_step_id: Optional[int]
     step_description: Optional[str]
+    quantity_on_plate: Optional[int]
     start_time: Optional[datetime]
     end_time: Optional[datetime]
     created_at: Optional[datetime]
@@ -91,6 +92,7 @@ def list_print_jobs(db: Session = Depends(get_db)):
             item_name=item.name if item else None,
             routing_step_id=job.routing_step_id,
             step_description=step.description if step else None,
+            quantity_on_plate=step.quantity_on_plate if step else None,
             start_time=job.start_time,
             end_time=job.end_time,
             created_at=job.created_at,
