@@ -40,6 +40,7 @@ const nav: NavItemDef[] = [
     children: [
       { to: '/reports/filament-inventory', label: 'Filament Inventory' },
       { to: '/reports/print-jobs', label: 'Print Jobs' },
+      { to: '/reports/order-step-progress', label: 'Order Step Progress' },
     ],
   },
   {
