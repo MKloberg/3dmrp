@@ -297,13 +297,19 @@ export default function MobileLoadFilament({ onDone }: { onDone: () => void }) {
           </button>
           <div>
             <p className="font-semibold text-white">
-              {isSingleLane ? 'Scan Spool' : `Scan Spool — Lane ${(selectedSlot ?? 0) + 1}`}
+              {isSingleLane ? 'Scan Spool' : `Lane ${(selectedSlot ?? 0) + 1} — Scan Spool`}
             </p>
-            <p className="text-xs text-gray-400">{printer.name} · point camera at Spoolman QR label</p>
+            <p className="text-xs text-gray-400">Point camera at the Spoolman QR label</p>
           </div>
         </div>
 
-        <div className="flex-1 relative overflow-hidden mx-4 mb-4 rounded-2xl bg-black">
+        {/* Printer confirmed banner */}
+        <div className="mx-4 mb-2 flex items-center gap-2.5 px-3 py-2 rounded-xl bg-green-500/15 border border-green-500/30">
+          <Check size={15} className="text-green-400 shrink-0" />
+          <p className="text-sm font-semibold text-green-400 truncate">{printer.name}</p>
+        </div>
+
+        <div className="flex-1 relative overflow-hidden mx-4 mb-4 rounded-2xl bg-black" style={{ maxHeight: '55vh' }}>
           <QrScanner onScan={handleSpoolScan} />
           {corners}
         </div>
