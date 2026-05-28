@@ -13,7 +13,7 @@ const STATUS_COLORS: Record<string, string> = {
 type SortCol = keyof Pick<
   OrderStepProgressReport,
   'id' | 'order_id' | 'order_status' | 'item_name' | 'step_description' |
-  'parts_per_item' | 'quantity_on_plate' | 'parts_printed' | 'items_complete' |
+  'parts_per_item' | 'parts_printed' | 'items_complete' |
   'order_quantity' | 'order_quantity_printed'
 >
 
@@ -124,7 +124,6 @@ export default function OrderStepProgressReport() {
               <Th col="item_name" label="Item" />
               <Th col="step_description" label="Step" />
               <Th col="parts_per_item" label="Parts/Item" right />
-              <Th col="quantity_on_plate" label="Qty/Plate" right />
               <Th col="parts_printed" label="Parts Printed" right />
               <Th col="items_complete" label="Items Complete" right />
               <Th col="order_quantity" label="Order Qty" right />
@@ -156,7 +155,6 @@ export default function OrderStepProgressReport() {
                   <span className="truncate block" title={row.step_description}>{row.step_description}</span>
                 </td>
                 <td className="px-1.5 py-0.5 text-right tabular-nums">{row.parts_per_item}</td>
-                <td className="px-1.5 py-0.5 text-right tabular-nums">{row.quantity_on_plate}</td>
                 <td className="px-1.5 py-0.5 text-right tabular-nums font-medium">{row.parts_printed}</td>
                 <td className="px-1.5 py-0.5 text-right tabular-nums">{row.items_complete}</td>
                 <td className="px-1.5 py-0.5 text-right tabular-nums">{row.order_quantity}</td>
@@ -165,7 +163,7 @@ export default function OrderStepProgressReport() {
             ))}
             {!isLoading && sorted.length === 0 && (
               <tr>
-                <td colSpan={11} className="px-1.5 py-6 text-center text-gray-400">No step progress records found.</td>
+                <td colSpan={10} className="px-1.5 py-6 text-center text-gray-400">No step progress records found.</td>
               </tr>
             )}
           </tbody>
