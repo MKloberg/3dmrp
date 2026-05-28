@@ -115,6 +115,7 @@ export default function MobileApp() {
   const [spoolsLoading, setSpoolsLoading] = useState(false)
   const [pickerIntent, setPickerIntent] = useState<'nfc' | 'label' | 'weigh' | 'clone'>('nfc')
   const phoneInitiatedRef = useRef(false)
+  const scanAbortRef = useRef<AbortController | null>(null)
 
   // Label done state
   const [labeledSpool, setLabeledSpool] = useState<SpoolmanSpool | null>(null)
@@ -242,10 +243,11 @@ export default function MobileApp() {
     session: NfcSession,
     onRead: (uid: string, wrote: boolean, writeErr: string | null) => void,
     onError: (msg: string) => void,
+    abort: AbortController,
   ) {
     try {
       const reader = new window.NDEFReader()
-      await reader.scan()
+      await reader.scan({ signal: abort.signal })
       let handled = false
       reader.addEventListener('reading', async (ev: Event) => {
         if (handled) return
@@ -282,12 +284,15 @@ export default function MobileApp() {
           }
         }
         onRead(uid, wrote, writeErr)
+        abort.abort()
       })
       reader.addEventListener('readingerror', () => {
         onError('Error reading tag. Hold it steadier and try again.')
       })
     } catch (e: unknown) {
-      onError(e instanceof Error ? e.message : 'NFC failed')
+      if ((e as Error).name !== 'AbortError') {
+        onError(e instanceof Error ? e.message : 'NFC failed')
+      }
     }
   }
 
@@ -298,6 +303,9 @@ export default function MobileApp() {
     _setPhase('nfc_scanning')
     setNfcErrorMsg(null)
     setWriteErrorA(null)
+    scanAbortRef.current?.abort()
+    const abort = new AbortController()
+    scanAbortRef.current = abort
     await runNfcScan(
       session,
       async (uid, wrote, writeErr) => {
@@ -313,6 +321,7 @@ export default function MobileApp() {
         }
       },
       (msg) => { _setPhase('nfc_error'); setNfcErrorMsg(msg) },
+      abort,
     )
   }
 
@@ -325,9 +334,17 @@ export default function MobileApp() {
     _setPhase('nfc_scanning_b')
     setNfcErrorMsg(null)
     setWriteErrorB(null)
+    scanAbortRef.current?.abort()
+    const abort = new AbortController()
+    scanAbortRef.current = abort
     await runNfcScan(
       session,
       async (uid, wrote, writeErr) => {
+        if (uid === uidA) {
+          _setPhase('nfc_error')
+          setNfcErrorMsg('Same tag detected — hold the other side of the spool to your phone.')
+          return
+        }
         setCardUidB(uid)
         setWroteTagB(wrote)
         setWriteErrorB(writeErr)
@@ -346,6 +363,7 @@ export default function MobileApp() {
         _setPhase('nfc_done')
       },
       (msg) => { _setPhase('nfc_error'); setNfcErrorMsg(msg) },
+      abort,
     )
   }
 
