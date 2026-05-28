@@ -48,8 +48,6 @@ export default function MobileLoadFilament({ onDone }: { onDone: () => void }) {
   const [slots, setSlots] = useState<(SpoolmanSpool | null)[]>([])
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null)
   const [spools, setSpools] = useState<SpoolmanSpool[]>([])
-  const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
   const [showManualEntry, setShowManualEntry] = useState(false)
   const [manualName, setManualName] = useState('')
   const manualInputRef = useRef<HTMLInputElement>(null)
@@ -102,30 +100,22 @@ export default function MobileLoadFilament({ onDone }: { onDone: () => void }) {
       setScanError(`Spool #${id} not found in Spoolman.`)
       return
     }
-    if (selectedSlot !== null) {
-      setSlots(prev => {
-        const next = [...prev]
-        next[selectedSlot] = found
-        return next
-      })
-    }
+    const newSlots = [...slots]
+    if (selectedSlot !== null) newSlots[selectedSlot] = found
+    setSlots(newSlots)
     setLoadPhase('confirm')
+
+    // Save immediately so the assignment persists even if the user exits without pressing Done
+    if (printer) {
+      setPrinterSpoolmanSlots(
+        printer.id,
+        newSlots.map((s, i) => ({ tool_index: i, spool_id: s?.id ?? null })),
+      ).catch(() => { /* best-effort; user can retry via Done */ })
+    }
   }
 
-  async function handleDone() {
-    if (!printer) { onDone(); return }
-    setSaving(true)
-    setSaveError(null)
-    try {
-      await setPrinterSpoolmanSlots(
-        printer.id,
-        slots.map((s, i) => ({ tool_index: i, spool_id: s?.id ?? null })),
-      )
-      onDone()
-    } catch (e) {
-      setSaveError(e instanceof Error ? e.message : 'Failed to update printer')
-      setSaving(false)
-    }
+  function handleDone() {
+    onDone()
   }
 
   function handleLoadAnother() {
@@ -381,28 +371,22 @@ export default function MobileLoadFilament({ onDone }: { onDone: () => void }) {
             </div>
           ))}
 
-          {saveError && (
-            <p className="text-sm text-red-400 text-center px-2 pt-2">{saveError}</p>
-          )}
         </div>
 
         <div className="px-4 pb-safe pb-6 pt-2 space-y-2 border-t border-gray-800">
           {slots.length > 1 && (
             <button
               onClick={handleLoadAnother}
-              disabled={saving}
-              className="w-full py-3.5 rounded-xl border border-gray-700 text-sm font-medium text-gray-300 hover:bg-gray-900 active:bg-gray-800 transition-colors disabled:opacity-40"
+              className="w-full py-3.5 rounded-xl border border-gray-700 text-sm font-medium text-gray-300 hover:bg-gray-900 active:bg-gray-800 transition-colors"
             >
               Load another lane
             </button>
           )}
           <button
             onClick={handleDone}
-            disabled={saving}
-            className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-brand-600 hover:bg-brand-700 active:bg-brand-800 text-white font-semibold text-sm disabled:opacity-40"
+            className="w-full py-3.5 rounded-xl bg-brand-600 hover:bg-brand-700 active:bg-brand-800 text-white font-semibold text-sm"
           >
-            {saving && <Loader2 size={16} className="animate-spin" />}
-            {saving ? 'Saving…' : 'Done'}
+            Done
           </button>
         </div>
       </div>
