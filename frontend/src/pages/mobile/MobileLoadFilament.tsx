@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { ArrowLeft, Check, Loader2 } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { ArrowLeft, Check, Loader2, Keyboard } from 'lucide-react'
 import {
   getPrinterByName,
   getSpoolmanStock,
@@ -50,6 +50,9 @@ export default function MobileLoadFilament({ onDone }: { onDone: () => void }) {
   const [spools, setSpools] = useState<SpoolmanSpool[]>([])
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [showManualEntry, setShowManualEntry] = useState(false)
+  const [manualName, setManualName] = useState('')
+  const manualInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     getSpoolmanStock()
@@ -155,6 +158,36 @@ export default function MobileLoadFilament({ onDone }: { onDone: () => void }) {
           <div className="flex-1 flex items-center justify-center">
             <Loader2 size={28} className="text-brand-400 animate-spin" />
           </div>
+        ) : showManualEntry ? (
+          <div className="flex-1 flex flex-col justify-center px-4 gap-4">
+            <p className="text-sm text-gray-400 text-center">Type the printer name exactly as it appears in 3DMRP.</p>
+            <input
+              ref={manualInputRef}
+              type="text"
+              autoFocus
+              placeholder="Printer name…"
+              value={manualName}
+              onChange={e => { setManualName(e.target.value); setScanError(null) }}
+              onKeyDown={e => { if (e.key === 'Enter' && manualName.trim()) handlePrinterScan(manualName) }}
+              className="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 text-base text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+            />
+            {scanError && (
+              <p className="text-sm text-red-400 text-center">{scanError}</p>
+            )}
+            <button
+              onClick={() => { if (manualName.trim()) handlePrinterScan(manualName) }}
+              disabled={!manualName.trim()}
+              className="w-full py-3.5 rounded-xl bg-brand-600 hover:bg-brand-700 active:bg-brand-800 text-white font-semibold text-sm disabled:opacity-40"
+            >
+              Continue
+            </button>
+            <button
+              onClick={() => { setShowManualEntry(false); setScanError(null) }}
+              className="w-full py-2 text-sm text-gray-500 active:text-gray-300"
+            >
+              Back to scanner
+            </button>
+          </div>
         ) : (
           <>
             <div className="flex-1 relative overflow-hidden mx-4 mb-4 rounded-2xl bg-black">
@@ -164,10 +197,16 @@ export default function MobileLoadFilament({ onDone }: { onDone: () => void }) {
             {scanError && (
               <p className="text-sm text-red-400 text-center px-4 pb-2">{scanError}</p>
             )}
-            <div className="px-4 pb-safe pb-6">
+            <div className="px-4 pb-safe pb-6 space-y-2">
+              <button
+                onClick={() => { setShowManualEntry(true); setScanError(null) }}
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-gray-700 text-sm text-gray-400 active:bg-gray-900"
+              >
+                <Keyboard size={15} /> Enter name manually
+              </button>
               <button
                 onClick={onDone}
-                className="w-full py-3 rounded-xl border border-gray-700 text-sm text-gray-400 active:bg-gray-900"
+                className="w-full py-2 text-sm text-gray-600 active:text-gray-400"
               >
                 Cancel
               </button>
