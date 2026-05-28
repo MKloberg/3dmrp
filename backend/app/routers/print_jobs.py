@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..database import SessionLocal
-from ..models import Customer, Item, Order, PrintJob, Printer, RoutingStep
+from ..models import Customer, Item, Order, OrderStepProgress, PrintJob, Printer, RoutingStep
 
 router = APIRouter()
 
@@ -41,6 +41,72 @@ class PrintJobEnriched(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class OrderStepProgressEnriched(BaseModel):
+    id: int
+    order_id: int
+    order_customer: Optional[str]
+    order_status: str
+    order_quantity: int
+    order_quantity_printed: int
+    item_id: Optional[int]
+    item_name: Optional[str]
+    routing_step_id: int
+    step_description: str
+    parts_per_item: int
+    quantity_on_plate: int
+    parts_printed: int
+    items_complete: int
+
+    class Config:
+        from_attributes = True
+
+
+@router.get("/api/order-step-progress", response_model=List[OrderStepProgressEnriched])
+def list_order_step_progress(db: Session = Depends(get_db)):
+    rows = db.query(OrderStepProgress).all()
+    if not rows:
+        return []
+
+    order_ids = {r.order_id for r in rows}
+    step_ids = {r.routing_step_id for r in rows}
+
+    orders = {o.id: o for o in db.query(Order).filter(Order.id.in_(order_ids))}
+    steps = {s.id: s for s in db.query(RoutingStep).filter(RoutingStep.id.in_(step_ids))}
+
+    item_ids = {o.item_id for o in orders.values() if o.item_id}
+    items = {i.id: i for i in db.query(Item).filter(Item.id.in_(item_ids))}
+
+    customer_ids = {o.customer_id for o in orders.values() if o.customer_id}
+    customers = {c.id: c for c in db.query(Customer).filter(Customer.id.in_(customer_ids))}
+
+    result = []
+    for row in rows:
+        order = orders.get(row.order_id)
+        step = steps.get(row.routing_step_id)
+        if not order or not step:
+            continue
+        item = items.get(order.item_id) if order.item_id else None
+        cust = customers.get(order.customer_id) if order.customer_id else None
+        order_customer = (cust.display_name if cust else None) or order.customer_name or None
+        result.append(OrderStepProgressEnriched(
+            id=row.id,
+            order_id=row.order_id,
+            order_customer=order_customer,
+            order_status=order.status.value if hasattr(order.status, 'value') else order.status,
+            order_quantity=order.quantity,
+            order_quantity_printed=order.quantity_printed,
+            item_id=order.item_id,
+            item_name=item.name if item else None,
+            routing_step_id=row.routing_step_id,
+            step_description=step.description,
+            parts_per_item=step.parts_per_item,
+            quantity_on_plate=step.quantity_on_plate,
+            parts_printed=row.parts_printed,
+            items_complete=row.parts_printed // step.parts_per_item if step.parts_per_item > 0 else 0,
+        ))
+    return result
 
 
 @router.get("/api/print-jobs", response_model=List[PrintJobEnriched])

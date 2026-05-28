@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { Disc2, FileText, Printer } from 'lucide-react'
+import { Disc2, FileText, Printer, ListChecks } from 'lucide-react'
 
 const reports = [
   {
@@ -19,6 +19,15 @@ const reports = [
     color: 'text-indigo-600',
     bg: 'bg-indigo-50 dark:bg-indigo-900/20',
     border: 'border-indigo-200 dark:border-indigo-800',
+  },
+  {
+    to: '/reports/order-step-progress',
+    label: 'Order Step Progress',
+    description: 'Raw order_step_progress table — parts printed and items complete per order per routing step.',
+    icon: ListChecks,
+    color: 'text-orange-600',
+    bg: 'bg-orange-50 dark:bg-orange-900/20',
+    border: 'border-orange-200 dark:border-orange-800',
   },
 ]
 

@@ -757,6 +757,25 @@ export interface PrintJobReport {
 
 export const getPrintJobs = () => req<PrintJobReport[]>('/print-jobs')
 
+export interface OrderStepProgressReport {
+  id: number
+  order_id: number
+  order_customer: string | null
+  order_status: string
+  order_quantity: number
+  order_quantity_printed: number
+  item_id: number | null
+  item_name: string | null
+  routing_step_id: number
+  step_description: string
+  parts_per_item: number
+  quantity_on_plate: number
+  parts_printed: number
+  items_complete: number
+}
+
+export const getOrderStepProgress = () => req<OrderStepProgressReport[]>('/order-step-progress')
+
 // --- Settings ---
 export const getSettings = () => req<Record<string, string>>('/settings')
 export const setSetting = (key: string, value: string) =>

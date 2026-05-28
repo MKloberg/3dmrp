@@ -17,6 +17,7 @@ import AISettings from './pages/settings/AI'
 import Reports from './pages/Reports'
 import FilamentInventory from './pages/reports/FilamentInventory'
 import PrintJobsReport from './pages/reports/PrintJobsReport'
+import OrderStepProgressReport from './pages/reports/OrderStepProgressReport'
 import Tools from './pages/Tools'
 import SpoolInventory from './pages/filaments/SpoolInventory'
 import MobileLanding from './pages/mobile/MobileLanding'
@@ -60,6 +61,7 @@ export default function App() {
         <Route path="reports" element={<Reports />} />
         <Route path="reports/filament-inventory" element={<FilamentInventory />} />
         <Route path="reports/print-jobs" element={<PrintJobsReport />} />
+        <Route path="reports/order-step-progress" element={<OrderStepProgressReport />} />
         <Route path="tools" element={<Tools />} />
         <Route path="filaments/spools" element={<SpoolInventory />} />
       </Route>
