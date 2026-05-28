@@ -13,7 +13,7 @@ import {
   createRoutingStep, updateRoutingStep, deleteRoutingStep,
   addRoutingStepFilament, updateRoutingStepFilament, deleteRoutingStepFilament,
   getOrders, getGcodeFiles, getGcodeFileMetadata, sendGcodeToPrinter, checkGcodeItemFolders, renameGcodeItemFolders,
-  getPrinterStatus, getMailsailSpoolman, getSettings, getPrinterAfcLanes, getSpoolmanStock, getPrinterFilamentDetect,
+  getPrinterStatus, getMailsailSpoolman, getSettings, getPrinterAfcLanes, getSpoolmanStock, getPrinterFilamentDetect, getPrinterSpoolmanSlots,
   createPostProcessingCost, updatePostProcessingCost, deletePostProcessingCost,
   setSlicerFile, deleteSlicerFile, openInSlicer, pickModelFile,
   setStepSlicerFile, deleteStepSlicerFile, openStepInSlicer,
@@ -259,6 +259,7 @@ function PrintWizard({
       qc.refetchQueries({ queryKey: ['printers'] })
       qc.refetchQueries({ queryKey: ['spoolman-stock'] })
       qc.refetchQueries({ queryKey: ['filament-detect', printer.id] })
+      qc.refetchQueries({ queryKey: ['printer-spoolman-slots', printer.id] })
     }, 3000)
     return () => clearInterval(id)
   }, [step, printer.id, qc])
@@ -279,6 +280,13 @@ function PrintWizard({
     queryKey: ['mainsail-spoolman', printer.id],
     queryFn: () => getMailsailSpoolman(printer.id),
     staleTime: 60_000,
+    retry: false,
+  })
+  const { data: spoolmanSlots } = useQuery({
+    queryKey: ['printer-spoolman-slots', printer.id, printer.effective_slot_count],
+    queryFn: () => getPrinterSpoolmanSlots(printer.id, printer.effective_slot_count),
+    enabled: mainsailSpoolman?.configured === true,
+    staleTime: 0,
     retry: false,
   })
   const { data: filamentDetect } = useQuery({
@@ -341,6 +349,19 @@ function PrintWizard({
         const material = fd.material !== 'NONE' ? fd.material : ''
         const label = [vendor, material !== 'NONE' ? material : null, fd.sub_type || null].filter(Boolean).join(' ') || 'Unknown filament'
         return { colorHex, label, material, spoolId: null }
+      }
+    }
+    // Spoolman slot — for non-AFC printers with Moonraker Spoolman integration
+    if (mainsailSpoolman?.configured && spoolmanSlots) {
+      const spSlot = spoolmanSlots.find(s => s.tool_index === slotNum - 1)
+      if (spSlot?.spool_id != null) {
+        const spool = spoolMapById.get(spSlot.spool_id)
+        if (spool) {
+          const rawHex = spool.filament.color_hex
+          const colorHex = rawHex ? (rawHex.startsWith('#') ? rawHex : `#${rawHex}`) : '#888888'
+          const label = [spool.filament.vendor?.name, spool.filament.material, spool.filament.name].filter(Boolean).join(' ')
+          return { colorHex, label, material: spool.filament.material ?? '', spoolId: spool.id }
+        }
       }
     }
     const slot = livePrinter.slots.find(s => s.slot_number === slotNum)
