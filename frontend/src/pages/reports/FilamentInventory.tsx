@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { getSpoolmanStock, SpoolmanSpool } from '../../api/client'
+import { getSpoolmanStock, SpoolmanSpool, getSpoolCardUid } from '../../api/client'
 import { ArrowLeft, WifiOff, LayoutList, Layers, MapPin } from 'lucide-react'
 import { SpoolIcon } from '../../components/SpoolIcon'
 
@@ -52,8 +52,8 @@ function SpoolRow({ spool }: { spool: SpoolmanSpool }) {
               <MapPin size={10} />{spool.location}
             </span>
           )}
-          {spool.extra?.card_uid && (
-            <span className="text-xs text-gray-400">NFC: {spool.extra.card_uid}</span>
+          {getSpoolCardUid(spool) && (
+            <span className="text-xs text-gray-400">NFC: {getSpoolCardUid(spool)}</span>
           )}
           {spool.comment && (
             <span className="text-xs text-gray-400 italic truncate max-w-40">{spool.comment}</span>

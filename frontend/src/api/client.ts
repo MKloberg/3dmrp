@@ -876,6 +876,13 @@ export const createSpoolmanSpoolsWizard = (data: { filament_id: number; count: n
     body: JSON.stringify(data),
   })
 
+// Spoolman stores extra field values as JSON-encoded strings; decode before display.
+export function getSpoolCardUid(spool: SpoolmanSpool): string | null {
+  const raw = spool.extra?.card_uid
+  if (!raw) return null
+  try { return JSON.parse(raw) } catch { return raw }
+}
+
 export const patchSpoolmanCardUid = (spoolId: number, cardUids: string[]) =>
   req<{ id: number }>(`/spoolman/spools/${spoolId}/card-uid`, {
     method: 'PATCH',

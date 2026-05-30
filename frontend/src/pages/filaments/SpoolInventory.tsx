@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { getSpoolmanStock, getSettings, setSetting, SpoolmanSpool, createNfcSession, patchSpoolmanCardUid, patchSpoolmanLocation, getSpoolmanLocationOptions, getSpoolWeighLog, getFilaments, updateFilament, FilamentSpec } from '../../api/client'
+import { getSpoolmanStock, getSettings, setSetting, SpoolmanSpool, createNfcSession, patchSpoolmanCardUid, patchSpoolmanLocation, getSpoolmanLocationOptions, getSpoolWeighLog, getFilaments, updateFilament, FilamentSpec, getSpoolCardUid } from '../../api/client'
 import { ArrowLeft, WifiOff, MapPin, LayoutList, LayoutGrid, QrCode, Plus, Nfc, Loader2, Check, Scale, ChevronUp, ChevronDown, X } from 'lucide-react'
 import { SpoolIcon } from '../../components/SpoolIcon'
 import { QRCodeSVG } from 'qrcode.react'
@@ -195,7 +195,7 @@ function SpoolRow({ spool, onPrintLabel, onTag, onWeigh, onLocationChange, allLo
           <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 font-medium">
             {spool.filament.material}
           </span>
-          {spool.extra?.card_uid && <span className="text-xs text-gray-400">NFC: {spool.extra.card_uid}</span>}
+          {getSpoolCardUid(spool) && <span className="text-xs text-gray-400">NFC: {getSpoolCardUid(spool)}</span>}
           {spool.comment && (
             <span className="text-xs text-gray-400 italic truncate max-w-40">{spool.comment}</span>
           )}
@@ -313,7 +313,7 @@ function SpoolCard({ spool, onPrintLabel, onTag, onWeigh, onLocationChange, allL
           <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 font-medium">
             {spool.filament.material}
           </span>
-          {spool.extra?.card_uid && <span className="text-xs text-gray-400">NFC: {spool.extra.card_uid}</span>}
+          {getSpoolCardUid(spool) && <span className="text-xs text-gray-400">NFC: {getSpoolCardUid(spool)}</span>}
         </div>
         <div className="mt-auto pt-3 space-y-2">
           <div className="flex items-center gap-1">
@@ -504,7 +504,7 @@ export default function SpoolInventory() {
         s.filament.material?.toLowerCase().includes(q) ||
         s.filament.vendor?.name?.toLowerCase().includes(q) ||
         s.location?.toLowerCase().includes(q) ||
-        s.extra?.card_uid?.toLowerCase().includes(q)
+        getSpoolCardUid(s)?.toLowerCase().includes(q)
       )
     })
     .sort((a, b) => {

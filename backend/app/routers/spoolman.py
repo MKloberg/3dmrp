@@ -1,4 +1,5 @@
 import re
+import json
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -389,7 +390,8 @@ async def patch_spool_card_uid(spool_id: int, body: PatchCardUidRequest, db: Ses
             get_resp = await client.get(f"{base}/api/v1/spool/{spool_id}")
             get_resp.raise_for_status()
             existing_extra = get_resp.json().get("extra") or {}
-            existing_card_uid = existing_extra.get("card_uid") or ""
+            raw = existing_extra.get("card_uid") or '""'
+            existing_card_uid = json.loads(raw) if isinstance(raw, str) else ""
 
             existing_uids = {u.strip() for u in existing_card_uid.split(",") if u.strip()}
 
@@ -398,9 +400,10 @@ async def patch_spool_card_uid(spool_id: int, body: PatchCardUidRequest, db: Ses
                 return get_resp.json()
 
             # Otherwise the physical tags are the new source of truth — replace entirely.
+            # Spoolman stores extra field values as JSON-encoded strings.
             resp = await client.patch(
                 f"{base}/api/v1/spool/{spool_id}",
-                json={"extra": {"card_uid": ",".join(normalized)}},
+                json={"extra": {"card_uid": json.dumps(",".join(normalized))}},
             )
             resp.raise_for_status()
             return resp.json()

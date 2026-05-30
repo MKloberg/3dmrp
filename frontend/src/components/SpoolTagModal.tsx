@@ -8,6 +8,7 @@ import {
   getSettings,
   createNfcSession,
   patchSpoolmanCardUid,
+  getSpoolCardUid,
   SpoolmanSpool,
 } from '../api/client'
 
@@ -122,7 +123,7 @@ export default function SpoolTagModal({ spool, onClose }: Props) {
             <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{spoolName}</p>
             <p className="text-xs text-gray-400 truncate">
               {[vendorName, spool.filament.material].filter(Boolean).join(' · ')}
-              {spool.extra?.card_uid && <span className="ml-2 text-amber-500 dark:text-amber-400">Current: {spool.extra.card_uid}</span>}
+              {getSpoolCardUid(spool) && <span className="ml-2 text-amber-500 dark:text-amber-400">Current: {getSpoolCardUid(spool)}</span>}
             </p>
           </div>
         </div>
