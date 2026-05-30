@@ -7,7 +7,7 @@ import { useMobileSession } from '../contexts/MobileSessionContext'
 import {
   getSettings,
   createNfcSession,
-  patchSpoolmanLotNr,
+  patchSpoolmanCardUid,
   SpoolmanSpool,
 } from '../api/client'
 
@@ -81,9 +81,9 @@ export default function SpoolTagModal({ spool, onClose }: Props) {
         const uids = [result.card_uid, result.card_uid_b].filter(Boolean) as string[]
         const normalized = uids.map(u => u.replace(/:/g, '').toLowerCase())
         setFinalUids(normalized)
-        patchSpoolmanLotNr(spool.id, normalized)
+        patchSpoolmanCardUid(spool.id, normalized)
           .then(() => {
-            setWrittenLotNr(normalized.map(u => `card_uid:${u}`).join(','))
+            setWrittenLotNr(normalized.join(','))
             qc.invalidateQueries({ queryKey: ['spoolman-stock'] })
             setPhase('done')
           })
@@ -122,7 +122,7 @@ export default function SpoolTagModal({ spool, onClose }: Props) {
             <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{spoolName}</p>
             <p className="text-xs text-gray-400 truncate">
               {[vendorName, spool.filament.material].filter(Boolean).join(' · ')}
-              {spool.lot_nr && <span className="ml-2 text-amber-500 dark:text-amber-400">Current: {spool.lot_nr}</span>}
+              {spool.extra?.card_uid && <span className="ml-2 text-amber-500 dark:text-amber-400">Current: {spool.extra.card_uid}</span>}
             </p>
           </div>
         </div>

@@ -52,8 +52,8 @@ function SpoolRow({ spool }: { spool: SpoolmanSpool }) {
               <MapPin size={10} />{spool.location}
             </span>
           )}
-          {spool.lot_nr && (
-            <span className="text-xs text-gray-400">Lot: {spool.lot_nr}</span>
+          {spool.extra?.card_uid && (
+            <span className="text-xs text-gray-400">NFC: {spool.extra.card_uid}</span>
           )}
           {spool.comment && (
             <span className="text-xs text-gray-400 italic truncate max-w-40">{spool.comment}</span>

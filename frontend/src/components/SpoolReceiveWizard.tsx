@@ -9,7 +9,7 @@ import {
   getSettings,
   getSpoolmanLocationOptions,
   createSpoolmanSpoolsWizard,
-  patchSpoolmanLotNr,
+  patchSpoolmanCardUid,
   createNfcSession,
   SpoolmanSpool,
   SpoolmanFilament,
@@ -241,7 +241,7 @@ export default function SpoolReceiveWizard({ onClose, initialSpools, initialFila
             [spool.id]: normalized.map(uid => ({ card_uid: uid, wrote_tag: true })),
           }))
           if (normalized.length > 0) {
-            patchSpoolmanLotNr(spool.id, normalized).catch(() => { /* non-fatal */ })
+            patchSpoolmanCardUid(spool.id, normalized).catch(() => { /* non-fatal */ })
           }
         }
         setNfcWaiting(false)

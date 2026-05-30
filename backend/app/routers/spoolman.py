@@ -370,12 +370,12 @@ async def clone_spool(body: CloneSpoolRequest, db: Session = Depends(get_db)) ->
         raise HTTPException(status_code=502, detail=f"Failed to reach Spoolman: {e}")
 
 
-class PatchLotNrRequest(BaseModel):
+class PatchCardUidRequest(BaseModel):
     card_uids: List[str]
 
 
-@router.patch("/spools/{spool_id}/lot-nr")
-async def patch_spool_lot_nr(spool_id: int, body: PatchLotNrRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
+@router.patch("/spools/{spool_id}/card-uid")
+async def patch_spool_card_uid(spool_id: int, body: PatchCardUidRequest, db: Session = Depends(get_db)) -> Dict[str, Any]:
     url = get_setting(db, "spoolman_url")
     if not url:
         raise HTTPException(status_code=400, detail="Spoolman URL not configured")
@@ -385,26 +385,22 @@ async def patch_spool_lot_nr(spool_id: int, body: PatchLotNrRequest, db: Session
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            # Read existing lot_nr so we can compare before writing.
+            # Read existing extra.card_uid so we can compare before writing.
             get_resp = await client.get(f"{base}/api/v1/spool/{spool_id}")
             get_resp.raise_for_status()
-            existing_lot = get_resp.json().get("lot_nr") or ""
+            existing_extra = get_resp.json().get("extra") or {}
+            existing_card_uid = existing_extra.get("card_uid") or ""
 
-            existing_uids = {
-                part.replace("card_uid:", "").strip()
-                for part in existing_lot.split(",")
-                if part.strip().startswith("card_uid:")
-            }
+            existing_uids = {u.strip() for u in existing_card_uid.split(",") if u.strip()}
 
             # If the scanned UIDs exactly match what's already stored, nothing to do.
             if set(normalized) == existing_uids:
                 return get_resp.json()
 
             # Otherwise the physical tags are the new source of truth — replace entirely.
-            lot_nr = ",".join(f"card_uid:{uid}" for uid in normalized)
             resp = await client.patch(
                 f"{base}/api/v1/spool/{spool_id}",
-                json={"lot_nr": lot_nr},
+                json={"extra": {"card_uid": ",".join(normalized)}},
             )
             resp.raise_for_status()
             return resp.json()

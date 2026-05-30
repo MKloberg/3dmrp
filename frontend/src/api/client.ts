@@ -398,6 +398,7 @@ export interface SpoolmanSpool {
   price: number | null
   location: string | null
   lot_nr: string | null
+  extra: { card_uid?: string } | null
   comment: string | null
   first_used: string | null
   last_used: string | null
@@ -875,8 +876,8 @@ export const createSpoolmanSpoolsWizard = (data: { filament_id: number; count: n
     body: JSON.stringify(data),
   })
 
-export const patchSpoolmanLotNr = (spoolId: number, cardUids: string[]) =>
-  req<{ id: number }>(`/spoolman/spools/${spoolId}/lot-nr`, {
+export const patchSpoolmanCardUid = (spoolId: number, cardUids: string[]) =>
+  req<{ id: number }>(`/spoolman/spools/${spoolId}/card-uid`, {
     method: 'PATCH',
     body: JSON.stringify({ card_uids: cardUids }),
   })

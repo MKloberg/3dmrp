@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { useParams } from 'react-router-dom'
-import { getNfcSession, postNfcTagA, postNfcResult, getSpoolmanStock, createNfcSession, patchSpoolmanLotNr, patchSpoolmanRemainingWeight, patchSpoolmanFilamentSpoolWeight, cloneSpoolmanSpool, type NfcSession, type SpoolmanSpool } from '../../api/client'
+import { getNfcSession, postNfcTagA, postNfcResult, getSpoolmanStock, createNfcSession, patchSpoolmanCardUid, patchSpoolmanRemainingWeight, patchSpoolmanFilamentSpoolWeight, cloneSpoolmanSpool, type NfcSession, type SpoolmanSpool } from '../../api/client'
 import { Check, Loader2, X, AlertTriangle, WifiOff, Nfc, ChevronRight, ArrowLeft, Scale, Sparkles, Info, QrCode, Copy, Layers } from 'lucide-react'
 import MobileLoadFilament from './MobileLoadFilament'
 
@@ -354,7 +354,7 @@ export default function MobileApp() {
         if (phoneInitiatedRef.current && nfcSessionRef.current) {
           const spoolId = nfcSessionRef.current.spool_id
           const uids = [uidA, uid].filter(Boolean) as string[]
-          patchSpoolmanLotNr(spoolId, uids).catch(() => { /* ignore */ })
+          patchSpoolmanCardUid(spoolId, uids).catch(() => { /* ignore */ })
         }
         wsRef.current?.send(JSON.stringify({
           type: 'task_result', task_type: 'nfc_write', success: true,
@@ -376,7 +376,7 @@ export default function MobileApp() {
       await postNfcResult(tok, { card_uid: uidA, wrote_tag: wroteA })
     } catch { /* ignore */ }
     if (phoneInitiatedRef.current && nfcSessionRef.current) {
-      patchSpoolmanLotNr(nfcSessionRef.current.spool_id, [uidA]).catch(() => { /* ignore */ })
+      patchSpoolmanCardUid(nfcSessionRef.current.spool_id, [uidA]).catch(() => { /* ignore */ })
     }
     wsRef.current?.send(JSON.stringify({
       type: 'task_result', task_type: 'nfc_write', success: true,
