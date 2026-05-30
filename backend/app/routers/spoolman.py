@@ -386,11 +386,11 @@ async def patch_spool_card_uid(spool_id: int, body: PatchCardUidRequest, db: Ses
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            # Read existing extra.card_uid so we can compare before writing.
+            # Read existing extra.card_uids so we can compare before writing.
             get_resp = await client.get(f"{base}/api/v1/spool/{spool_id}")
             get_resp.raise_for_status()
             existing_extra = get_resp.json().get("extra") or {}
-            raw = existing_extra.get("card_uid") or '""'
+            raw = existing_extra.get("card_uids") or '""'
             existing_card_uid = json.loads(raw) if isinstance(raw, str) else ""
 
             existing_uids = {u.strip() for u in existing_card_uid.split(",") if u.strip()}
@@ -403,7 +403,7 @@ async def patch_spool_card_uid(spool_id: int, body: PatchCardUidRequest, db: Ses
             # Spoolman stores extra field values as JSON-encoded strings.
             resp = await client.patch(
                 f"{base}/api/v1/spool/{spool_id}",
-                json={"extra": {"card_uid": json.dumps(",".join(normalized))}},
+                json={"extra": {"card_uids": json.dumps(",".join(normalized))}},
             )
             resp.raise_for_status()
             return resp.json()

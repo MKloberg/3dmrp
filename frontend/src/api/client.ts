@@ -398,7 +398,7 @@ export interface SpoolmanSpool {
   price: number | null
   location: string | null
   lot_nr: string | null
-  extra: { card_uid?: string } | null
+  extra: { card_uids?: string } | null
   comment: string | null
   first_used: string | null
   last_used: string | null
@@ -878,7 +878,7 @@ export const createSpoolmanSpoolsWizard = (data: { filament_id: number; count: n
 
 // Spoolman stores extra field values as JSON-encoded strings; decode before display.
 export function getSpoolCardUid(spool: SpoolmanSpool): string | null {
-  const raw = spool.extra?.card_uid
+  const raw = spool.extra?.card_uids
   if (!raw) return null
   try { return JSON.parse(raw) } catch { return raw }
 }
