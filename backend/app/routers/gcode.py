@@ -127,7 +127,7 @@ def gcode_file_metadata(
                 if m:
                     t = m.group(1).strip()
                     secs = 0
-                    for pattern, mult in [(r"(\d+)h", 3600), (r"(\d+)m(?!s)", 60), (r"(\d+)s", 1)]:
+                    for pattern, mult in [(r"(\d+)d", 86400), (r"(\d+)h", 3600), (r"(\d+)m(?!s)", 60), (r"(\d+)s", 1)]:
                         tm = re.search(pattern, t)
                         if tm:
                             secs += int(tm.group(1)) * mult
