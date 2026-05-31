@@ -128,7 +128,12 @@ function FilamentDetail({ f }: { f: FilamentSpec }) {
         <Field label="Price" value={f.price != null ? `${currSym}${f.price.toFixed(2)}` : null} />
         <Field label="Extruder temp" value={f.settings_extruder_temp ? `${f.settings_extruder_temp} °C` : null} />
         <Field label="Bed temp" value={f.settings_bed_temp ? `${f.settings_bed_temp} °C` : null} />
-        <Field label="TD (Transmissivity)" value={f.extra?.['td'] != null ? `${f.extra['td']} mm` : null} />
+        <div>
+          <dt className="text-xs text-gray-400">TD (Transmissivity)</dt>
+          <dd className="text-sm font-medium text-gray-800 dark:text-gray-200">
+            {f.extra?.['td'] != null ? `${f.extra['td']} mm` : <span className="text-gray-400 font-normal">—</span>}
+          </dd>
+        </div>
         <Field label="Article #" value={f.article_number} />
         <Field label="External ID" value={f.external_id} />
         {f.spoolman_id && <Field label="Spoolman ID" value={f.spoolman_id} />}
