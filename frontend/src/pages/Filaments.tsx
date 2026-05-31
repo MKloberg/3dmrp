@@ -20,6 +20,43 @@ function normalizeHex(hex: string | null | undefined): string {
   return hex.startsWith('#') ? hex.toLowerCase() : `#${hex}`.toLowerCase()
 }
 
+function stableJson(obj: Record<string, unknown>): string {
+  return JSON.stringify(Object.fromEntries(Object.entries(obj).sort()))
+}
+
+function hasSpoolmanDiff(local: FilamentSpec, sf: SpoolmanFilament): boolean {
+  if (sf.material && sf.material !== local.material) return true
+  if (sf.name && sf.name !== local.color_name) return true
+  if (sf.color_hex) {
+    const sfHex = normalizeHex(sf.color_hex)
+    if (sfHex !== normalizeHex(local.color_hex)) return true
+  }
+  const sfBrand = sf.vendor?.name
+  if (sfBrand && sfBrand !== local.brand) return true
+  const numFields: Array<[keyof SpoolmanFilament, keyof FilamentSpec]> = [
+    ['price', 'price'], ['density', 'density'], ['diameter', 'diameter'],
+    ['weight', 'weight'], ['spool_weight', 'spool_weight'],
+    ['settings_extruder_temp', 'settings_extruder_temp'],
+    ['settings_bed_temp', 'settings_bed_temp'],
+  ]
+  for (const [sfKey, localKey] of numFields) {
+    const sfVal = sf[sfKey]
+    if (sfVal != null && sfVal !== local[localKey]) return true
+  }
+  const strFields: Array<[keyof SpoolmanFilament, keyof FilamentSpec]> = [
+    ['article_number', 'article_number'], ['comment', 'comment'], ['external_id', 'external_id'],
+  ]
+  for (const [sfKey, localKey] of strFields) {
+    const sfVal = sf[sfKey]
+    if (sfVal && sfVal !== local[localKey]) return true
+  }
+  if (sf.extra && Object.keys(sf.extra).length > 0) {
+    const localExtra = local.extra && Object.keys(local.extra).length > 0 ? local.extra : {}
+    if (stableJson(sf.extra) !== stableJson(localExtra as Record<string, unknown>)) return true
+  }
+  return false
+}
+
 function emptyForm(): FilamentSpecInput {
   return {
     material: 'PLA', color_name: '', color_hex: '#888888', brand: '',
@@ -441,6 +478,11 @@ export default function Filaments() {
   function closeForm() { setShowForm(false); setEditing(null) }
 
   const linkedToSpoolman = filaments.filter(f => f.spoolman_id).length
+  const spoolmanFilamentMap = new Map((spoolmanData?.filaments ?? []).map(sf => [sf.id, sf]))
+  const outOfSyncCount = filaments.filter(f =>
+    f.spoolman_id != null && spoolmanFilamentMap.has(f.spoolman_id) &&
+    hasSpoolmanDiff(f, spoolmanFilamentMap.get(f.spoolman_id)!)
+  ).length
   const importedSpoolmanIds = new Set(filaments.map(f => f.spoolman_id).filter(Boolean))
   const localKeys = new Set(
     filaments.map(f => `${(f.material ?? '').toLowerCase()}::${(f.color_name ?? '').toLowerCase()}`)
@@ -504,10 +546,15 @@ export default function Filaments() {
             <button
               onClick={() => syncMutation.mutate()}
               disabled={syncMutation.isPending}
-              className="flex items-center gap-1.5 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 text-sm px-3 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+              className={`flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg disabled:opacity-50 transition-colors ${
+                outOfSyncCount > 0
+                  ? 'bg-amber-50 dark:bg-amber-900/30 border border-amber-400 dark:border-amber-600 text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/50'
+                  : 'border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+              }`}
+              title={outOfSyncCount > 0 ? `${outOfSyncCount} filament${outOfSyncCount !== 1 ? 's' : ''} differ from Spoolman` : 'All linked filaments are in sync'}
             >
               <RefreshCw size={14} className={syncMutation.isPending ? 'animate-spin' : ''} />
-              {syncMutation.isPending ? 'Syncing…' : `Sync ${linkedToSpoolman}`}
+              {syncMutation.isPending ? 'Syncing…' : outOfSyncCount > 0 ? `${outOfSyncCount} out of sync` : 'In sync'}
             </button>
           )}
           {spoolmanData?.connected && notImported.length > 0 && (
