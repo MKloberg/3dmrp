@@ -419,7 +419,7 @@ export default function Filaments() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const { data: filaments = [] } = useQuery({ queryKey: ['filaments'], queryFn: getFilaments })
-  const { data: spoolmanData } = useQuery({ queryKey: ['spoolman-filaments'], queryFn: getSpoolmanFilaments })
+  const { data: spoolmanData } = useQuery({ queryKey: ['spoolman-filaments'], queryFn: getSpoolmanFilaments, refetchInterval: 30_000 })
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: getSettings })
   const spoolmanUrl = (settings?.spoolman_url || '').replace(/\/$/, '')
 
@@ -467,6 +467,7 @@ export default function Filaments() {
     mutationFn: spoolmanSync,
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['filaments'] })
+      qc.invalidateQueries({ queryKey: ['spoolman-filaments'] })
       setSyncMsg(`Synced ${data.updated} filament${data.updated !== 1 ? 's' : ''} from Spoolman.`)
       setTimeout(() => setSyncMsg(null), 4000)
     },
