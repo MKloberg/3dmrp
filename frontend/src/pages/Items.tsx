@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import ReactCrop, { Crop, PixelCrop } from 'react-image-crop'
 import 'react-image-crop/dist/ReactCrop.css'
@@ -25,7 +25,7 @@ import ConfirmModal from '../components/ConfirmModal'
 import PrintSpoolWizard from '../components/PrintSpoolWizard'
 import { SpoolIcon } from '../components/SpoolIcon'
 import { useCurrency } from '../lib/currency'
-import { Plus, Trash2, ChevronDown, ChevronRight, Pencil, Check, X, Upload, ShoppingCart, GripVertical, Tag as TagIcon, Crop as CropIcon, Download, Route, Send, RefreshCw, Clock, Box, Share2, ClipboardList as BomIcon, FolderOpen, FileText, AlertTriangle, Info } from 'lucide-react'
+import { Plus, Trash2, ChevronDown, ChevronRight, Pencil, Check, X, Upload, ShoppingCart, GripVertical, Tag as TagIcon, Crop as CropIcon, Download, Route, Send, RefreshCw, Clock, Box, Share2, ClipboardList as BomIcon, FolderOpen, FileText, AlertTriangle, Info, Printer as PrinterIcon } from 'lucide-react'
 
 function smoothScrollTo(container: HTMLElement, target: number, duration = 700) {
   const start = container.scrollTop
@@ -3797,6 +3797,7 @@ export default function Items() {
   const printingItemIds = useMemo(() => new Set(printingOrders.map(o => o.item_id)), [printingOrders])
   const currSym = useCurrency()
 
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [expanded, setExpanded] = useState<number | null>(() => {
     const id = Number(searchParams.get('open'))
@@ -3900,6 +3901,14 @@ export default function Items() {
             className="flex items-center gap-1.5 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm px-3 py-2 rounded-lg"
           >
             <TagIcon size={14} /> Tags
+          </button>
+          <button
+            onClick={() => navigate(`/print/price-tags?items=${visibleItems.map(i => i.id).join(',')}`)}
+            disabled={visibleItems.length === 0}
+            className="flex items-center gap-1.5 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm px-3 py-2 rounded-lg disabled:opacity-40"
+            title="Print price tags for visible items"
+          >
+            <PrinterIcon size={14} /> Price Tags
           </button>
           <button
             onClick={openCreate}

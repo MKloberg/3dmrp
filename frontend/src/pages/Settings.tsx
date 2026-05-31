@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Settings as SettingsIcon, SlidersHorizontal, Layers, Printer, Database, Smartphone, ChevronRight } from 'lucide-react'
+import { Settings as SettingsIcon, SlidersHorizontal, Layers, Printer, Database, Smartphone, Tag, ChevronRight } from 'lucide-react'
 
 const cards = [
   {
@@ -19,6 +19,12 @@ const cards = [
     icon: Printer,
     title: 'Printer Types',
     description: 'Define printer type categories and default slot counts.',
+  },
+  {
+    to: '/settings/price-tags',
+    icon: Tag,
+    title: 'Price Tags',
+    description: 'Design the layout and dimensions of printed price tags.',
   },
   {
     to: '/settings/database',

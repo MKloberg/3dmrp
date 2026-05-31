@@ -14,6 +14,7 @@ import General from './pages/settings/General'
 import Database from './pages/settings/Database'
 import MobileAccess from './pages/settings/MobileAccess'
 import AISettings from './pages/settings/AI'
+import PriceTags from './pages/settings/PriceTags'
 import Reports from './pages/Reports'
 import FilamentInventory from './pages/reports/FilamentInventory'
 import PrintJobsReport from './pages/reports/PrintJobsReport'
@@ -25,6 +26,7 @@ import MobilePrinterLoad from './pages/mobile/MobilePrinterLoad'
 import MobileNfcScan from './pages/mobile/MobileNfcScan'
 import MobileApp from './pages/mobile/MobileApp'
 import SpoolLabelPage from './pages/print/SpoolLabelPage'
+import PriceTagPrintPage from './pages/print/PriceTagPrintPage'
 import { MobileSessionProvider } from './contexts/MobileSessionContext'
 
 function DesktopLayout() {
@@ -43,6 +45,7 @@ export default function App() {
       <Route path="mobile/nfc/:token" element={<MobileNfcScan />} />
       <Route path="mobile/app/:token" element={<MobileApp />} />
       <Route path="print/spool/:id" element={<SpoolLabelPage />} />
+      <Route path="print/price-tags" element={<PriceTagPrintPage />} />
       <Route element={<DesktopLayout />}>
         <Route index element={<Dashboard />} />
         <Route path="items" element={<Items />} />
@@ -58,6 +61,7 @@ export default function App() {
         <Route path="settings/database" element={<Database />} />
         <Route path="settings/mobile" element={<MobileAccess />} />
         <Route path="settings/ai" element={<AISettings />} />
+        <Route path="settings/price-tags" element={<PriceTags />} />
         <Route path="reports" element={<Reports />} />
         <Route path="reports/filament-inventory" element={<FilamentInventory />} />
         <Route path="reports/print-jobs" element={<PrintJobsReport />} />

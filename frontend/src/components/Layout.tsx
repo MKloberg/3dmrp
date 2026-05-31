@@ -4,7 +4,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
   LayoutDashboard, Box, ClipboardList, TrendingUp, Printer,
-  Settings, Users, FileText, ChevronRight, SlidersHorizontal, Layers, Database, X, Disc2, Wrench, Sparkles,
+  Settings, Users, FileText, ChevronRight, SlidersHorizontal, Layers, Database, X, Disc2, Wrench, Sparkles, Tag,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { QRCodeSVG } from 'qrcode.react'
@@ -56,6 +56,7 @@ const nav: NavItemDef[] = [
       { to: '/settings/general', label: 'General', icon: SlidersHorizontal },
       { to: '/settings/slicers', label: 'Slicers', icon: Layers },
       { to: '/settings/printer-types', label: 'Printer Types', icon: Printer },
+      { to: '/settings/price-tags', label: 'Price Tags', icon: Tag },
       { to: '/settings/database', label: 'Database', icon: Database },
       { to: '/settings/mobile', label: 'Mobile Access', icon: Printer },
       { to: '/settings/ai', label: 'AI', icon: Sparkles },
