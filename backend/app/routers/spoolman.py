@@ -220,24 +220,51 @@ async def sync_spoolman_filaments(db: Session = Depends(get_db)) -> Dict[str, An
         sf = sf_map.get(local.spoolman_id)
         if not sf:
             continue
-        local.material = sf.get("material") or local.material
-        local.color_name = sf.get("name") or local.color_name
+
+        changed = False
+
+        new_material = sf.get("material") or local.material
+        if new_material != local.material:
+            local.material = new_material
+            changed = True
+
+        new_name = sf.get("name") or local.color_name
+        if new_name != local.color_name:
+            local.color_name = new_name
+            changed = True
+
         hex_val = sf.get("color_hex")
         if hex_val:
-            local.color_hex = (hex_val if hex_val.startswith("#") else f"#{hex_val}").lower()
+            new_hex = (hex_val if hex_val.startswith("#") else f"#{hex_val}").lower()
+            if new_hex != local.color_hex:
+                local.color_hex = new_hex
+                changed = True
+
         vendor = sf.get("vendor") or {}
-        if vendor.get("name"):
+        if vendor.get("name") and vendor["name"] != local.brand:
             local.brand = vendor["name"]
+            changed = True
+
         for field in ["price", "density", "diameter", "weight", "spool_weight",
                       "settings_extruder_temp", "settings_bed_temp"]:
             v = sf.get(field)
-            if v is not None:
+            if v is not None and v != getattr(local, field):
                 setattr(local, field, v)
+                changed = True
+
         for field in ["article_number", "comment", "external_id"]:
             v = sf.get(field)
-            if v:
+            if v and v != getattr(local, field):
                 setattr(local, field, v)
-        updated += 1
+                changed = True
+
+        sf_extra = sf.get("extra") or None
+        if sf_extra and sf_extra != local.extra:
+            local.extra = sf_extra
+            changed = True
+
+        if changed:
+            updated += 1
 
     db.commit()
     return {"updated": updated}
