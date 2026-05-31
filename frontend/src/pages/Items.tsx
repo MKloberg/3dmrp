@@ -2244,7 +2244,7 @@ function ItemDetail({ item, filaments, allTags, printerTypes, printers }: { item
   const saveDescMutation = useMutation({
     mutationFn: () => updateItem(item.id, {
       name: item.name, description: descValue, notes: item.notes, sku: item.sku,
-      stl_source_url: item.stl_source_url, use_advanced_routing: item.use_advanced_routing,
+      stl_source_url: item.stl_source_url, use_advanced_routing: item.use_advanced_routing, msrp: item.msrp,
     }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['items'] }); setEditingDesc(false) },
   })
@@ -2441,7 +2441,7 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
   const toggleAdvancedMutation = useMutation({
     mutationFn: () => updateItem(item.id, {
       name: item.name, description: item.description, notes: item.notes, sku: item.sku,
-      stl_source_url: item.stl_source_url, use_advanced_routing: !item.use_advanced_routing,
+      stl_source_url: item.stl_source_url, use_advanced_routing: !item.use_advanced_routing, msrp: item.msrp,
     }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['items'] }),
   })
@@ -3732,6 +3732,7 @@ export default function Items() {
   const { data: printers = [] } = useQuery({ queryKey: ['printers'], queryFn: getPrinters })
   const { data: printingOrders = [] } = useQuery({ queryKey: ['orders', 'printing'], queryFn: () => getOrders('printing'), refetchInterval: 30_000 })
   const printingItemIds = useMemo(() => new Set(printingOrders.map(o => o.item_id)), [printingOrders])
+  const currSym = useCurrency()
 
   const [searchParams, setSearchParams] = useSearchParams()
   const [expanded, setExpanded] = useState<number | null>(() => {
@@ -3744,7 +3745,7 @@ export default function Items() {
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState<'name_asc' | 'name_desc' | 'recent'>('recent')
   const [editing, setEditing] = useState<Item | null>(null)
-  const [form, setForm] = useState({ name: '', sku: '', description: '', notes: '', stl_source_url: '' })
+  const [form, setForm] = useState({ name: '', sku: '', description: '', notes: '', stl_source_url: '', msrp: '' })
   const [gcodeRenamePrompt, setGcodeRenamePrompt] = useState<{ oldName: string; newName: string } | null>(null)
 
   useEffect(() => {
@@ -3786,9 +3787,12 @@ export default function Items() {
     })
 
   const saveMutation = useMutation({
-    mutationFn: () => editing
-      ? updateItem(editing.id, { ...form, use_advanced_routing: editing.use_advanced_routing })
-      : createItem(form),
+    mutationFn: () => {
+      const msrp = form.msrp !== '' ? Number(form.msrp) : null
+      return editing
+        ? updateItem(editing.id, { ...form, msrp, use_advanced_routing: editing.use_advanced_routing })
+        : createItem({ ...form, msrp })
+    },
     onSuccess: async () => {
       qc.invalidateQueries({ queryKey: ['items'] })
       const wasRename = editing && form.name !== editing.name
@@ -3811,17 +3815,17 @@ export default function Items() {
 
   function openCreate() {
     setEditing(null)
-    setForm({ name: '', sku: '', description: '', notes: '', stl_source_url: '' })
+    setForm({ name: '', sku: '', description: '', notes: '', stl_source_url: '', msrp: '' })
     setShowForm(true)
   }
 
   function openEdit(item: Item) {
     setEditing(item)
-    setForm({ name: item.name, sku: item.sku, description: item.description, notes: item.notes, stl_source_url: item.stl_source_url })
+    setForm({ name: item.name, sku: item.sku, description: item.description, notes: item.notes, stl_source_url: item.stl_source_url, msrp: item.msrp != null ? String(item.msrp) : '' })
     setShowForm(true)
   }
 
-  function closeForm() { setShowForm(false); setEditing(null); setForm({ name: '', sku: '', description: '', notes: '', stl_source_url: '' }) }
+  function closeForm() { setShowForm(false); setEditing(null); setForm({ name: '', sku: '', description: '', notes: '', stl_source_url: '', msrp: '' }) }
 
   return (
     <div className="p-6 space-y-4">
@@ -4034,6 +4038,21 @@ export default function Items() {
                 value={form.stl_source_url}
                 onChange={e => setForm(f => ({ ...f, stl_source_url: e.target.value }))}
               />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 dark:text-gray-400 block mb-1">MSRP</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-400 pointer-events-none">{currSym}</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  className="w-full border rounded-lg pl-7 pr-3 py-2 text-sm dark:bg-gray-700 dark:border-gray-600"
+                  placeholder="0.00"
+                  value={form.msrp}
+                  onChange={e => setForm(f => ({ ...f, msrp: e.target.value }))}
+                />
+              </div>
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <button onClick={closeForm} className="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200">Cancel</button>

@@ -79,6 +79,7 @@ class Item(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     use_advanced_routing = Column(Boolean, nullable=False, default=False)
+    msrp = Column(Float, nullable=True)
 
     filament_requirements = relationship("ModelFilament", back_populates="item", cascade="all, delete-orphan", order_by="ModelFilament.sort_order")
     images = relationship("ModelImage", back_populates="item", cascade="all, delete-orphan", order_by="ModelImage.created_at")

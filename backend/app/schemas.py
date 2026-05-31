@@ -210,6 +210,7 @@ class ItemBase(BaseModel):
     notes: str = ""
     stl_source_url: str = ""
     use_advanced_routing: bool = False
+    msrp: Optional[float] = None
 
 
 class ItemCreate(ItemBase):

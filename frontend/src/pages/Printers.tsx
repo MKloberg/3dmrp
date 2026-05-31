@@ -1119,7 +1119,7 @@ function PrinterHistory({ printer, filaments }: { printer: Printer; filaments: F
   async function handleImport(s: ImportState) {
     setImportSaving(true)
     try {
-      const item = await createItem({ name: s.modelName, sku: '', description: s.description, notes: s.notes })
+      const item = await createItem({ name: s.modelName, sku: '', description: s.description, notes: s.notes, msrp: null })
       for (const slot of s.slots) {
         if (!slot.specId) continue
         const grams = parseFloat(slot.grams)

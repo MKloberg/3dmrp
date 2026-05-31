@@ -123,6 +123,7 @@ export interface Item {
   tags: Tag[]
   routings: Routing[]
   post_processing_costs: PostProcessingCost[]
+  msrp: number | null
 }
 
 export interface Order {
@@ -181,9 +182,9 @@ export const deleteFilament = (id: number) =>
 
 // --- Items ---
 export const getItems = () => req<Item[]>('/items')
-export const createItem = (data: Pick<Item, 'name' | 'description' | 'notes' | 'sku'>) =>
+export const createItem = (data: Pick<Item, 'name' | 'description' | 'notes' | 'sku' | 'msrp'>) =>
   req<Item>('/items', { method: 'POST', body: JSON.stringify(data) })
-export const updateItem = (id: number, data: Pick<Item, 'name' | 'description' | 'notes' | 'sku' | 'stl_source_url' | 'use_advanced_routing'>) =>
+export const updateItem = (id: number, data: Pick<Item, 'name' | 'description' | 'notes' | 'sku' | 'stl_source_url' | 'use_advanced_routing' | 'msrp'>) =>
   req<Item>(`/items/${id}`, { method: 'PUT', body: JSON.stringify(data) })
 export const deleteItem = (id: number) =>
   req<void>(`/items/${id}`, { method: 'DELETE' })

@@ -163,6 +163,8 @@ with engine.connect() as conn:
         conn.execute(text("ALTER TABLE items ADD COLUMN use_advanced_routing BOOLEAN NOT NULL DEFAULT 0"))
     if "stl_source_url" not in existing_items_cols2:
         conn.execute(text("ALTER TABLE items ADD COLUMN stl_source_url TEXT NOT NULL DEFAULT ''"))
+    if "msrp" not in existing_items_cols2:
+        conn.execute(text("ALTER TABLE items ADD COLUMN msrp REAL"))
 
 
     existing_tables2 = {row[0] for row in conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))}
