@@ -176,6 +176,25 @@ def _handle_job_started(printer_id: int, job: dict, db) -> None:
     if pj and moonraker_job_id and pj.moonraker_job_id is None:
         pj.moonraker_job_id = moonraker_job_id
 
+    # No existing record — job was started externally (not via 3DMRP send-gcode).
+    # Create a PrintJob now so the order shows as in-progress and reconciliation
+    # can credit it when the print finishes.
+    if pj is None and (moonraker_job_id or filename):
+        start_ts = job.get("start_time")
+        item_id = _resolve_item_by_filename(filename, db) if filename else None
+        step_id = _resolve_step_by_filename(filename, db) if filename else None
+        pj = PrintJob(
+            printer_id=printer_id,
+            moonraker_job_id=moonraker_job_id,
+            filename=filename,
+            status="in_progress",
+            start_time=datetime.utcfromtimestamp(start_ts) if start_ts else None,
+            item_id=item_id,
+            routing_step_id=step_id,
+        )
+        db.add(pj)
+        db.flush()
+
     if pj:
         _link_order_to_job(pj, db)
 
