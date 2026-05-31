@@ -84,7 +84,7 @@ function TdBadge({ td }: { td: number }) {
   const { bg, color } = tdBadgeStyle(td)
   return (
     <span
-      style={{ backgroundColor: bg, color, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}
+      style={{ backgroundColor: bg, color, fontFamily: '"Segoe UI", system-ui, sans-serif' }}
       className="inline-flex items-center justify-center w-10 h-6 rounded text-[11px] font-bold shrink-0 leading-none"
     >
       {td.toFixed(1)}
