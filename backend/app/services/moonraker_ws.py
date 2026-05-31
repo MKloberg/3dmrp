@@ -120,10 +120,19 @@ async def _handle_history_changed(printer_id: int, event: dict) -> None:
 
 
 def _link_order_to_job(pj: PrintJob, db) -> None:
-    """Link the earliest open FIFO order for this job's item, and advance pending → printing."""
+    """Link the earliest open FIFO order for this job's item, and advance pending → printing.
+    Also back-fills item_id and routing_step_id from the filename whenever they are missing."""
+    # Always try to resolve item/step from filename if fields are missing.
+    if pj.item_id is None and pj.filename:
+        pj.item_id = _resolve_item_by_filename(pj.filename, db)
+    if pj.routing_step_id is None and pj.filename:
+        step = _resolve_step_by_filename(pj.filename, db)
+        if step:
+            pj.routing_step_id = step.id
+
     if pj.order_id is not None:
         return
-    item_id = pj.item_id or _resolve_item_by_filename(pj.filename, db)
+    item_id = pj.item_id
     if item_id is None:
         return
     order = (
@@ -182,7 +191,7 @@ def _handle_job_started(printer_id: int, job: dict, db) -> None:
     if pj is None and (moonraker_job_id or filename):
         start_ts = job.get("start_time")
         item_id = _resolve_item_by_filename(filename, db) if filename else None
-        step_id = _resolve_step_by_filename(filename, db) if filename else None
+        step = _resolve_step_by_filename(filename, db) if filename else None
         pj = PrintJob(
             printer_id=printer_id,
             moonraker_job_id=moonraker_job_id,
@@ -190,7 +199,7 @@ def _handle_job_started(printer_id: int, job: dict, db) -> None:
             status="in_progress",
             start_time=datetime.utcfromtimestamp(start_ts) if start_ts else None,
             item_id=item_id,
-            routing_step_id=step_id,
+            routing_step_id=step.id if step else None,
         )
         db.add(pj)
         db.flush()
@@ -291,9 +300,9 @@ async def _reconcile(printer_id: int, db) -> None:
             if existing.end_time is None and end_ts:
                 existing.end_time = datetime.utcfromtimestamp(end_ts)
                 changed = True
-            if existing.order_id is None:
+            if existing.order_id is None or existing.routing_step_id is None:
                 _link_order_to_job(existing, db)
-                if existing.order_id is not None:
+                if existing.order_id is not None or existing.routing_step_id is not None:
                     changed = True
 
     if changed:
