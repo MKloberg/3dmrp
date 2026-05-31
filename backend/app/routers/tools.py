@@ -133,7 +133,8 @@ def pick_hueforge_folder(body: PickFolderRequest = PickFolderRequest()):
 
 @router.post("/export-hueforge")
 def export_hueforge(body: ExportHueForgeRequest, db: Session = Depends(get_db)):
-    directory = os.path.dirname(os.path.normpath(body.path))
+    dest = os.path.normpath(body.path)
+    directory = os.path.dirname(dest)
     if not os.path.isdir(directory):
         raise HTTPException(status_code=404, detail=f"Directory not found: {directory}")
 
@@ -167,11 +168,19 @@ def export_hueforge(body: ExportHueForgeRequest, db: Session = Depends(get_db)):
     payload = json.dumps({"Filaments": hueforge_list}, indent=2)
 
     try:
-        with open(body.path, "w", encoding="utf-8") as fh:
+        with open(dest, "w", encoding="utf-8") as fh:
             fh.write(payload)
+            fh.flush()
+            try:
+                os.fsync(fh.fileno())
+            except OSError:
+                pass  # some virtual filesystems don't support fsync
     except PermissionError:
-        raise HTTPException(status_code=403, detail=f"Permission denied: {body.path}")
+        raise HTTPException(status_code=403, detail=f"Permission denied: {dest}")
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail=f"Directory not found: {directory}")
 
-    return {"path": body.path}
+    if not os.path.isfile(dest):
+        raise HTTPException(status_code=500, detail=f"File was not written to disk. The target folder may be a virtual or cloud-synced drive that doesn't support direct file writes from background processes. Try exporting to a local folder (e.g. Desktop or Documents) and moving the file manually.")
+
+    return {"path": dest}
