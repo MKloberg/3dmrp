@@ -128,6 +128,7 @@ function FilamentDetail({ f }: { f: FilamentSpec }) {
         <Field label="Price" value={f.price != null ? `${currSym}${f.price.toFixed(2)}` : null} />
         <Field label="Extruder temp" value={f.settings_extruder_temp ? `${f.settings_extruder_temp} °C` : null} />
         <Field label="Bed temp" value={f.settings_bed_temp ? `${f.settings_bed_temp} °C` : null} />
+        <Field label="TD (Transmissivity)" value={f.extra?.['td'] != null ? `${f.extra['td']} mm` : null} />
         <Field label="Article #" value={f.article_number} />
         <Field label="External ID" value={f.external_id} />
         {f.spoolman_id && <Field label="Spoolman ID" value={f.spoolman_id} />}
@@ -150,11 +151,11 @@ function FilamentDetail({ f }: { f: FilamentSpec }) {
           <dd className="text-sm text-gray-700 dark:text-gray-300 mt-0.5">{f.comment}</dd>
         </div>
       )}
-      {hasExtra && (
+      {hasExtra && Object.entries(f.extra!).filter(([k]) => k !== 'td').length > 0 && (
         <div className="mt-3">
           <p className="text-xs text-gray-400 mb-1">Extra fields</p>
           <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-2">
-            {Object.entries(f.extra!).map(([k, v]) => (
+            {Object.entries(f.extra!).filter(([k]) => k !== 'td').map(([k, v]) => (
               <Field key={k} label={k} value={String(v)} />
             ))}
           </dl>
@@ -238,6 +239,17 @@ function FilamentForm({
             <label className="text-xs text-gray-500 block mb-1">Empty spool (g)</label>
             <input type="number" step="1" className="w-full border rounded-lg px-3 py-2 text-sm"
               placeholder="e.g. 250" value={form.spool_weight ?? ''} onChange={e => set({ spool_weight: num(e.target.value) })} />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 block mb-1">TD — Transmissivity (mm)</label>
+            <input type="number" step="0.01" min="0" className="w-full border rounded-lg px-3 py-2 text-sm"
+              placeholder="e.g. 0.3"
+              value={form.extra?.['td'] != null ? String(form.extra['td']) : ''}
+              onChange={e => {
+                const next = { ...(form.extra ?? {}) }
+                if (e.target.value === '') { delete next['td'] } else { next['td'] = Number(e.target.value) }
+                set({ extra: Object.keys(next).length ? next : null })
+              }} />
           </div>
         </div>
       </div>
