@@ -81,6 +81,7 @@ export interface RoutingStep {
   sort_order: number
   description: string
   printer_type_id: number | null
+  printer_type: PrinterType | null
   quantity_on_plate: number
   parts_per_item: number
   estimated_print_time: number | null
@@ -129,6 +130,12 @@ export interface Item {
   msrp: number | null
 }
 
+export interface StepProgress {
+  id: number
+  routing_step_id: number
+  parts_printed: number
+}
+
 export interface Order {
   id: number
   item_id: number
@@ -142,6 +149,7 @@ export interface Order {
   status: 'pending' | 'printing' | 'complete' | 'cancelled'
   item: Item
   customer: Customer | null
+  step_progress: StepProgress[]
 }
 
 export interface ContributingOrder {

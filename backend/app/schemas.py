@@ -147,12 +147,27 @@ class StepSlicerFileOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class StepSlicerOut(BaseModel):
+    name: str
+
+    model_config = {"from_attributes": True}
+
+
+class StepPrinterTypeOut(BaseModel):
+    id: int
+    name: str
+    slicer: Optional[StepSlicerOut] = None
+
+    model_config = {"from_attributes": True}
+
+
 class RoutingStepOut(BaseModel):
     id: int
     routing_id: int
     sort_order: int
     description: str
     printer_type_id: Optional[int] = None
+    printer_type: Optional[StepPrinterTypeOut] = None
     quantity_on_plate: int
     parts_per_item: int = 1
     estimated_print_time: Optional[int] = None
@@ -331,6 +346,14 @@ class OrderUpdate(BaseModel):
     status: Optional[OrderStatus] = None
 
 
+class StepProgressOut(BaseModel):
+    id: int
+    routing_step_id: int
+    parts_printed: int
+
+    model_config = {"from_attributes": True}
+
+
 class OrderOut(OrderBase):
     id: int
     customer_id: Optional[int] = None
@@ -339,6 +362,7 @@ class OrderOut(OrderBase):
     status: OrderStatus
     item: ItemOut
     customer: Optional[CustomerOut] = None
+    step_progress: List[StepProgressOut] = []
 
     model_config = {"from_attributes": True}
 

@@ -1,10 +1,127 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
-import { getOrders, createOrder, updateOrder, deleteOrder, getItems, updateItem, getCustomers, adjustQuantityPrinted, Order } from '../api/client'
+import { getOrders, createOrder, updateOrder, deleteOrder, getItems, updateItem, getCustomers, adjustQuantityPrinted, Order, RoutingStep } from '../api/client'
 import Modal from '../components/Modal'
 import StatusBadge from '../components/StatusBadge'
-import { Plus, Trash2, Pencil, Package, User, ExternalLink, ClipboardList } from 'lucide-react'
+import { Plus, Trash2, Pencil, Package, User, ExternalLink, ClipboardList, ChevronRight, ChevronDown } from 'lucide-react'
+
+function fmtTime(secs: number): string {
+  const h = Math.floor(secs / 3600)
+  const m = Math.floor((secs % 3600) / 60)
+  return h > 0 ? `~${h}h ${m}m` : `~${m}m`
+}
+
+function OrderProgressPanel({ order }: { order: Order }) {
+  const qualifyingSteps: RoutingStep[] = []
+  for (const routing of order.item.routings) {
+    if (!routing.include_in_summary) continue
+    for (const step of routing.steps) {
+      if (!step.include_in_planning) continue
+      qualifyingSteps.push(step)
+    }
+  }
+
+  if (qualifyingSteps.length === 0) {
+    return <p className="text-sm text-gray-400 italic">No production steps defined.</p>
+  }
+
+  const progressMap = new Map(order.step_progress.map(p => [p.routing_step_id, p.parts_printed]))
+  const THUMB = 72
+  const MODAL = 384
+
+  return (
+    <div className="space-y-2">
+      {qualifyingSteps.map(step => {
+        const partsNeeded = step.parts_per_item * order.quantity
+        const partsPrinted = progressMap.get(step.id) ?? 0
+        const pct = partsNeeded > 0 ? Math.min(100, Math.round((partsPrinted / partsNeeded) * 100)) : 0
+        const barColor = pct >= 100 ? 'bg-green-500' : pct > 0 ? 'bg-brand-500' : 'bg-gray-300 dark:bg-gray-600'
+
+        const slicerName = step.printer_type?.slicer?.name
+        const printerTypeName = step.printer_type?.name
+        const thumbUrl = step.gcode_file && slicerName && printerTypeName
+          ? `/api/gcode/thumbnail?item_name=${encodeURIComponent(order.item.name)}&slicer_name=${encodeURIComponent(slicerName)}&printer_type_name=${encodeURIComponent(printerTypeName)}&filename=${encodeURIComponent(step.gcode_file)}`
+          : null
+
+        const zoom = step.thumbnail_zoom ?? 150
+        const ox = step.thumbnail_offset_x ?? 0
+        const oy = step.thumbnail_offset_y ?? 0
+
+        const platesNeeded = partsNeeded > 0 ? Math.ceil(partsNeeded / step.quantity_on_plate) : null
+        const totalTime = step.estimated_print_time && platesNeeded ? step.estimated_print_time * platesNeeded : null
+
+        return (
+          <div key={step.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
+            {/* Thumbnail zone — always reserved */}
+            <div className="w-[72px] h-[72px] shrink-0 rounded border border-gray-200 dark:border-gray-600 overflow-hidden bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
+              {thumbUrl && (
+                <img
+                  src={thumbUrl}
+                  style={{
+                    maxWidth: '100%',
+                    maxHeight: '100%',
+                    objectFit: 'contain',
+                    transform: `translate(${ox * THUMB / MODAL}px, ${oy * THUMB / MODAL}px) scale(${zoom / 100})`,
+                    transformOrigin: 'center center',
+                  }}
+                  alt=""
+                  onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+                />
+              )}
+            </div>
+
+            {/* Step info */}
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
+                {step.description || '(unnamed step)'}
+              </p>
+              {step.printer_type && (
+                <p className="text-xs text-gray-500 dark:text-gray-400">{step.printer_type.name}</p>
+              )}
+              {step.filaments.length > 0 && (
+                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                  {step.filaments.map(f => (
+                    <span key={f.id} className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                      <span
+                        className="inline-block w-2.5 h-2.5 rounded-full border border-gray-300 dark:border-gray-500 shrink-0"
+                        style={{ backgroundColor: f.filament_spec.color_hex }}
+                      />
+                      {f.filament_spec.material} {f.filament_spec.color_name}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-3 text-xs text-gray-400 mt-1">
+                {step.parts_per_item !== 1 && <span>{step.parts_per_item} parts/item</span>}
+                {step.quantity_on_plate !== 1 && <span>{step.quantity_on_plate}/plate</span>}
+                {step.estimated_print_time && <span>{fmtTime(step.estimated_print_time)}/plate</span>}
+              </div>
+            </div>
+
+            {/* Progress zone */}
+            <div className="w-44 shrink-0">
+              <div className="flex justify-between text-xs mb-1">
+                <span className="font-medium tabular-nums text-gray-700 dark:text-gray-300">
+                  {partsPrinted}<span className="text-gray-400 font-normal">/{partsNeeded} parts</span>
+                </span>
+                <span className={pct >= 100 ? 'text-green-600 font-medium' : pct > 0 ? 'text-brand-600 font-medium' : 'text-gray-400'}>
+                  {pct}%
+                </span>
+              </div>
+              <div className="w-full h-2 rounded-full bg-gray-200 dark:bg-gray-600 overflow-hidden">
+                <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${pct}%` }} />
+              </div>
+              {totalTime && (
+                <p className="text-xs text-gray-400 mt-1 text-right">{fmtTime(totalTime)} total</p>
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
 const STATUSES = ['pending', 'printing', 'complete', 'cancelled'] as const
 type Status = typeof STATUSES[number]
@@ -45,6 +162,7 @@ export default function Orders() {
     }
   }, [searchParams, orders])
 
+  const [expandedOrderId, setExpandedOrderId] = useState<number | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing] = useState<Order | null>(null)
   const [modelMode, setModelMode] = useState<'existing' | 'new'>('existing')
@@ -179,6 +297,7 @@ export default function Orders() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 dark:bg-gray-700/50 border-b dark:border-gray-700 text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">
               <tr>
+                <th className="px-2 py-2 w-8" />
                 <th className="px-4 py-2 text-left">Item</th>
                 <th className="px-4 py-2 text-left">Customer</th>
                 <th className="px-4 py-2 text-center">Progress</th>
@@ -192,8 +311,19 @@ export default function Orders() {
               {orders.map(order => {
                 const firstImage = order.item.images[0]
                 const customerLabel = orderCustomerLabel(order)
+                const isExpanded = expandedOrderId === order.id
                 return (
-                  <tr key={order.id} id={`order-${order.id}`} className={`hover:bg-gray-50 dark:hover:bg-gray-700/30 ${hash === `#order-${order.id}` ? 'bg-brand-50 dark:bg-brand-900/20' : ''}`}>
+                  <Fragment key={order.id}>
+                  <tr id={`order-${order.id}`} className={`hover:bg-gray-50 dark:hover:bg-gray-700/30 ${hash === `#order-${order.id}` ? 'bg-brand-50 dark:bg-brand-900/20' : ''}`}>
+                    <td className="px-2 py-3">
+                      <button
+                        onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}
+                        className="text-gray-400 hover:text-brand-600 p-0.5 rounded"
+                        title={isExpanded ? 'Collapse' : 'Show production progress'}
+                      >
+                        {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                      </button>
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         {firstImage ? (
@@ -301,6 +431,14 @@ export default function Orders() {
                       </div>
                     </td>
                   </tr>
+                  {isExpanded && (
+                    <tr className="bg-gray-50 dark:bg-gray-800/60">
+                      <td colSpan={8} className="px-6 py-3 border-b border-gray-100 dark:border-gray-700">
+                        <OrderProgressPanel order={order} />
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 )
               })}
             </tbody>

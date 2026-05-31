@@ -249,6 +249,7 @@ class Order(Base):
 
     item = relationship("Item", back_populates="orders")
     customer = relationship("Customer", back_populates="orders")
+    step_progress = relationship("OrderStepProgress", back_populates="order")
 
 
 class Routing(Base):
@@ -338,6 +339,8 @@ class OrderStepProgress(Base):
     order_id = Column(Integer, ForeignKey("orders.id", ondelete="CASCADE"), nullable=False)
     routing_step_id = Column(Integer, ForeignKey("routing_steps.id", ondelete="CASCADE"), nullable=False)
     parts_printed = Column(Integer, nullable=False, default=0)
+
+    order = relationship("Order", back_populates="step_progress")
 
     __table_args__ = (UniqueConstraint("order_id", "routing_step_id", name="uq_order_step_progress"),)
 
