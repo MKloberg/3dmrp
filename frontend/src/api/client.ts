@@ -86,6 +86,9 @@ export interface RoutingStep {
   estimated_print_time: number | null
   include_in_planning: boolean
   gcode_file: string | null
+  thumbnail_zoom: number | null
+  thumbnail_offset_x: number | null
+  thumbnail_offset_y: number | null
   filaments: RoutingStepFilament[]
   slicer_file: StepSlicerFile | null
 }
@@ -252,7 +255,7 @@ export const deleteRouting = (itemId: number, routingId: number) =>
 
 export const createRoutingStep = (itemId: number, routingId: number, data: { description?: string; printer_type_id?: number | null; quantity_on_plate?: number; parts_per_item?: number; estimated_print_time?: number | null }) =>
   req<RoutingStep>(`/items/${itemId}/routings/${routingId}/steps`, { method: 'POST', body: JSON.stringify(data) })
-export const updateRoutingStep = (itemId: number, routingId: number, stepId: number, data: { description?: string; printer_type_id?: number | null; quantity_on_plate?: number; parts_per_item?: number; estimated_print_time?: number | null; include_in_planning?: boolean; gcode_file?: string | null }) =>
+export const updateRoutingStep = (itemId: number, routingId: number, stepId: number, data: { description?: string; printer_type_id?: number | null; quantity_on_plate?: number; parts_per_item?: number; estimated_print_time?: number | null; include_in_planning?: boolean; gcode_file?: string | null; thumbnail_zoom?: number | null; thumbnail_offset_x?: number | null; thumbnail_offset_y?: number | null }) =>
   req<RoutingStep>(`/items/${itemId}/routings/${routingId}/steps/${stepId}`, { method: 'PATCH', body: JSON.stringify(data) })
 export const deleteRoutingStep = (itemId: number, routingId: number, stepId: number) =>
   req<void>(`/items/${itemId}/routings/${routingId}/steps/${stepId}`, { method: 'DELETE' })

@@ -1601,7 +1601,7 @@ function PrinterStatusRow({ printer, anySending, uploadSending, uploadSent, uplo
   )
 }
 
-function GcodePanel({ itemId, routingId, itemName, slicerName, printerTypeName, printerTypeId, stepId, savedGcodeFile, stepPrintTime, printers, stepFilaments, filaments, onUpdateFromGcode, onGcodeFileChange }: {
+function GcodePanel({ itemId, routingId, itemName, slicerName, printerTypeName, printerTypeId, stepId, savedGcodeFile, stepPrintTime, initialZoom, initialOffsetX, initialOffsetY, printers, stepFilaments, filaments, onUpdateFromGcode, onGcodeFileChange }: {
   itemId: number
   routingId: number
   itemName: string
@@ -1611,6 +1611,9 @@ function GcodePanel({ itemId, routingId, itemName, slicerName, printerTypeName, 
   stepId: number
   savedGcodeFile?: string | null
   stepPrintTime: number | null
+  initialZoom?: number | null
+  initialOffsetX?: number | null
+  initialOffsetY?: number | null
   printers: Printer[]
   stepFilaments: RoutingStepFilament[]
   filaments: FilamentSpec[]
@@ -1665,9 +1668,9 @@ function GcodePanel({ itemId, routingId, itemName, slicerName, printerTypeName, 
   const [wizardState, setWizardState] = useState<{ printer: Printer; mode: 'analyze' | 'send' | 'send_and_start' } | null>(null)
   const [showThumbModal, setShowThumbModal] = useState(false)
   const [showExcludeObjectsModal, setShowExcludeObjectsModal] = useState(false)
-  const [zoom, setZoom] = useState(150)
-  const [offsetX, setOffsetX] = useState(0)
-  const [offsetY, setOffsetY] = useState(0)
+  const [zoom, setZoom] = useState(initialZoom ?? 150)
+  const [offsetX, setOffsetX] = useState(initialOffsetX ?? 0)
+  const [offsetY, setOffsetY] = useState(initialOffsetY ?? 0)
   // Drag state kept in a ref to avoid re-renders during pointer move
   const dragRef = useRef<{ startX: number; startY: number; ox: number; oy: number } | null>(null)
 
@@ -1678,8 +1681,14 @@ function GcodePanel({ itemId, routingId, itemName, slicerName, printerTypeName, 
     return () => window.removeEventListener('keydown', onKey)
   }, [showThumbModal])
 
-  // Reset position when file changes
-  useEffect(() => { setOffsetX(0); setOffsetY(0) }, [activeFile])
+
+  function saveThumb(z: number, ox: number, oy: number) {
+    updateRoutingStep(itemId, routingId, stepId, {
+      thumbnail_zoom: z,
+      thumbnail_offset_x: Math.round(ox),
+      thumbnail_offset_y: Math.round(oy),
+    })
+  }
 
   function onDragPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     e.currentTarget.setPointerCapture(e.pointerId)
@@ -1692,6 +1701,11 @@ function GcodePanel({ itemId, routingId, itemName, slicerName, printerTypeName, 
   }
   function onDragPointerUp(e: React.PointerEvent<HTMLDivElement>) {
     e.currentTarget.releasePointerCapture(e.pointerId)
+    if (dragRef.current) {
+      const newOx = dragRef.current.ox + (e.clientX - dragRef.current.startX)
+      const newOy = dragRef.current.oy + (e.clientY - dragRef.current.startY)
+      saveThumb(zoom, newOx, newOy)
+    }
     dragRef.current = null
   }
 
@@ -1713,6 +1727,9 @@ function GcodePanel({ itemId, routingId, itemName, slicerName, printerTypeName, 
 
   function selectFile(f: string) {
     setSelected(f)
+    setOffsetX(0)
+    setOffsetY(0)
+    setZoom(150)
     setSentPrinterId(null)
     setSendError(null)
     setProgress(0)
@@ -1905,7 +1922,7 @@ function GcodePanel({ itemId, routingId, itemName, slicerName, printerTypeName, 
       {showThumbModal && thumbnailUrl && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-          onClick={() => setShowThumbModal(false)}
+          onClick={() => { saveThumb(zoom, offsetX, offsetY); setShowThumbModal(false) }}
         >
           <div
             className="bg-gray-900 rounded-xl shadow-2xl flex flex-col gap-3 p-4 w-96"
@@ -1913,7 +1930,7 @@ function GcodePanel({ itemId, routingId, itemName, slicerName, printerTypeName, 
           >
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-gray-400 truncate">{activeFile}</span>
-              <button onClick={() => setShowThumbModal(false)} className="text-gray-400 hover:text-white shrink-0 ml-2">
+              <button onClick={() => { saveThumb(zoom, offsetX, offsetY); setShowThumbModal(false) }} className="text-gray-400 hover:text-white shrink-0 ml-2">
                 <X size={16} />
               </button>
             </div>
@@ -1943,16 +1960,16 @@ function GcodePanel({ itemId, routingId, itemName, slicerName, printerTypeName, 
 
             <div className="flex items-center justify-center gap-2">
               <button
-                onClick={() => setZoom(z => Math.max(10, z - 10))}
+                onClick={() => { const z = Math.max(10, zoom - 10); setZoom(z); saveThumb(z, offsetX, offsetY) }}
                 className="w-7 h-7 flex items-center justify-center rounded-full text-white/80 hover:text-white hover:bg-white/10 text-xl leading-none font-bold"
               >−</button>
               <button
                 title="Click to reset to 100%"
-                onClick={() => setZoom(100)}
+                onClick={() => { setZoom(100); saveThumb(100, offsetX, offsetY) }}
                 className="w-14 text-center text-sm font-mono text-gray-300 hover:text-white"
               >{zoom}%</button>
               <button
-                onClick={() => setZoom(z => Math.min(400, z + 10))}
+                onClick={() => { const z = Math.min(400, zoom + 10); setZoom(z); saveThumb(z, offsetX, offsetY) }}
                 className="w-7 h-7 flex items-center justify-center rounded-full text-white/80 hover:text-white hover:bg-white/10 text-xl leading-none font-bold"
               >+</button>
             </div>
@@ -2398,6 +2415,15 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
   // --- Cost / BOM modals ---
   const [showCostModal, setShowCostModal] = useState(false)
   const [showBomModal, setShowBomModal] = useState(false)
+  const [msrpInput, setMsrpInput] = useState(item.msrp != null ? String(item.msrp) : '')
+  const [msrpEditing, setMsrpEditing] = useState(false)
+  const saveMsrpMutation = useMutation({
+    mutationFn: (val: number | null) => updateItem(item.id, {
+      name: item.name, description: item.description, notes: item.notes, sku: item.sku,
+      stl_source_url: item.stl_source_url, use_advanced_routing: item.use_advanced_routing, msrp: val,
+    }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['items'] }),
+  })
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: getSettings })
   const globalHourlyRate = parseFloat(settings?.machine_hourly_rate ?? '2.50') || 2.50
   const electricityRate = parseFloat(settings?.electricity_cost_kwh ?? '0.1765') || 0.1765
@@ -2735,6 +2761,9 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                       stepId={step.id}
                       savedGcodeFile={step.gcode_file}
                       stepPrintTime={step.estimated_print_time}
+                      initialZoom={step.thumbnail_zoom}
+                      initialOffsetX={step.thumbnail_offset_x}
+                      initialOffsetY={step.thumbnail_offset_y}
                       printers={printers}
                       stepFilaments={step.filaments}
                       filaments={filaments}
@@ -3467,9 +3496,42 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                           </span>
                           <span className="text-xs text-gray-400">{totalCost > 0 ? `${currSym}${totalCost.toFixed(2)} × ${globalMarkup.toFixed(2)}` : '—'}</span>
                         </div>
-                        <div className="flex items-center justify-between py-2">
+                        <div className="flex items-center justify-between py-2 border-b dark:border-gray-700">
                           <span className="font-semibold text-green-700 dark:text-green-400">Suggested MSRP</span>
                           <span className="font-bold text-2xl text-green-600 dark:text-green-400">{currSym}{msrp.toFixed(2)}</span>
+                        </div>
+                        <div className="flex items-center justify-between py-2 gap-3">
+                          <span className="font-semibold text-green-700 dark:text-green-400">Item MSRP</span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              title="Use suggested MSRP"
+                              onClick={() => { const v = msrp.toFixed(2); setMsrpInput(v); saveMsrpMutation.mutate(msrp); setMsrpEditing(false) }}
+                              className="text-xs text-green-600 dark:text-green-400 hover:text-green-800 dark:hover:text-green-200 border border-green-300 dark:border-green-700 rounded px-1.5 py-0.5 shrink-0"
+                            >↑ use suggested</button>
+                            {msrpEditing ? (
+                              <div className="relative">
+                                <span className="absolute left-0 top-1/2 -translate-y-1/2 font-bold text-2xl text-green-600 dark:text-green-400 pointer-events-none">{currSym}</span>
+                                <input
+                                  autoFocus
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  value={msrpInput}
+                                  onChange={e => setMsrpInput(e.target.value)}
+                                  onBlur={() => { saveMsrpMutation.mutate(msrpInput !== '' ? Number(msrpInput) : null); setMsrpEditing(false) }}
+                                  onKeyDown={e => { if (e.key === 'Enter') { saveMsrpMutation.mutate(msrpInput !== '' ? Number(msrpInput) : null); setMsrpEditing(false) } if (e.key === 'Escape') setMsrpEditing(false) }}
+                                  className="font-bold text-2xl text-green-600 dark:text-green-400 bg-transparent border-b border-green-400 dark:border-green-600 focus:outline-none w-28 text-right pl-6 pr-1"
+                                />
+                              </div>
+                            ) : (
+                              <button onClick={() => setMsrpEditing(true)} className="flex items-center gap-1.5 group">
+                                <span className="font-bold text-2xl text-green-600 dark:text-green-400">
+                                  {msrpInput !== '' ? `${currSym}${Number(msrpInput).toFixed(2)}` : <span className="text-gray-400 dark:text-gray-500">—</span>}
+                                </span>
+                                <Pencil size={13} className="text-green-400 dark:text-green-600 group-hover:text-green-600 dark:group-hover:text-green-400 shrink-0" />
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </>
                     )

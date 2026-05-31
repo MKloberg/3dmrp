@@ -279,6 +279,9 @@ class RoutingStep(Base):
     estimated_print_time = Column(Integer, nullable=True)  # seconds
     include_in_planning = Column(Boolean, nullable=False, default=True)
     gcode_file = Column(String, nullable=True)
+    thumbnail_zoom = Column(Integer, nullable=True)
+    thumbnail_offset_x = Column(Integer, nullable=True)
+    thumbnail_offset_y = Column(Integer, nullable=True)
 
     routing = relationship("Routing", back_populates="steps")
     printer_type = relationship("PrinterType")

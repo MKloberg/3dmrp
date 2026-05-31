@@ -153,6 +153,12 @@ with engine.connect() as conn:
         conn.execute(text("ALTER TABLE routing_steps ADD COLUMN include_in_planning BOOLEAN NOT NULL DEFAULT 1"))
     if "gcode_file" not in existing_steps:
         conn.execute(text("ALTER TABLE routing_steps ADD COLUMN gcode_file TEXT"))
+    if "thumbnail_zoom" not in existing_steps:
+        conn.execute(text("ALTER TABLE routing_steps ADD COLUMN thumbnail_zoom INTEGER"))
+    if "thumbnail_offset_x" not in existing_steps:
+        conn.execute(text("ALTER TABLE routing_steps ADD COLUMN thumbnail_offset_x INTEGER"))
+    if "thumbnail_offset_y" not in existing_steps:
+        conn.execute(text("ALTER TABLE routing_steps ADD COLUMN thumbnail_offset_y INTEGER"))
 
     existing_routings = {row[1] for row in conn.execute(text("PRAGMA table_info(routings)"))}
     if "include_in_summary" not in existing_routings:

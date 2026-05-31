@@ -129,6 +129,9 @@ class RoutingStepUpdate(BaseModel):
     estimated_print_time: Optional[int] = None
     include_in_planning: Optional[bool] = None
     gcode_file: Optional[str] = None
+    thumbnail_zoom: Optional[int] = None
+    thumbnail_offset_x: Optional[int] = None
+    thumbnail_offset_y: Optional[int] = None
 
 
 class RoutingStepReorderItem(BaseModel):
@@ -157,6 +160,9 @@ class RoutingStepOut(BaseModel):
     filaments: List[RoutingStepFilamentOut] = []
     slicer_file: Optional[StepSlicerFileOut] = None
     gcode_file: Optional[str] = None
+    thumbnail_zoom: Optional[int] = None
+    thumbnail_offset_x: Optional[int] = None
+    thumbnail_offset_y: Optional[int] = None
 
     model_config = {"from_attributes": True}
 
