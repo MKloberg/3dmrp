@@ -1,7 +1,7 @@
 import { useState, useEffect, Fragment } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
-import { getOrders, createOrder, updateOrder, deleteOrder, getItems, updateItem, getCustomers, adjustQuantityPrinted, Order, RoutingStep } from '../api/client'
+import { getOrders, createOrder, updateOrder, deleteOrder, getItems, updateItem, getCustomers, adjustQuantityPrinted, getPrinterStatus, Order, RoutingStep } from '../api/client'
 import Modal from '../components/Modal'
 import StatusBadge from '../components/StatusBadge'
 import { Plus, Trash2, Pencil, Package, User, ExternalLink, ClipboardList, ChevronRight, ChevronDown } from 'lucide-react'
@@ -10,6 +10,21 @@ function fmtTime(secs: number): string {
   const h = Math.floor(secs / 3600)
   const m = Math.floor((secs % 3600) / 60)
   return h > 0 ? `~${h}h ${m}m` : `~${m}m`
+}
+
+function formatCompletion(remainingSecs: number): string {
+  const now = new Date()
+  const done = new Date(now.getTime() + remainingSecs * 1000)
+  const tomorrow = new Date(now)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  const isToday = done.toDateString() === now.toDateString()
+  const isTomorrow = done.toDateString() === tomorrow.toDateString()
+  const timeStr = done.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  const dayLabel = isToday ? 'today' : isTomorrow ? 'tomorrow' : done.toLocaleDateString([], { weekday: 'long' })
+  const h = Math.floor(remainingSecs / 3600)
+  const m = Math.floor((remainingSecs % 3600) / 60)
+  const leftStr = h > 0 ? `${h}h ${m}m left` : `${m}m left`
+  return `${timeStr} ${dayLabel} · ${leftStr}`
 }
 
 function OrderProgressPanel({ order }: { order: Order }) {
@@ -21,6 +36,20 @@ function OrderProgressPanel({ order }: { order: Order }) {
       qualifyingSteps.push(step)
     }
   }
+
+  const activePrinterIds = [...new Set(order.active_print_jobs.map(j => j.printer_id))]
+  const printerStatuses = useQueries({
+    queries: activePrinterIds.map(id => ({
+      queryKey: ['printer-status', id],
+      queryFn: () => getPrinterStatus(id),
+      refetchInterval: 30_000,
+      staleTime: 15_000,
+      retry: false,
+    })),
+  })
+  const timeRemainingMap = new Map<number, number | null>(
+    activePrinterIds.map((id, i) => [id, printerStatuses[i]?.data?.time_remaining ?? null])
+  )
 
   if (qualifyingSteps.length === 0) {
     return <p className="text-sm text-gray-400 italic">No production steps defined.</p>
@@ -51,6 +80,16 @@ function OrderProgressPanel({ order }: { order: Order }) {
         const platesNeeded = partsNeeded > 0 ? Math.ceil(partsNeeded / step.quantity_on_plate) : null
         const totalTime = step.estimated_print_time && platesNeeded ? step.estimated_print_time * platesNeeded : null
 
+        const stepJobs = order.active_print_jobs.filter(j => j.routing_step_id === step.id)
+        const printerNames = stepJobs.map(j => j.printer?.name ?? `Printer ${j.printer_id}`).join(', ')
+        const maxRemaining = stepJobs.length > 0
+          ? stepJobs.reduce<number | null>((max, j) => {
+              const t = timeRemainingMap.get(j.printer_id) ?? null
+              if (t === null) return max
+              return max === null ? t : Math.max(max, t)
+            }, null)
+          : null
+
         return (
           <div key={step.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
             {/* Thumbnail zone — always reserved */}
@@ -76,9 +115,17 @@ function OrderProgressPanel({ order }: { order: Order }) {
               <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
                 {step.description || '(unnamed step)'}
               </p>
-              {step.printer_type && (
-                <p className="text-xs text-gray-500 dark:text-gray-400">{step.printer_type.name}</p>
-              )}
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                {step.printer_type?.name}
+                {stepJobs.length > 0 && (
+                  <span className="text-brand-500 dark:text-brand-400">
+                    {' '}· printing on {printerNames}
+                    {maxRemaining !== null && maxRemaining > 0 && (
+                      <>, done {formatCompletion(maxRemaining)}</>
+                    )}
+                  </span>
+                )}
+              </p>
               {step.filaments.length > 0 && (
                 <div className="flex items-center gap-2 mt-1 flex-wrap">
                   {step.filaments.map(f => (

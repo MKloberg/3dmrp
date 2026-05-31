@@ -136,6 +136,12 @@ export interface StepProgress {
   parts_printed: number
 }
 
+export interface ActivePrintJob {
+  routing_step_id: number | null
+  printer_id: number
+  printer: { id: number; name: string } | null
+}
+
 export interface Order {
   id: number
   item_id: number
@@ -150,6 +156,7 @@ export interface Order {
   item: Item
   customer: Customer | null
   step_progress: StepProgress[]
+  active_print_jobs: ActivePrintJob[]
 }
 
 export interface ContributingOrder {

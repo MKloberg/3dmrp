@@ -250,6 +250,11 @@ class Order(Base):
     item = relationship("Item", back_populates="orders")
     customer = relationship("Customer", back_populates="orders")
     step_progress = relationship("OrderStepProgress", back_populates="order")
+    active_print_jobs = relationship(
+        "PrintJob",
+        primaryjoin="and_(Order.id == foreign(PrintJob.order_id), PrintJob.status == 'in_progress')",
+        viewonly=True,
+    )
 
 
 class Routing(Base):
@@ -353,6 +358,8 @@ class PrintJob(Base):
     item_id = Column(Integer, ForeignKey("items.id", ondelete="SET NULL"), nullable=True)
     routing_step_id = Column(Integer, ForeignKey("routing_steps.id", ondelete="SET NULL"), nullable=True)
     printer_id = Column(Integer, ForeignKey("printers.id", ondelete="CASCADE"), nullable=False)
+
+    printer = relationship("Printer")
     moonraker_job_id = Column(String, nullable=True)
     filename = Column(String, nullable=False)
     status = Column(String, nullable=False, default="in_progress")

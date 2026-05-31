@@ -354,6 +354,21 @@ class StepProgressOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PrinterSimpleOut(BaseModel):
+    id: int
+    name: str
+
+    model_config = {"from_attributes": True}
+
+
+class ActivePrintJobOut(BaseModel):
+    routing_step_id: Optional[int] = None
+    printer_id: int
+    printer: Optional[PrinterSimpleOut] = None
+
+    model_config = {"from_attributes": True}
+
+
 class OrderOut(OrderBase):
     id: int
     customer_id: Optional[int] = None
@@ -363,6 +378,7 @@ class OrderOut(OrderBase):
     item: ItemOut
     customer: Optional[CustomerOut] = None
     step_progress: List[StepProgressOut] = []
+    active_print_jobs: List[ActivePrintJobOut] = []
 
     model_config = {"from_attributes": True}
 
