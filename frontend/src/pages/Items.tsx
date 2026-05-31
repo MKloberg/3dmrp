@@ -1652,7 +1652,7 @@ function GcodePanel({ itemId, routingId, itemName, slicerName, printerTypeName, 
   }, [savedGcodeFile])
 
   const files = data?.files ?? []
-  const activeFile = files.includes(selected) ? selected : (files[0] ?? '')
+  const activeFile = files.includes(selected) ? selected : ''
 
   const { data: metadata } = useQuery({
     queryKey: ['gcode-metadata', itemName, slicerName, printerTypeName, activeFile],
@@ -1821,10 +1821,11 @@ function GcodePanel({ itemId, routingId, itemName, slicerName, printerTypeName, 
         <div className="flex-1 min-w-0 space-y-1">
           <select
             value={activeFile}
-            onChange={e => selectFile(e.target.value)}
+            onChange={e => { if (e.target.value) selectFile(e.target.value) }}
             onFocus={() => refetch()}
             className="w-full border rounded px-2 py-1 text-xs font-mono dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
           >
+            {!activeFile && <option value="">— not assigned —</option>}
             {files.map(f => <option key={f} value={f}>{f}</option>)}
           </select>
           {metadata && !metadata.error && (metadata.filament_weight_total != null || metadata.estimated_time != null) && (
@@ -1885,7 +1886,7 @@ function GcodePanel({ itemId, routingId, itemName, slicerName, printerTypeName, 
           </div>
         </Modal>
       )}
-      {matchingPrinters.length === 0 ? (
+      {activeFile && (matchingPrinters.length === 0 ? (
         <p className="text-xs text-gray-400 italic">No printers of this type</p>
       ) : matchingPrinters.map(printer => (
         <PrinterStatusRow
@@ -1899,7 +1900,7 @@ function GcodePanel({ itemId, routingId, itemName, slicerName, printerTypeName, 
           onSend={handleSend}
           onAnalyze={handleAnalyze}
         />
-      ))}
+      )))}
       {wizardState && (
         <PrintWizard
           printer={wizardState.printer}
