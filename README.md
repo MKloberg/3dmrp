@@ -6,6 +6,10 @@ A self-hosted web app for managing 3D print items, filament inventory, orders, a
 
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-mkloberg-yellow?logo=buy-me-a-coffee&logoColor=white)](https://buymeacoffee.com/mkloberg)
 
+> **v0.8.2:** Order Progress Detail Panel & Live Print Status — each order row now has a chevron toggle that expands an inline production progress panel. The panel shows every qualifying production step for that order, with the G-code thumbnail (zoom and offset applied), printer type, filament colour swatches, a progress bar tracking parts printed vs. parts needed (`parts_printed / parts_per_item × quantity`), and estimated total print time. Steps currently being printed show a live "Currently printing on [printer name] · Completed by [time] ([remaining] left)" banner, polled every 30 seconds directly from Moonraker — if multiple printers are running the same step the latest completion time is used. The G-code file selector in Production Steps now shows a "— not assigned —" placeholder when no file has been explicitly saved, preventing silent auto-selection of the first available file. Also in this release: MSRP field on items (stored in the database, editable from both the Edit Item modal and the cost accounting panel with a "↑ use suggested" button), thumbnail zoom and offset now persist across page reloads, print time display fixed for jobs longer than 24 hours (PrusaSlicer outputs `1d 3h 34m`), and several filament cost calculation fixes (proportional plate share in both the BOM and the cost modal).
+>
+> **v0.8.1:** Print Job Fixes, Order Step Progress Report & NFC Tag Bug Fix — corrected print job order linking, timestamps, and expected parts calculation. Added an **Order Step Progress** report (under Reports in the sidebar) showing a per-step breakdown of parts printed across all active orders. Fixed a double-tag bug when writing NFC tags to both sides of a spool (same UID was being detected as a re-scan). Removed the Qty/Plate column from the Order Step Progress report. Migrated Spoolman NFC card UID storage from `lot_nr` to `extra.card_uids` to align with SpoolLink PR #491. Fixed a SQLAlchemy connection pool exhaustion issue on SQLite by switching to `NullPool`.
+>
 > **v0.8.0:** AI Filament Import — A new **Tools** section in the nav houses AI-powered utilities. The first tool, **Import Filament from Listing**, lets you paste any product listing (Amazon, manufacturer site, anywhere) and uses the Anthropic API to extract the full filament spec — material, brand, color, diameter, weight, temperatures, price, and ASIN — into an editable review form. One click creates the filament in Spoolman, then walks you through adding spools and hands off directly to the existing NFC tag & weigh mobile workflow. PLA density defaults to 1.24 g/cm³ automatically. Anthropic API key is configured in a new **Settings → AI** page, which includes a cost estimate (typically <$0.02/month at casual usage) and a live key test button.
 >
 > **v0.7.0:** Print Job Tracking & Order Automation — 3DMRP now maintains a persistent WebSocket connection to every Moonraker printer and tracks print jobs in real time. Completed jobs are automatically credited to the oldest open order (FIFO), advancing order status from printing → complete without any manual input. The Orders page shows a printed/total progress bar and +/− adjustment buttons for manual corrections (with a warning if active prints exist). The PrintWizard step 2 shows which open order the current print will count toward. A new **Print Jobs** report exposes the full job history with sortable columns, status/printer/filename filters, and links to related orders, items, and printers.
@@ -75,7 +79,7 @@ Define how an item gets made — step by step.
 - Each step carries its own filament requirements, auto-populated from the item's filament specs
 - Switch between simple mode (single default routing) and advanced mode (multiple named routings)
 - Rename routings inline; reorder and delete steps
-- **Cost accounting** — each step supports an MSRP and post-processing cost, giving a full cost breakdown per item
+- **Cost accounting** — each step supports post-processing costs and a full cost breakdown per item. The item's **MSRP** is stored directly on the item record, editable from both the Edit Item modal (with a currency-symbol prefix) and inline in the cost accounting panel via a click-to-edit pencil icon, with a "↑ use suggested" button to copy the calculated suggested price in one click
 - **Spoolman status** — each printer shown in a production step displays a live Spoolman indicator (green check = active, red cross = not configured), so you know at a glance whether slot assignment will sync to the printer
 
 #### G-Code in Production Steps
@@ -83,7 +87,7 @@ Define how an item gets made — step by step.
 Send G-Code files to printers directly from within each production step.
 
 - Files are served from the **G-Code Repository** (see Settings → Slicers) organized by slicer and printer type
-- Dropdown file selector per step — selection persists across sessions
+- Dropdown file selector per step — selection persists across sessions. When no file has been explicitly assigned the dropdown shows **"— not assigned —"** rather than silently defaulting to the first available file, so the thumbnail and send controls stay hidden until you make an explicit choice
 - G-Code files are parsed for embedded metadata: **per-slot filament weights** and **estimated print time** are read from the file and shown alongside the filename
 - **Slicer thumbnail preview** — the preview image embedded in the G-Code file by OrcaSlicer / PrusaSlicer / SuperSlicer is extracted and shown as a small inline thumbnail. Click it to open a zoom modal:
   - Zoom in / out in 10% steps (10%–400% range); click the percentage label to reset to 150%
@@ -266,6 +270,12 @@ Track print orders from intake to delivery.
 - **Open Item** button in the edit modal — jumps directly to the Items page, auto-expands the linked item's accordion, and scrolls it into view
 - **Print progress** — each order row shows a printed/total counter and progress bar, updated automatically as jobs complete. Use the +/− buttons to adjust manually; if active prints are running on the order you'll be asked to confirm before the change is applied
 - **Automatic status advancement** — when completed Moonraker jobs are credited to an order via FIFO attribution, the order status advances from printing → complete automatically once the quantity is met
+- **Order Progress Detail Panel** — click the chevron on any order row to expand a per-step production panel. Each qualifying production step shows:
+  - G-code thumbnail (with saved zoom and offset applied) — space reserved even when no G-code is assigned so all rows align
+  - Step description, printer type, and filament colour swatches with material/colour names
+  - Progress bar (`parts printed / parts_per_item × order quantity`) coloured green at 100%, brand blue in progress, gray at 0% — with part count and percentage
+  - Estimated total print time for the full order quantity
+  - If the step is actively printing: **"Currently printing on [printer] · Completed by [time] ([remaining] left)"**, polled live from Moonraker every 30 seconds. Multiple printers on the same step use the latest finishing time. Gracefully omits the time estimate if a printer is unreachable
 
 ![Orders](docs/screenshots/orders.png)
 
