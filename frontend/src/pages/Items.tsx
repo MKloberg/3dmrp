@@ -3388,7 +3388,7 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                           {routing.steps.map((step, stepIdx) => {
                             const printerType = printerTypes.find(pt => pt.id === step.printer_type_id)
                             const hourlyRate = printerType?.hourly_rate ?? globalHourlyRate
-                            const platesPerItem = Math.ceil(step.parts_per_item / step.quantity_on_plate)
+                            const platesPerItem = step.parts_per_item / step.quantity_on_plate
                             const machineCost = step.estimated_print_time != null
                               ? (step.estimated_print_time / 3600) * hourlyRate * platesPerItem
                               : null
