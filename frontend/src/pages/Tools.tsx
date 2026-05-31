@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { Wrench, FileText } from 'lucide-react'
+import { Wrench, FileText, Download, CheckCircle, XCircle, Loader2 } from 'lucide-react'
 import FilamentImportWizard from '../components/FilamentImportWizard'
 import SpoolReceiveWizard from '../components/SpoolReceiveWizard'
-import { SpoolmanSpool } from '../api/client'
+import { SpoolmanSpool, pickHueForgeFolder, exportHueForge, getSettings, setSetting } from '../api/client'
 
 interface FilamentMeta {
   type?: string
@@ -13,12 +13,47 @@ interface FilamentMeta {
   bed_temp?: number
 }
 
+type HueForgeStatus = 'idle' | 'picking' | 'exporting' | 'success' | 'error'
+
 export default function Tools() {
   const [importWizardOpen, setImportWizardOpen] = useState(false)
   const [tagSpools, setTagSpools] = useState<{ spools: SpoolmanSpool[]; meta: FilamentMeta } | null>(null)
+  const [hueforgeStatus, setHueforgeStatus] = useState<HueForgeStatus>('idle')
+  const [hueforgeResult, setHueforgeResult] = useState('')
 
   function handleTagSpools(spools: SpoolmanSpool[], meta: FilamentMeta) {
     setTagSpools({ spools, meta })
+  }
+
+  async function handleHueForgeExport() {
+    if (hueforgeStatus === 'picking' || hueforgeStatus === 'exporting') return
+    if (hueforgeStatus === 'success' || hueforgeStatus === 'error') {
+      setHueforgeStatus('idle')
+      setHueforgeResult('')
+      return
+    }
+    try {
+      setHueforgeStatus('picking')
+      const settings = await getSettings()
+      const lastDir = settings['hueforge_export_path'] || undefined
+      const { directory } = await pickHueForgeFolder(lastDir)
+      if (!directory) {
+        setHueforgeStatus('idle')
+        return
+      }
+      setHueforgeStatus('exporting')
+      const dateStr = new Date().toISOString().slice(0, 10)
+      const filename = `hueforge-filaments-${dateStr}.json`
+      const sep = directory.includes('\\') ? '\\' : '/'
+      const fullPath = directory + sep + filename
+      const { path } = await exportHueForge(fullPath)
+      await setSetting('hueforge_export_path', directory)
+      setHueforgeResult(path)
+      setHueforgeStatus('success')
+    } catch (err) {
+      setHueforgeResult(err instanceof Error ? err.message : 'Export failed')
+      setHueforgeStatus('error')
+    }
   }
 
   return (
@@ -30,7 +65,49 @@ export default function Tools() {
 
       <section className="space-y-3">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Simple</h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400 italic">No tools yet — check back soon.</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <button
+            data-testid="hueforge-export-card"
+            onClick={handleHueForgeExport}
+            disabled={hueforgeStatus === 'picking' || hueforgeStatus === 'exporting'}
+            className="flex flex-col items-start gap-3 p-5 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 hover:border-brand-400 dark:hover:border-brand-600 hover:shadow-sm transition-all text-left group disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            <div className="w-10 h-10 rounded-lg bg-green-50 dark:bg-green-900/30 flex items-center justify-center group-hover:bg-green-100 dark:group-hover:bg-green-900/50 transition-colors">
+              {hueforgeStatus === 'picking' || hueforgeStatus === 'exporting'
+                ? <Loader2 size={20} className="text-green-600 dark:text-green-400 animate-spin" />
+                : hueforgeStatus === 'success'
+                ? <CheckCircle size={20} className="text-green-600 dark:text-green-400" />
+                : hueforgeStatus === 'error'
+                ? <XCircle size={20} className="text-red-500 dark:text-red-400" />
+                : <Download size={20} className="text-green-600 dark:text-green-400" />}
+            </div>
+            <div>
+              <p className="font-semibold text-gray-800 dark:text-gray-100 text-sm">HueForge Filament Export</p>
+              {hueforgeStatus === 'picking' && (
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Opening folder picker…</p>
+              )}
+              {hueforgeStatus === 'exporting' && (
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Writing export file…</p>
+              )}
+              {hueforgeStatus === 'success' && (
+                <p className="text-xs text-green-600 dark:text-green-400 mt-1 leading-relaxed break-all">
+                  Saved to: {hueforgeResult}
+                </p>
+              )}
+              {hueforgeStatus === 'error' && (
+                <p className="text-xs text-red-500 dark:text-red-400 mt-1 leading-relaxed">
+                  {hueforgeResult}
+                  <span className="block mt-1 text-gray-400">Click to try again.</span>
+                </p>
+              )}
+              {hueforgeStatus === 'idle' && (
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 leading-relaxed">
+                  Export all filaments as a HueForge-compatible JSON library file, saved directly to your HueForge libraries folder.
+                </p>
+              )}
+            </div>
+          </button>
+        </div>
       </section>
 
       <section className="space-y-3">

@@ -886,6 +886,15 @@ export interface ParsedFilamentSpec {
 export const parseFilamentListing = (text: string) =>
   req<ParsedFilamentSpec>('/tools/parse-filament', { method: 'POST', body: JSON.stringify({ text }) })
 
+export const pickHueForgeFolder = (initialDir?: string) =>
+  req<{ directory: string | null; error?: string }>('/tools/pick-hueforge-folder', {
+    method: 'POST',
+    body: JSON.stringify({ initial_dir: initialDir ?? null }),
+  })
+
+export const exportHueForge = (path: string) =>
+  req<{ path: string }>('/tools/export-hueforge', { method: 'POST', body: JSON.stringify({ path }) })
+
 export const createSpoolmanFilament = (data: CreateFilamentData) =>
   req<SpoolmanFilament>('/spoolman/filaments', { method: 'POST', body: JSON.stringify(data) })
 

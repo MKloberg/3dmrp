@@ -1,4 +1,6 @@
 import json
+import os
+import uuid
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -6,7 +8,10 @@ from typing import Any, Dict, Optional
 from pydantic import BaseModel
 
 from ..database import get_db
+from ..models import FilamentSpec, Setting
 from .settings import get_setting
+
+_HUEFORGE_NS = uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 
 router = APIRouter(prefix="/api/tools", tags=["tools"])
 
@@ -30,6 +35,14 @@ Return only valid JSON. Example: {"name":"Silk Green","material":"PLA","brand":"
 
 Product listing:
 """
+
+
+class PickFolderRequest(BaseModel):
+    initial_dir: Optional[str] = None
+
+
+class ExportHueForgeRequest(BaseModel):
+    path: str
 
 
 class ParseFilamentRequest(BaseModel):
@@ -92,3 +105,73 @@ async def parse_filament(body: ParseFilamentRequest, db: Session = Depends(get_d
         raise HTTPException(status_code=502, detail="AI returned malformed JSON. Try pasting more structured product text.")
 
     return parsed
+
+
+@router.post("/pick-hueforge-folder")
+def pick_hueforge_folder(body: PickFolderRequest = PickFolderRequest()):
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except ImportError:
+        return {"directory": None, "error": "tkinter not available"}
+
+    initial_dir: Optional[str] = None
+    if body.initial_dir and os.path.isdir(body.initial_dir):
+        initial_dir = body.initial_dir
+
+    root = tk.Tk()
+    root.withdraw()
+    root.wm_attributes("-topmost", True)
+    chosen = filedialog.askdirectory(title="Select HueForge Libraries Folder", initialdir=initial_dir)
+    root.destroy()
+
+    if not chosen:
+        return {"directory": None}
+
+    return {"directory": os.path.normpath(chosen)}
+
+
+@router.post("/export-hueforge")
+def export_hueforge(body: ExportHueForgeRequest, db: Session = Depends(get_db)):
+    directory = os.path.dirname(os.path.normpath(body.path))
+    if not os.path.isdir(directory):
+        raise HTTPException(status_code=404, detail=f"Directory not found: {directory}")
+
+    filaments = db.query(FilamentSpec).order_by(FilamentSpec.id).all()
+
+    hueforge_list = []
+    for f in filaments:
+        extra = f.extra if isinstance(f.extra, dict) else {}
+        td_raw = extra.get("td", 0.0)
+        try:
+            td = float(td_raw) if td_raw is not None else 0.0
+        except (TypeError, ValueError):
+            td = 0.0
+
+        color = f.color_hex or ""
+        if not color.startswith("#"):
+            color = "#" + color
+
+        uid = "{" + str(uuid.uuid5(_HUEFORGE_NS, str(f.id))) + "}"
+
+        hueforge_list.append({
+            "Brand": f.brand or "",
+            "Color": color,
+            "Name": f.color_name or "",
+            "Owned": True,
+            "Transmissivity": td,
+            "Type": f.material or "",
+            "uuid": uid,
+        })
+
+    payload = json.dumps({"Filaments": hueforge_list}, indent=2)
+
+    try:
+        with open(body.path, "w", encoding="utf-8") as fh:
+            fh.write(payload)
+    except PermissionError:
+        raise HTTPException(status_code=403, detail=f"Permission denied: {body.path}")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Directory not found: {directory}")
+
+    return {"path": body.path}
