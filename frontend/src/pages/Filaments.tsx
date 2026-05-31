@@ -57,36 +57,16 @@ function hasSpoolmanDiff(local: FilamentSpec, sf: SpoolmanFilament): boolean {
   return false
 }
 
-function tdBadgeStyle(td: number): { bg: string; color: string } {
-  // Color stops tuned to match HueForge's gradient (green peaks ~2, yellow ~3.5, orange ~5.5, red ~8)
-  const stops = [
-    { at: 0,   r: 15,  g: 15,  b: 15  },
-    { at: 2.0, r: 34,  g: 197, b: 94  },
-    { at: 3.5, r: 234, g: 179, b: 8   },
-    { at: 5.5, r: 249, g: 115, b: 22  },
-    { at: 8.0, r: 239, g: 68,  b: 68  },
-  ]
-  const clamped = Math.max(0, td)
-  let r = stops[stops.length - 1].r, g = stops[stops.length - 1].g, b = stops[stops.length - 1].b
-  for (let i = 0; i < stops.length - 1; i++) {
-    if (clamped <= stops[i + 1].at) {
-      const t = (clamped - stops[i].at) / (stops[i + 1].at - stops[i].at)
-      r = Math.round(stops[i].r + (stops[i + 1].r - stops[i].r) * t)
-      g = Math.round(stops[i].g + (stops[i + 1].g - stops[i].g) * t)
-      b = Math.round(stops[i].b + (stops[i + 1].b - stops[i].b) * t)
-      break
-    }
-  }
+function TdBadge({ td, colorHex }: { td: number; colorHex: string }) {
+  const hex = normalizeHex(colorHex)
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
   const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-  return { bg: `rgb(${r},${g},${b})`, color: luminance > 0.45 ? '#000' : '#fff' }
-}
-
-function TdBadge({ td }: { td: number }) {
-  const { bg, color } = tdBadgeStyle(td)
   return (
     <span
-      style={{ backgroundColor: bg, color }}
-      className="inline-flex items-center justify-center w-10 h-6 rounded text-[11px] font-black shrink-0 leading-none"
+      style={{ backgroundColor: hex, color: luminance > 0.45 ? '#000' : '#fff' }}
+      className="inline-flex items-center justify-center w-10 h-6 rounded text-[13px] font-black shrink-0 leading-none"
     >
       {td.toFixed(1)}
     </span>
@@ -734,7 +714,14 @@ export default function Filaments() {
                         {f.settings_extruder_temp && (
                           <span className="text-xs text-gray-400">{f.settings_extruder_temp}°C / {f.settings_bed_temp}°C</span>
                         )}
-                        {(() => { const td = Number(f.extra?.['td'] ?? 0); return td > 0 ? <TdBadge td={td} /> : null })()}
+                        {(() => {
+                          const td = Number(f.extra?.['td'] ?? 0)
+                          if (td <= 0) return null
+                          const hex = f.spoolman_id && spoolmanMultiColorMap.has(f.spoolman_id)
+                            ? `#${spoolmanMultiColorMap.get(f.spoolman_id)!.split(',')[0].trim()}`
+                            : (f.color_hex ?? '#888888')
+                          return <TdBadge td={td} colorHex={hex} />
+                        })()}
                       </div>
                       <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
                         <button
