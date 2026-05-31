@@ -58,12 +58,13 @@ function hasSpoolmanDiff(local: FilamentSpec, sf: SpoolmanFilament): boolean {
 }
 
 function tdBadgeStyle(td: number): { bg: string; color: string } {
+  // Color stops tuned to match HueForge's gradient (green peaks ~2, yellow ~3.5, orange ~5.5, red ~8)
   const stops = [
-    { at: 0, r: 15,  g: 15,  b: 15  },
-    { at: 2, r: 34,  g: 197, b: 94  },
-    { at: 4, r: 234, g: 179, b: 8   },
-    { at: 6, r: 249, g: 115, b: 22  },
-    { at: 8, r: 239, g: 68,  b: 68  },
+    { at: 0,   r: 15,  g: 15,  b: 15  },
+    { at: 2.0, r: 34,  g: 197, b: 94  },
+    { at: 3.5, r: 234, g: 179, b: 8   },
+    { at: 5.5, r: 249, g: 115, b: 22  },
+    { at: 8.0, r: 239, g: 68,  b: 68  },
   ]
   const clamped = Math.max(0, td)
   let r = stops[stops.length - 1].r, g = stops[stops.length - 1].g, b = stops[stops.length - 1].b
@@ -84,8 +85,8 @@ function TdBadge({ td }: { td: number }) {
   const { bg, color } = tdBadgeStyle(td)
   return (
     <span
-      style={{ backgroundColor: bg, color, fontFamily: '"Segoe UI", system-ui, sans-serif' }}
-      className="inline-flex items-center justify-center w-10 h-6 rounded text-[11px] font-bold shrink-0 leading-none"
+      style={{ backgroundColor: bg, color }}
+      className="inline-flex items-center justify-center w-10 h-6 rounded text-[11px] font-black shrink-0 leading-none"
     >
       {td.toFixed(1)}
     </span>
