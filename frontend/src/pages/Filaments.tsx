@@ -65,7 +65,7 @@ function TdBadge({ td, colorHex }: { td: number; colorHex: string }) {
   const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
   return (
     <span
-      style={{ backgroundColor: hex, color: luminance > 0.45 ? '#000' : '#fff', fontFamily: 'Bahnschrift, "Segoe UI", system-ui, sans-serif', letterSpacing: '-0.02em' }}
+      style={{ backgroundColor: hex, color: luminance > 0.45 ? '#000' : '#fff' }}
       className="inline-flex items-center justify-center w-10 h-6 rounded-md text-[13px] font-black shrink-0 leading-none"
     >
       {td.toFixed(1)}
