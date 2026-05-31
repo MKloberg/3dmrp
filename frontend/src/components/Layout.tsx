@@ -46,6 +46,8 @@ const nav: NavItemDef[] = [
   {
     to: '/tools', label: 'Tools', icon: Wrench,
     children: [
+      { to: '', label: 'Simple', isSection: true },
+      { to: '/tools', label: 'HueForge Filament Export' },
       { to: '', label: 'Advanced', isSection: true, badge: '$' },
       { to: '/tools', label: 'Import Filament from Listing' },
     ],
