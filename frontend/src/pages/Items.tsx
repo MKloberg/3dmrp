@@ -3576,7 +3576,7 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
 
               const bomMap = new Map<number, { spec: FilamentSpec; totalGrams: number }>()
               for (const step of allSteps) {
-                const platesPerItem = Math.ceil(step.parts_per_item / step.quantity_on_plate)
+                const platesPerItem = step.parts_per_item / step.quantity_on_plate
                 for (const f of step.filaments) {
                   const existing = bomMap.get(f.filament_spec_id)
                   if (existing) {
