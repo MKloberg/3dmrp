@@ -7,8 +7,10 @@ import StatusBadge from '../components/StatusBadge'
 import { Plus, Trash2, Pencil, Package, User, ExternalLink, ClipboardList, ChevronRight, ChevronDown } from 'lucide-react'
 
 function fmtTime(secs: number): string {
-  const h = Math.floor(secs / 3600)
+  const d = Math.floor(secs / 86400)
+  const h = Math.floor((secs % 86400) / 3600)
   const m = Math.floor((secs % 3600) / 60)
+  if (d > 0) return `~${d}d ${h}h ${m}m`
   return h > 0 ? `~${h}h ${m}m` : `~${m}m`
 }
 
