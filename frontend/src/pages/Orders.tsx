@@ -119,9 +119,9 @@ function OrderProgressPanel({ order }: { order: Order }) {
                 {step.printer_type?.name}
                 {stepJobs.length > 0 && (
                   <span className="text-brand-500 dark:text-brand-400">
-                    {' '}· printing on {printerNames}
+                    {' '}· Currently printing on {printerNames}
                     {maxRemaining !== null && maxRemaining > 0 && (
-                      <>, done {formatCompletion(maxRemaining)}</>
+                      <>, Completed by {formatCompletion(maxRemaining)}</>
                     )}
                   </span>
                 )}
