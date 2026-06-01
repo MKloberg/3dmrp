@@ -39,6 +39,7 @@ Product listing:
 
 class PickFolderRequest(BaseModel):
     initial_dir: Optional[str] = None
+    initial_filename: Optional[str] = None
 
 
 class ExportHueForgeRequest(BaseModel):
@@ -113,7 +114,7 @@ def pick_hueforge_folder(body: PickFolderRequest = PickFolderRequest()):
         import tkinter as tk
         from tkinter import filedialog
     except ImportError:
-        return {"directory": None, "error": "tkinter not available"}
+        return {"path": None, "error": "tkinter not available"}
 
     initial_dir: Optional[str] = None
     if body.initial_dir and os.path.isdir(body.initial_dir):
@@ -122,13 +123,19 @@ def pick_hueforge_folder(body: PickFolderRequest = PickFolderRequest()):
     root = tk.Tk()
     root.withdraw()
     root.wm_attributes("-topmost", True)
-    chosen = filedialog.askdirectory(title="Select HueForge Libraries Folder", initialdir=initial_dir)
+    chosen = filedialog.asksaveasfilename(
+        title="Export HueForge Personal Library",
+        initialdir=initial_dir,
+        initialfile=body.initial_filename or "hueforge-filaments.json",
+        defaultextension=".json",
+        filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+    )
     root.destroy()
 
     if not chosen:
-        return {"directory": None}
+        return {"path": None}
 
-    return {"directory": os.path.normpath(chosen)}
+    return {"path": os.path.normpath(chosen)}
 
 
 @router.post("/export-hueforge")
