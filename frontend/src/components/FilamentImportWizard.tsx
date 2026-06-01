@@ -6,7 +6,8 @@ import {
 import Modal from './Modal'
 import {
   parseFilamentListing, createSpoolmanFilament, createSpoolmanSpoolsWizard,
-  getSpoolmanLocationOptions, ParsedFilamentSpec, SpoolmanSpool,
+  getSpoolmanLocationOptions, getSpoolmanFilaments,
+  ParsedFilamentSpec, SpoolmanSpool, SpoolmanFilament,
 } from '../api/client'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -80,6 +81,9 @@ export default function FilamentImportWizard({ onClose, onTagSpools }: Props) {
   const [createdSpools, setCreatedSpools] = useState<SpoolmanSpool[]>([])
 
   const { data: locationData } = useQuery({ queryKey: ['spoolman-location-options'], queryFn: getSpoolmanLocationOptions })
+  const { data: spoolmanFilamentsData } = useQuery({ queryKey: ['spoolman-filaments'], queryFn: getSpoolmanFilaments, staleTime: 30_000 })
+
+  const [dupMatch, setDupMatch] = useState<SpoolmanFilament | null>(null)
 
   function setField(k: keyof typeof form, v: string) {
     setForm(p => ({ ...p, [k]: v }))
@@ -120,9 +124,35 @@ export default function FilamentImportWizard({ onClose, onTagSpools }: Props) {
 
   // ── Step 2 → 3: Create filament ──────────────────────────────────────────
 
-  async function handleCreateFilament() {
-    setCreatingFilament(true)
+  function handleUseExisting() {
+    if (!dupMatch) return
+    setCreatedFilamentId(dupMatch.id)
+    setCreatedFilamentName(dupMatch.name ?? form.name)
+    setDupMatch(null)
+    setStep(3)
+  }
+
+  async function handleCreateFilament(forceCreate = false) {
     setFilamentError(null)
+
+    if (!forceCreate) {
+      const filaments = spoolmanFilamentsData?.filaments ?? []
+      const nameLower = form.name.trim().toLowerCase()
+      const matLower = form.material.trim().toLowerCase()
+      const brandLower = form.brand.trim().toLowerCase()
+      const match = filaments.find(f => {
+        const nameMatch = (f.name ?? '').toLowerCase() === nameLower
+        const matMatch = (f.material ?? '').toLowerCase() === matLower
+        const vendorMatch = brandLower === '' || (f.vendor?.name ?? '').toLowerCase() === brandLower
+        return nameMatch && matMatch && vendorMatch
+      })
+      if (match) {
+        setDupMatch(match)
+        return
+      }
+    }
+
+    setCreatingFilament(true)
     try {
       const result = await createSpoolmanFilament({
         name: form.name.trim(),
@@ -314,6 +344,32 @@ export default function FilamentImportWizard({ onClose, onTagSpools }: Props) {
             </Field>
           </div>
 
+          {dupMatch && (
+            <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-700 space-y-2">
+              <div className="flex items-start gap-2">
+                <AlertTriangle size={14} className="shrink-0 mt-0.5 text-amber-500" />
+                <p className="text-sm text-amber-800 dark:text-amber-200">
+                  A matching filament already exists in Spoolman: <strong>{dupMatch.name}</strong>
+                  {dupMatch.vendor?.name ? ` by ${dupMatch.vendor.name}` : ''} (ID #{dupMatch.id})
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleUseExisting}
+                  className="flex-1 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold transition-colors"
+                >
+                  Use existing filament
+                </button>
+                <button
+                  onClick={() => handleCreateFilament(true)}
+                  className="flex-1 px-3 py-1.5 rounded-lg border border-amber-300 dark:border-amber-600 text-amber-700 dark:text-amber-300 text-xs font-semibold hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors"
+                >
+                  Create new anyway
+                </button>
+              </div>
+            </div>
+          )}
+
           {filamentError && (
             <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-300 max-h-32 overflow-y-auto">
               <AlertTriangle size={14} className="shrink-0 mt-0.5" />
@@ -323,13 +379,13 @@ export default function FilamentImportWizard({ onClose, onTagSpools }: Props) {
 
           <div className="flex items-center justify-between pt-1">
             <button
-              onClick={() => setStep(0)}
+              onClick={() => { setStep(0); setDupMatch(null) }}
               className="flex items-center gap-1 text-sm text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
             >
               <ChevronLeft size={16} /> Back
             </button>
             <button
-              onClick={handleCreateFilament}
+              onClick={() => handleCreateFilament(false)}
               disabled={creatingFilament || !form.name.trim() || !form.material.trim()}
               className="flex items-center gap-1.5 px-5 py-2.5 rounded-lg bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium disabled:opacity-40"
             >
