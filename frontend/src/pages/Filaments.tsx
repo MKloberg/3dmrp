@@ -21,7 +21,7 @@ function normalizeHex(hex: string | null | undefined): string {
 }
 
 function stableJson(obj: Record<string, unknown>): string {
-  return JSON.stringify(Object.fromEntries(Object.entries(obj).sort()))
+  return JSON.stringify(Object.fromEntries(Object.entries(obj).sort().map(([k, v]) => [k, String(v)])))
 }
 
 function hasSpoolmanDiff(local: FilamentSpec, sf: SpoolmanFilament): boolean {
