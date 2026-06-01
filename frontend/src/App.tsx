@@ -20,6 +20,8 @@ import FilamentInventory from './pages/reports/FilamentInventory'
 import PrintJobsReport from './pages/reports/PrintJobsReport'
 import OrderStepProgressReport from './pages/reports/OrderStepProgressReport'
 import Tools from './pages/Tools'
+import HueForgeExport from './pages/tools/HueForgeExport'
+import ImportFilament from './pages/tools/ImportFilament'
 import SpoolInventory from './pages/filaments/SpoolInventory'
 import MobileLanding from './pages/mobile/MobileLanding'
 import MobilePrinterLoad from './pages/mobile/MobilePrinterLoad'
@@ -67,6 +69,8 @@ export default function App() {
         <Route path="reports/print-jobs" element={<PrintJobsReport />} />
         <Route path="reports/order-step-progress" element={<OrderStepProgressReport />} />
         <Route path="tools" element={<Tools />} />
+        <Route path="tools/hueforge-export" element={<HueForgeExport />} />
+        <Route path="tools/import-filament" element={<ImportFilament />} />
         <Route path="filaments/spools" element={<SpoolInventory />} />
       </Route>
     </Routes>
