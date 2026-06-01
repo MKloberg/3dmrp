@@ -236,9 +236,16 @@ function FilamentForm({
   const set = (patch: Partial<FilamentSpecInput>) => setForm(f => ({ ...f, ...patch }))
   const num = (v: string) => v === '' ? null : Number(v)
   const currSym = useCurrency()
+  const spoolmanLocked = isEdit && !!form.spoolman_id
 
   return (
     <div className="space-y-4 max-h-[75vh] overflow-y-auto pr-1">
+      {spoolmanLocked && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 text-xs text-blue-700 dark:text-blue-300">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          Material and brand are managed by Spoolman. All other edits sync back automatically.
+        </div>
+      )}
       {/* Core */}
       <div className="grid grid-cols-2 gap-3">
         <div className="col-span-2">
@@ -247,16 +254,22 @@ function FilamentForm({
             value={form.color_name} onChange={e => set({ color_name: e.target.value })} />
         </div>
         <div>
-          <label className="text-xs text-gray-500 block mb-1">Material *</label>
-          <select className="w-full border rounded-lg px-3 py-2 text-sm"
-            value={form.material} onChange={e => set({ material: e.target.value })}>
+          <label className="text-xs text-gray-500 block mb-1">
+            Material *{spoolmanLocked && <span className="ml-1 text-blue-400">(Spoolman)</span>}
+          </label>
+          <select className="w-full border rounded-lg px-3 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-100 dark:disabled:bg-gray-700"
+            value={form.material} onChange={e => set({ material: e.target.value })}
+            disabled={spoolmanLocked}>
             {MATERIALS.map(m => <option key={m}>{m}</option>)}
           </select>
         </div>
         <div>
-          <label className="text-xs text-gray-500 block mb-1">Brand</label>
-          <input className="w-full border rounded-lg px-3 py-2 text-sm" placeholder="e.g. Bambu"
-            value={form.brand} onChange={e => set({ brand: e.target.value })} />
+          <label className="text-xs text-gray-500 block mb-1">
+            Brand{spoolmanLocked && <span className="ml-1 text-blue-400">(Spoolman)</span>}
+          </label>
+          <input className="w-full border rounded-lg px-3 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-100 dark:disabled:bg-gray-700"
+            placeholder="e.g. Bambu" value={form.brand} onChange={e => set({ brand: e.target.value })}
+            disabled={spoolmanLocked} />
         </div>
         <div>
           <label className="text-xs text-gray-500 block mb-1">Color</label>
