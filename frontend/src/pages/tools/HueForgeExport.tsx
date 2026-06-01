@@ -5,6 +5,10 @@ import { pickHueForgeFolder, exportHueForge, getSettings, setSetting, getFilamen
 
 type Status = 'idle' | 'picking' | 'exporting' | 'success' | 'error'
 
+function localDateStr(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 export default function HueForgeExport() {
   const [status, setStatus] = useState<Status>('idle')
   const [result, setResult] = useState('')
@@ -27,7 +31,8 @@ export default function HueForgeExport() {
       setStatus('picking')
       const s = await getSettings()
       const lastDir = s['hueforge_export_path'] || undefined
-      const dateStr = new Date().toISOString().slice(0, 10)
+      const d = new Date()
+      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
       const { path: chosenPath } = await pickHueForgeFolder(lastDir, `hueforge-filaments-${dateStr}.json`)
       if (!chosenPath) { setStatus('idle'); return }
       setStatus('exporting')
@@ -83,7 +88,7 @@ export default function HueForgeExport() {
             <FileText size={20} className="text-green-600 dark:text-green-400" />
           </div>
           <div className="min-w-0">
-            <p className="font-semibold text-gray-900 dark:text-gray-100 text-sm">hueforge-filaments-{new Date().toISOString().slice(0, 10)}.json</p>
+            <p className="font-semibold text-gray-900 dark:text-gray-100 text-sm">hueforge-filaments-{localDateStr()}.json</p>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
               Personal Library · includes color, material, TD, temperatures, and density for all {totalFilaments} filaments.
             </p>

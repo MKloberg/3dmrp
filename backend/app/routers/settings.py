@@ -96,7 +96,7 @@ def backup_database(db: Session = Depends(get_db)):
     if not os.path.exists(_DB_PATH):
         raise HTTPException(status_code=404, detail="Database file not found")
     db.execute(text("PRAGMA wal_checkpoint(FULL)"))
-    filename = f"3dmrp_backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.db"
+    filename = f"3dmrp_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
     return FileResponse(
         _DB_PATH,
         media_type="application/octet-stream",
