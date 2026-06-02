@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from typing import Any, Dict, List, Optional
 
 from ..database import get_db
-from ..models import FilamentSpec
+from ..models import FilamentSpec, ModelFilament, RoutingStepFilament, RoutingStep, Routing, Item
 from ..schemas import FilamentSpecCreate, FilamentSpecOut
 from .settings import get_setting
 
@@ -83,5 +83,47 @@ def delete_filament(spec_id: int, db: Session = Depends(get_db)):
     spec = db.query(FilamentSpec).filter(FilamentSpec.id == spec_id).first()
     if not spec:
         raise HTTPException(status_code=404, detail="Filament spec not found")
+
+    label = f'"{spec.color_name} {spec.material}"'
+
+    step_usages = (
+        db.query(RoutingStepFilament, RoutingStep, Routing, Item)
+        .join(RoutingStep, RoutingStep.id == RoutingStepFilament.routing_step_id)
+        .join(Routing, Routing.id == RoutingStep.routing_id)
+        .join(Item, Item.id == Routing.item_id)
+        .filter(RoutingStepFilament.filament_spec_id == spec_id)
+        .all()
+    )
+    if step_usages:
+        lines = "\n".join(
+            f"  - {item.name} / {step.description or f'Step {step.id}'}"
+            for _, step, _, item in step_usages
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Cannot delete {label}: it is assigned to {len(step_usages)} routing step(s).\n"
+                f"{lines}\n\n"
+                "Remove this filament from those steps first."
+            ),
+        )
+
+    item_usages = (
+        db.query(ModelFilament, Item)
+        .join(Item, Item.id == ModelFilament.print_model_id)
+        .filter(ModelFilament.filament_spec_id == spec_id)
+        .all()
+    )
+    if item_usages:
+        lines = "\n".join(f"  - {item.name}" for _, item in item_usages)
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Cannot delete {label}: it is a filament requirement for {len(item_usages)} item(s).\n"
+                f"{lines}\n\n"
+                "Remove this filament from those items' requirements first."
+            ),
+        )
+
     db.delete(spec)
     db.commit()

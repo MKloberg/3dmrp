@@ -2485,8 +2485,14 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
   })
 
   const deleteRoutingMutation = useMutation({
-    mutationFn: (routingId: number) => deleteRouting(item.id, routingId),
+    mutationFn: ({ routingId, force = false }: { routingId: number; force?: boolean }) =>
+      deleteRouting(item.id, routingId, force),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['items'] }),
+    onError: (err: Error, vars) => {
+      if (confirm(`${err.message}\n\nDelete anyway?`)) {
+        deleteRoutingMutation.mutate({ routingId: vars.routingId, force: true })
+      }
+    },
   })
 
   const createStepMutation = useMutation({
@@ -2525,9 +2531,14 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
   })
 
   const deleteStepMutation = useMutation({
-    mutationFn: ({ routingId, stepId }: { routingId: number; stepId: number }) =>
-      deleteRoutingStep(item.id, routingId, stepId),
+    mutationFn: ({ routingId, stepId, force = false }: { routingId: number; stepId: number; force?: boolean }) =>
+      deleteRoutingStep(item.id, routingId, stepId, force),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['items'] }),
+    onError: (err: Error, vars) => {
+      if (confirm(`${err.message}\n\nDelete anyway?`)) {
+        deleteStepMutation.mutate({ routingId: vars.routingId, stepId: vars.stepId, force: true })
+      }
+    },
   })
 
   const addStepFilMutation = useMutation({
@@ -3312,7 +3323,7 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                       />
                     )}
                     <button
-                      onClick={() => { if (confirm(`Delete routing "${routing.name || 'Untitled'}"?`)) deleteRoutingMutation.mutate(routing.id) }}
+                      onClick={() => { if (confirm(`Delete routing "${routing.name || 'Untitled'}"?`)) deleteRoutingMutation.mutate({ routingId: routing.id }) }}
                       className="text-red-400 hover:text-red-600"
                     >
                       <Trash2 size={13} />
@@ -3875,6 +3886,7 @@ export default function Items() {
   const deleteMutation = useMutation({
     mutationFn: (id: number) => deleteItem(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['items'] }),
+    onError: (err: Error) => alert(err.message),
   })
 
   function openCreate() {

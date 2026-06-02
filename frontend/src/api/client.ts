@@ -6,8 +6,13 @@ async function req<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
   })
   if (!res.ok) {
-    const err = await res.text()
-    throw new Error(err || res.statusText)
+    const text = await res.text()
+    let message = text || res.statusText
+    try {
+      const json = JSON.parse(text)
+      if (typeof json.detail === 'string') message = json.detail
+    } catch { /* keep raw text */ }
+    throw new Error(message)
   }
   if (res.status === 204) return undefined as T
   return res.json()
@@ -265,15 +270,15 @@ export const createRouting = (itemId: number, data: { name?: string; is_default?
   req<Routing>(`/items/${itemId}/routings`, { method: 'POST', body: JSON.stringify(data) })
 export const updateRouting = (itemId: number, routingId: number, data: { name?: string; is_default?: boolean; include_in_summary?: boolean }) =>
   req<Routing>(`/items/${itemId}/routings/${routingId}`, { method: 'PATCH', body: JSON.stringify(data) })
-export const deleteRouting = (itemId: number, routingId: number) =>
-  req<void>(`/items/${itemId}/routings/${routingId}`, { method: 'DELETE' })
+export const deleteRouting = (itemId: number, routingId: number, force = false) =>
+  req<void>(`/items/${itemId}/routings/${routingId}${force ? '?force=true' : ''}`, { method: 'DELETE' })
 
 export const createRoutingStep = (itemId: number, routingId: number, data: { description?: string; printer_type_id?: number | null; quantity_on_plate?: number; parts_per_item?: number; estimated_print_time?: number | null }) =>
   req<RoutingStep>(`/items/${itemId}/routings/${routingId}/steps`, { method: 'POST', body: JSON.stringify(data) })
 export const updateRoutingStep = (itemId: number, routingId: number, stepId: number, data: { description?: string; printer_type_id?: number | null; quantity_on_plate?: number; parts_per_item?: number; estimated_print_time?: number | null; include_in_planning?: boolean; gcode_file?: string | null; thumbnail_zoom?: number | null; thumbnail_offset_x?: number | null; thumbnail_offset_y?: number | null }) =>
   req<RoutingStep>(`/items/${itemId}/routings/${routingId}/steps/${stepId}`, { method: 'PATCH', body: JSON.stringify(data) })
-export const deleteRoutingStep = (itemId: number, routingId: number, stepId: number) =>
-  req<void>(`/items/${itemId}/routings/${routingId}/steps/${stepId}`, { method: 'DELETE' })
+export const deleteRoutingStep = (itemId: number, routingId: number, stepId: number, force = false) =>
+  req<void>(`/items/${itemId}/routings/${routingId}/steps/${stepId}${force ? '?force=true' : ''}`, { method: 'DELETE' })
 export const reorderRoutingSteps = (itemId: number, routingId: number, items: { id: number; sort_order: number }[]) =>
   req<void>(`/items/${itemId}/routings/${routingId}/steps/reorder`, { method: 'POST', body: JSON.stringify(items) })
 

@@ -481,6 +481,7 @@ export default function Filaments() {
   const deleteMutation = useMutation({
     mutationFn: (id: number) => deleteFilament(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['filaments'] }),
+    onError: (err: Error) => alert(err.message),
   })
   const importMutation = useMutation({
     mutationFn: (ids: number[]) => spoolmanBulkImport(ids),
@@ -595,6 +596,12 @@ export default function Filaments() {
               <Download size={14} /> Import from Spoolman ({notImported.length})
             </button>
           )}
+          <button
+            onClick={() => navigate('/tools/hueforge-export')}
+            className="flex items-center gap-1.5 bg-green-600 hover:bg-green-700 text-white text-sm px-3 py-2 rounded-lg"
+          >
+            <Download size={14} /> HueForge Export
+          </button>
           <button
             onClick={() => spoolmanUrl ? window.open(spoolmanUrl, '_blank') : undefined}
             disabled={!spoolmanUrl}

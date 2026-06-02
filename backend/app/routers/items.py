@@ -3,7 +3,7 @@ import shutil
 import subprocess
 import uuid
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -11,7 +11,7 @@ from typing import List
 from PIL import Image as PILImage
 
 from ..database import get_db
-from ..models import Item, ModelFilament, FilamentSpec, ModelImage, ModelSlicerFile, Printer, PrinterType, Routing, RoutingStep, RoutingStepFilament, RoutingStepSlicerFile, PostProcessingCost
+from ..models import Item, ModelFilament, FilamentSpec, ModelImage, ModelSlicerFile, Printer, PrinterType, Routing, RoutingStep, RoutingStepFilament, RoutingStepSlicerFile, PostProcessingCost, Order, OrderStepProgress
 from ..schemas import (
     ItemCreate, ItemOut,
     ModelFilamentCreate, ModelFilamentUpdate, ModelFilamentOut,
@@ -70,6 +70,17 @@ def delete_item(item_id: int, db: Session = Depends(get_db)):
     item = db.query(Item).filter(Item.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
+
+    order_count = db.query(Order).filter(Order.item_id == item_id).count()
+    if order_count > 0:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f'Cannot delete "{item.name}": it has {order_count} order(s) referencing it.\n\n'
+                "Delete all orders for this item before deleting the item itself."
+            ),
+        )
+
     for img in item.images:
         if os.path.exists(img.image_path):
             os.remove(img.image_path)
@@ -336,8 +347,30 @@ def update_routing(item_id: int, routing_id: int, data: RoutingUpdate, db: Sessi
 
 
 @router.delete("/{item_id}/routings/{routing_id}", status_code=204)
-def delete_routing(item_id: int, routing_id: int, db: Session = Depends(get_db)):
+def delete_routing(item_id: int, routing_id: int, force: bool = Query(False), db: Session = Depends(get_db)):
     routing = _get_routing_or_404(item_id, routing_id, db)
+
+    step_ids = [s.id for s in routing.steps]
+    if step_ids:
+        progress_count = (
+            db.query(OrderStepProgress)
+            .filter(OrderStepProgress.routing_step_id.in_(step_ids))
+            .count()
+        )
+        if progress_count > 0:
+            if not force:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f'WARNING: Deleting routing "{routing.name or "Unnamed"}" will permanently remove '
+                        f"{progress_count} order progress record(s) linked to its steps.\n\n"
+                        "This cannot be undone."
+                    ),
+                )
+            db.query(OrderStepProgress).filter(
+                OrderStepProgress.routing_step_id.in_(step_ids)
+            ).delete(synchronize_session=False)
+
     db.delete(routing)
     db.commit()
 
@@ -365,9 +398,29 @@ def update_routing_step(item_id: int, routing_id: int, step_id: int, data: Routi
 
 
 @router.delete("/{item_id}/routings/{routing_id}/steps/{step_id}", status_code=204)
-def delete_routing_step(item_id: int, routing_id: int, step_id: int, db: Session = Depends(get_db)):
+def delete_routing_step(item_id: int, routing_id: int, step_id: int, force: bool = Query(False), db: Session = Depends(get_db)):
     _get_routing_or_404(item_id, routing_id, db)
     step = _get_step_or_404(routing_id, step_id, db)
+
+    progress_count = (
+        db.query(OrderStepProgress)
+        .filter(OrderStepProgress.routing_step_id == step_id)
+        .count()
+    )
+    if progress_count > 0:
+        if not force:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f'WARNING: Deleting step "{step.description or f"Step {step.id}"}" will permanently remove '
+                    f"{progress_count} order progress record(s) linked to it.\n\n"
+                    "This cannot be undone."
+                ),
+            )
+        db.query(OrderStepProgress).filter(
+            OrderStepProgress.routing_step_id == step_id
+        ).delete(synchronize_session=False)
+
     db.delete(step)
     db.commit()
 

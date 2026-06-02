@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Download, CheckCircle, XCircle, Loader2, FileText, Layers } from 'lucide-react'
 import { pickHueForgeFolder, exportHueForge, getSettings, setSetting, getFilaments } from '../../api/client'
@@ -13,6 +13,12 @@ export default function HueForgeExport() {
   const [status, setStatus] = useState<Status>('idle')
   const [result, setResult] = useState('')
 
+  useEffect(() => {
+    if (status !== 'success') return
+    const t = setTimeout(() => { setStatus('idle'); setResult('') }, 10_000)
+    return () => clearTimeout(t)
+  }, [status])
+
   const { data: filaments = [] } = useQuery({ queryKey: ['filaments'], queryFn: getFilaments })
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: getSettings, staleTime: 60_000 })
 
@@ -22,7 +28,7 @@ export default function HueForgeExport() {
 
   async function handleExport() {
     if (status === 'picking' || status === 'exporting') return
-    if (status === 'success' || status === 'error') {
+    if (status === 'error') {
       setStatus('idle')
       setResult('')
       return
@@ -108,22 +114,22 @@ export default function HueForgeExport() {
           >
             {busy
               ? <Loader2 size={18} className="animate-spin" />
-              : status === 'success'
-              ? <CheckCircle size={18} />
               : status === 'error'
               ? <XCircle size={18} />
               : <Download size={18} />}
             {status === 'picking' ? 'Opening folder picker…'
               : status === 'exporting' ? 'Writing file…'
-              : status === 'success' ? 'Export again'
               : status === 'error' ? 'Try again'
               : 'Export to HueForge'}
           </button>
 
           {status === 'success' && (
-            <div className="flex items-start gap-2 p-3 rounded-lg bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800">
-              <CheckCircle size={14} className="text-green-600 dark:text-green-400 shrink-0 mt-0.5" />
-              <p className="text-sm text-green-700 dark:text-green-300 break-all font-mono">{result}</p>
+            <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 flex items-start gap-2.5 px-4 py-3 rounded-lg bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800">
+              <CheckCircle size={16} className="text-green-600 dark:text-green-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-green-700 dark:text-green-300">Exported successfully</p>
+                <p className="text-xs text-green-600/70 dark:text-green-400/70 font-mono break-all mt-0.5">{result}</p>
+              </div>
             </div>
           )}
           {status === 'error' && (

@@ -9,9 +9,14 @@ export default {
           '0%, 49%': { opacity: '1' },
           '50%, 100%': { opacity: '0' },
         },
+        shrink: {
+          '0%': { width: '100%' },
+          '100%': { width: '0%' },
+        },
       },
       animation: {
         blink: 'blink 1.4s step-start infinite',
+        shrink: 'shrink 10s linear forwards',
       },
       colors: {
         brand: {
