@@ -3430,6 +3430,11 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                             const printerType = printerTypes.find(pt => pt.id === step.printer_type_id)
                             const hourlyRate = printerType?.hourly_rate ?? globalHourlyRate
                             const platesPerItem = step.parts_per_item / step.quantity_on_plate
+                            const _gcd = (a: number, b: number): number => b === 0 ? a : _gcd(b, a % b)
+                            const _g = _gcd(step.parts_per_item, step.quantity_on_plate)
+                            const platesDisplay = _g === step.quantity_on_plate
+                              ? `${step.parts_per_item / _g}×`
+                              : `${step.parts_per_item / _g}/${step.quantity_on_plate / _g}×`
                             const machineCost = step.estimated_print_time != null
                               ? (step.estimated_print_time / 3600) * hourlyRate * platesPerItem
                               : null
@@ -3450,7 +3455,7 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                                   <span className="font-medium"><span className="text-gray-400 mr-1">{stepIdx + 1}.</span>{step.description || `Step ${step.sort_order + 1}`}</span>
                                   {printerType && <span className="text-xs text-gray-400 ml-1.5">({printerType.name}{printerType.hourly_rate != null ? ` · ${currSym}${printerType.hourly_rate}/hr` : ''})</span>}
                                 </td>
-                                <td className="text-right py-1.5 text-gray-500">{platesPerItem}×</td>
+                                <td className="text-right py-1.5 text-gray-500">{platesDisplay}</td>
                                 <td className="text-right py-1.5">{filamentCost > 0 ? `${currSym}${filamentCost.toFixed(2)}` : <span className="text-gray-400">—</span>}</td>
                                 <td className="text-right py-1.5">{machineCost != null ? `${currSym}${machineCost.toFixed(2)}` : <span className="text-gray-400">—</span>}</td>
                                 <td className="text-right py-1.5">{energyCost != null ? `${currSym}${energyCost.toFixed(2)}` : <span className="text-gray-400">—</span>}</td>
@@ -3554,7 +3559,7 @@ function confirmEdit(reqId: number, specId: string, gramsStr: string) {
                       Each production step contributes three costs: <span className="font-medium">filament</span> (grams used × cost per gram, derived from spool price and weight),{' '}
                       <span className="font-medium">machine time</span> (print hours × hourly rate), and{' '}
                       <span className="font-medium">energy</span> (print hours × printer wattage × electricity rate).
-                      The <em>Plates/Item</em> column shows how many print runs are needed — if a plate holds 2 parts but 3 are required per item, that's 2 plates — and all costs scale accordingly.
+                      The <em>Plates/Item</em> column shows the proportional share of a plate used per finished item — if a plate holds 6 parts and you need 1 per item, each item is charged for 1/6 of that plate's machine time, energy, and filament. This models batch production where plates are shared across multiple items.
                     </p>
                     {item.post_processing_costs.length > 0 && (
                       <div>

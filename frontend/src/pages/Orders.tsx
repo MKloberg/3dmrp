@@ -123,7 +123,7 @@ function OrderProgressPanel({ order }: { order: Order }) {
                   <span className="text-brand-500 dark:text-brand-400">
                     {' '}· Currently printing on {printerNames}
                     {maxRemaining !== null && maxRemaining > 0 && (
-                      <>, Completed by {formatCompletion(maxRemaining)}</>
+                      <>, Expected to finish by {formatCompletion(maxRemaining)}</>
                     )}
                   </span>
                 )}
