@@ -171,9 +171,10 @@ def gcode_file_metadata(
             head = [f.readline() for _ in range(200)]
             _parse_lines(head)
 
-            # Check head for EXCLUDE_OBJECT_DEFINE (Klipper bare command, not a comment)
+            # Check head for exclude object markers (Klipper bare command OR PrusaSlicer/Moonraker comment)
             for line in head:
-                if line.strip().upper().startswith("EXCLUDE_OBJECT_DEFINE"):
+                s = line.strip().upper()
+                if s.startswith("EXCLUDE_OBJECT_DEFINE") or s.startswith("; PRINTING OBJECT"):
                     has_exclude_objects = True
                     break
 
@@ -183,7 +184,8 @@ def gcode_file_metadata(
                     line = f.readline()
                     if not line:
                         break
-                    if line.strip().upper().startswith("EXCLUDE_OBJECT_DEFINE"):
+                    s = line.strip().upper()
+                    if s.startswith("EXCLUDE_OBJECT_DEFINE") or s.startswith("; PRINTING OBJECT"):
                         has_exclude_objects = True
                         break
 
